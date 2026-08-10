@@ -1,0 +1,27 @@
+# NOTE: no `user:` override on these services — this host runs rootless docker,
+# where container root maps to the host user (bind-mounted files come out owned
+# by you), and a user: 1000 override maps to an unwritable subuid instead.
+# If deploying somewhere with rootful docker, add:
+#   user: "${UID:-1000}:${GID:-1000}"
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data
+      - ./indexes:/indexes:ro
+      - ./catalogs:/catalogs:ro
+    environment:
+      - DATA_DIR=/data
+
+  worker:
+    build: .
+    command: python -m app.worker
+    volumes:
+      - ./data:/data
+      - ./indexes:/indexes:ro
+      - ./catalogs:/catalogs:ro
+      - ./photos:/photos:ro
+    environment:
+      - DATA_DIR=/data

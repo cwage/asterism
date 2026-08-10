@@ -1,0 +1,6 @@
+data/
+indexes/*.fits
+catalogs/*.csv
+photos/
+__pycache__/
+*.pyc
