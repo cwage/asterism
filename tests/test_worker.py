@@ -40,4 +40,6 @@ def test_ephemeris_crash_does_not_fail_the_job(monkeypatch):
     status, result, error = worker.process(JOB)
     assert status == "done" and error is None
     assert result["labels"] == STARS
-    assert "ephemeris exploded" in result["ephemeris"]["error"]
+    # stable client-facing schema, no traceback leakage
+    assert result["ephemeris"] == {"time_utc": None, "time_source": None,
+                                   "error": "ephemeris computation failed"}

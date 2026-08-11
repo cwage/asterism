@@ -85,7 +85,8 @@ def test_moon_covers_sun_at_total_eclipse():
     observer = eph["earth"] + wgs84.latlon(ECLIPSE_LAT, ECLIPSE_LON)
     ra, dec, _ = observer.at(t).observe(eph["sun"]).apparent().radec()
     moon = bodies["Moon"]
-    assert _sep(moon["ra"], moon["dec"], float(ra._degrees), float(dec.degrees)) < 0.3
+    assert _sep(moon["ra"], moon["dec"],
+                float(ra.hours) * 15.0, float(dec.degrees)) < 0.3
 
 
 @needs_de421

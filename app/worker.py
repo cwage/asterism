@@ -30,7 +30,10 @@ def process(job):
             result["wcs_path"], exif_info["width"], exif_info["height"], exif_info
         )
     except Exception:
-        bodies, eph_meta = [], {"error": traceback.format_exc()[-500:]}
+        # Full traceback stays in the worker log; clients get a stable schema.
+        print(f"worker: ephemeris failed for {job['id']}\n{traceback.format_exc()}")
+        bodies, eph_meta = [], {"time_utc": None, "time_source": None,
+                                "error": "ephemeris computation failed"}
 
     result["labels"] = bodies + labels
     result["ephemeris"] = eph_meta

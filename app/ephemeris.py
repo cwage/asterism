@@ -103,7 +103,7 @@ def compute_bodies(when_utc, lat=None, lon=None):
         ra, dec, _ = pos.radec()  # ICRS, matching the solved WCS
         body = {
             "name": name,
-            "ra": float(ra._degrees),
+            "ra": float(ra.hours) * 15.0,
             "dec": float(dec.degrees),
             "kind": "moon" if key == "moon" else "planet",
         }
