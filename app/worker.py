@@ -5,7 +5,7 @@ import os
 import time
 import traceback
 
-from . import db, ephemeris, solver
+from . import constellations, db, ephemeris, solver
 
 
 def process(job):
@@ -35,8 +35,18 @@ def process(job):
         bodies, eph_meta = [], {"time_utc": None, "time_source": None,
                                 "error": "ephemeris computation failed"}
 
+    # Constellation figures ride the same best-effort rule.
+    try:
+        figures = constellations.annotate(
+            result["wcs_path"], exif_info["width"], exif_info["height"]
+        )
+    except Exception:
+        print(f"worker: constellations failed for {job['id']}\n{traceback.format_exc()}")
+        figures = []
+
     result["labels"] = bodies + labels
     result["ephemeris"] = eph_meta
+    result["constellations"] = figures
     return "done", result, None
 
 

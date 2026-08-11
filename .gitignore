@@ -2,6 +2,7 @@ data/
 indexes/*.fits
 catalogs/*.csv
 catalogs/*.bsp
+catalogs/*.fab
 photos/
 __pycache__/
 *.pyc

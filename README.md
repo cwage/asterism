@@ -16,7 +16,9 @@ Final home: `asterism.quietlife.net`.
   the resulting WCS with astropy, and projects a bright-star catalog (HYG) into
   pixel coordinates. When the photo has an EXIF timestamp, the Moon and
   naked-eye planets are computed with skyfield (JPL DE421, topocentric when
-  GPS is present) and projected through the same WCS.
+  GPS is present) and projected through the same WCS. Constellation stick
+  figures (Stellarium's modern line set, resolved via HYG) are drawn the
+  same way.
 - Jobs/results live in `data/` (SQLite + uploaded images), bind-mounted into
   both containers.
 
@@ -28,7 +30,7 @@ only needed for narrow (telescope) fields, which are out of scope for v1.
 
 ```
 ./scripts/fetch-indexes.sh    # wide-field 4100-series indexes (~100MB)
-./scripts/fetch-catalog.sh    # HYG bright-star catalog + DE421 ephemeris (~17MB)
+./scripts/fetch-catalog.sh    # HYG catalog + DE421 ephemeris (~17MB) + constellation lines
 docker compose up -d --build
 ```
 
