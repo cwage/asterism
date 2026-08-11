@@ -32,6 +32,25 @@ docker compose up -d --build
 
 Then open http://localhost:8000 and upload a night-sky photo.
 
+## Tests
+
+Fast tier (pure logic — EXIF/FOV math, tier selection, catalog projection):
+
+```
+docker compose run --rm worker pytest
+```
+
+Slow tier (real `solve-field` runs against synthetic star fields rendered
+from the HYG catalog with a known WCS, plus obviously-unsolvable images):
+
+```
+docker compose run --rm worker pytest -m solver
+```
+
+The synthetic fields give exact ground truth: the test asserts the solved
+pointing lands within 1.5° of where the field was rendered, not just that
+the solver said yes.
+
 ## Benchmark
 
 The first real question for this project is the solve success rate on typical
