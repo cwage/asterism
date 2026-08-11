@@ -67,5 +67,8 @@ def test_missing_line_file_is_quiet(monkeypatch):
     monkeypatch.setattr(constellations, "CATALOG_DIR", "/nonexistent")
     monkeypatch.setattr(constellations, "_lines_cache", None)
     assert constellations.load_lines() == []
+    # The miss must not be cached — a later fetch should be picked up
+    # without a restart.
+    assert constellations._lines_cache is None
     # annotate short-circuits before ever opening the WCS.
     assert constellations.annotate("/also/nonexistent.wcs", 100, 100) == []

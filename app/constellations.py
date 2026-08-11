@@ -53,8 +53,9 @@ def load_lines():
         return _lines_cache
     path = os.path.join(CATALOG_DIR, LINES_FILE)
     if not os.path.exists(path):
-        _lines_cache = []
-        return _lines_cache
+        # Don't cache the miss: the file may get fetched while we're running,
+        # and the other data files recover without a restart too.
+        return []
 
     raw = []  # (abbr, [(hip_a, hip_b), ...])
     wanted = set()
