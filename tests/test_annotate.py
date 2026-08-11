@@ -1,5 +1,5 @@
 """Catalog projection through a hand-built WCS — no solver involved.
-Needs catalogs/hyg.csv (mounted at /catalogs in the containers)."""
+Self-contained: uses the mini catalog fixture, not catalogs/hyg.csv."""
 
 import pytest
 from astropy.io import fits
@@ -11,7 +11,7 @@ WIDTH, HEIGHT = 1000, 750
 
 
 @pytest.fixture()
-def orion_wcs_file(tmp_path):
+def orion_wcs_file(tmp_path, mini_catalog):
     # 40 deg field centered between Betelgeuse (88.8, +7.4) and Rigel
     # (78.6, -8.2): both should project comfortably in-frame.
     wcs = synth.make_wcs(ra=84.0, dec=0.0, fov_deg=40.0,
