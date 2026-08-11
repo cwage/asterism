@@ -6,8 +6,9 @@
   supported environment. Fast tests: `docker compose run --rm worker pytest`.
   Solver tests: add `-m solver`. Bench: `docker compose run --rm -T worker
   python -u -m app.bench <dir>`.
-- Tests and app code are COPYed into the image — `docker compose build worker`
-  after editing, before running them in the container.
+- Tests and app code are baked into the image at build time (Dockerfile `COPY`)
+  — run `docker compose build worker` after editing, before running them in
+  the container.
 - Some hosts run rootless docker: never add a `user:` override to compose
   services (see comment in docker-compose.yml; it breaks bind-mount writes
   under rootless).
