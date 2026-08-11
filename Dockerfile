@@ -11,6 +11,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY static ./static
 COPY scripts ./scripts
+COPY tests ./tests
+COPY pytest.ini conftest.py ./
 
 ENV ASTROMETRY_INDEX_DIR=/indexes \
     CATALOG_DIR=/catalogs \

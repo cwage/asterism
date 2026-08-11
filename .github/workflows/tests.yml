@@ -1,0 +1,49 @@
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fast-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache HYG catalog
+        uses: actions/cache@v4
+        with:
+          path: catalogs/hyg.csv
+          key: catalog-${{ hashFiles('scripts/fetch-catalog.sh') }}
+      - name: Fetch catalog
+        run: ./scripts/fetch-catalog.sh
+      - name: Build image
+        run: docker compose build worker
+      - name: Run fast tests
+        run: docker compose run --rm -T worker pytest -q
+
+  solver-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache catalog and astrometry indexes
+        uses: actions/cache@v4
+        with:
+          path: |
+            catalogs/hyg.csv
+            indexes/*.fits
+          key: astro-data-${{ hashFiles('scripts/fetch-catalog.sh', 'scripts/fetch-indexes.sh') }}
+      - name: Fetch catalog and indexes
+        run: |
+          ./scripts/fetch-catalog.sh
+          ./scripts/fetch-indexes.sh
+      - name: Build image
+        run: docker compose build worker
+      - name: Run solver tests
+        run: docker compose run --rm -T worker pytest -q -m solver
