@@ -59,6 +59,25 @@ function render(id, job) {
     const colors = { star: 'rgba(120, 200, 255, 0.9)',
                      planet: 'rgba(255, 200, 90, 0.95)',
                      moon: 'rgba(255, 235, 170, 0.95)' };
+    // Constellation figures go down first, under the labels.
+    const figures = job.result.constellations || [];
+    ctx.strokeStyle = 'rgba(150, 170, 210, 0.35)';
+    ctx.lineWidth = Math.max(1, 1.5 * scale);
+    ctx.fillStyle = 'rgba(150, 170, 210, 0.6)';
+    ctx.font = `italic ${Math.max(13, 15 * scale)}px system-ui`;
+    for (const c of figures) {
+      ctx.beginPath();
+      for (const [x1, y1, x2, y2] of c.segments) { ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); }
+      ctx.stroke();
+      const pts = c.segments.flatMap(([x1, y1, x2, y2]) => [[x1, y1], [x2, y2]])
+        .filter(([x, y]) => x >= 0 && x < canvas.width && y >= 0 && y < canvas.height);
+      if (pts.length) {
+        const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+        const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+        ctx.fillText(c.name, cx, cy);
+      }
+    }
+
     ctx.font = `${Math.max(14, 16 * scale)}px system-ui`;
     ctx.lineWidth = Math.max(1, scale);
     let bodies = 0;
@@ -77,6 +96,7 @@ function render(id, job) {
     }
     const parts = [`${job.result.labels.length - bodies} stars`];
     if (bodies) parts.push(`${bodies} solar-system ${bodies === 1 ? 'body' : 'bodies'}`);
+    if (figures.length) parts.push(`${figures.length} constellation${figures.length === 1 ? '' : 's'}`);
     status(`solved in ${job.solve_seconds}s — labeled ${parts.join(', ')}`);
   };
   img.hidden = false;

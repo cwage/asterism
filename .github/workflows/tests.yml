@@ -21,6 +21,7 @@ jobs:
           path: |
             catalogs/hyg.csv
             catalogs/de421.bsp
+            catalogs/constellations.fab
           key: catalog-${{ hashFiles('scripts/fetch-catalog.sh') }}
       - name: Fetch catalog
         run: ./scripts/fetch-catalog.sh
@@ -40,6 +41,7 @@ jobs:
           path: |
             catalogs/hyg.csv
             catalogs/de421.bsp
+            catalogs/constellations.fab
             indexes/*.fits
           key: astro-data-${{ hashFiles('scripts/fetch-catalog.sh', 'scripts/fetch-indexes.sh') }}
       - name: Fetch catalog and indexes
