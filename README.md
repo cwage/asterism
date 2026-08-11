@@ -14,7 +14,9 @@ Final home: `asterism.quietlife.net`.
 - `worker` — same image, different command. Polls the SQLite job table, shells
   out to `solve-field` with scale hints derived from EXIF focal length, parses
   the resulting WCS with astropy, and projects a bright-star catalog (HYG) into
-  pixel coordinates.
+  pixel coordinates. When the photo has an EXIF timestamp, the Moon and
+  naked-eye planets are computed with skyfield (JPL DE421, topocentric when
+  GPS is present) and projected through the same WCS.
 - Jobs/results live in `data/` (SQLite + uploaded images), bind-mounted into
   both containers.
 
@@ -26,7 +28,7 @@ only needed for narrow (telescope) fields, which are out of scope for v1.
 
 ```
 ./scripts/fetch-indexes.sh    # wide-field 4100-series indexes (~100MB)
-./scripts/fetch-catalog.sh    # HYG bright-star catalog
+./scripts/fetch-catalog.sh    # HYG bright-star catalog + DE421 ephemeris (~17MB)
 docker compose up -d --build
 ```
 
@@ -64,10 +66,11 @@ It prints per-image solve success, timing, and the scale hints used.
 
 ## Plan
 
-1. **Local MVP** (this repo): upload → solve → star labels on canvas. ← you are here
+1. **Local MVP** (this repo): upload → solve → star labels on canvas. ✅
 2. **Ephemeris layer**: Skyfield + EXIF time/GPS → label the Moon and planets
-   (the thing astrometry.net can't do). Graceful-failure path: no solve, but
-   time + GPS + compass heading → "you were facing SW, that was probably Jupiter".
+   (the thing astrometry.net can't do). ← you are here. Still open: proper
+   timezone handling (#6) and the graceful-failure path — no solve, but time +
+   GPS + compass heading → "you were facing SW, that was probably Jupiter" (#7).
 3. **Fly.io deploy**: single app, web + worker processes, indexes baked into
    the image.
 4. **Differentiators**: satellite/streak ID from archived TLEs, LLM narration,

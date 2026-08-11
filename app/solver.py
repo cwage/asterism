@@ -133,7 +133,7 @@ def annotate(wcs_path, width, height, max_labels=40):
         if not (0 <= x < width and 0 <= y < height):
             continue
         labels.append({"name": star["name"], "x": round(x, 1),
-                       "y": round(y, 1), "mag": star["mag"]})
+                       "y": round(y, 1), "mag": star["mag"], "kind": "star"})
         if len(labels) >= max_labels:
             break
     return labels

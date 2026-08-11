@@ -10,6 +10,7 @@ GPS_IFD = 0x8825
 TAG_FOCAL_LENGTH = 37386
 TAG_FOCAL_35MM = 41989
 TAG_DATETIME_ORIGINAL = 36867
+TAG_OFFSET_TIME_ORIGINAL = 36881
 
 # Fallback when EXIF gives us nothing: generous phone-plausible field widths.
 DEFAULT_FOV_BOUNDS = (30.0, 90.0)
@@ -31,6 +32,7 @@ def read_exif(path):
         "fov_bounds": DEFAULT_FOV_BOUNDS,
         "focal_35mm": None,
         "datetime_original": None,
+        "offset_time_original": None,
         "lat": None,
         "lon": None,
     }
@@ -52,6 +54,10 @@ def read_exif(path):
     dto = exif_ifd.get(TAG_DATETIME_ORIGINAL)
     if dto:
         info["datetime_original"] = str(dto)
+
+    oto = exif_ifd.get(TAG_OFFSET_TIME_ORIGINAL)
+    if oto:
+        info["offset_time_original"] = str(oto)
 
     if gps:
         lat = _gps_to_degrees(gps.get(2), gps.get(1))
