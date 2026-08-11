@@ -5,7 +5,7 @@ import os
 import time
 import traceback
 
-from . import db, solver
+from . import db, ephemeris, solver
 
 
 def process(job):
@@ -23,7 +23,20 @@ def process(job):
     labels = solver.annotate(
         result["wcs_path"], exif_info["width"], exif_info["height"]
     )
-    result["labels"] = labels
+
+    # Ephemeris labels are best-effort extras: never fail a good solve on them.
+    try:
+        bodies, eph_meta = ephemeris.annotate_bodies(
+            result["wcs_path"], exif_info["width"], exif_info["height"], exif_info
+        )
+    except Exception:
+        # Full traceback stays in the worker log; clients get a stable schema.
+        print(f"worker: ephemeris failed for {job['id']}\n{traceback.format_exc()}")
+        bodies, eph_meta = [], {"time_utc": None, "time_source": None,
+                                "error": "ephemeris computation failed"}
+
+    result["labels"] = bodies + labels
+    result["ephemeris"] = eph_meta
     return "done", result, None
 
 

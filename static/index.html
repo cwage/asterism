@@ -56,17 +56,28 @@ function render(id, job) {
     canvas.height = img.naturalHeight;
     const ctx = canvas.getContext('2d');
     const scale = img.naturalWidth / 1000;  // keep label size sane on big photos
-    ctx.strokeStyle = 'rgba(120, 200, 255, 0.9)';
-    ctx.fillStyle = 'rgba(120, 200, 255, 0.95)';
+    const colors = { star: 'rgba(120, 200, 255, 0.9)',
+                     planet: 'rgba(255, 200, 90, 0.95)',
+                     moon: 'rgba(255, 235, 170, 0.95)' };
     ctx.font = `${Math.max(14, 16 * scale)}px system-ui`;
     ctx.lineWidth = Math.max(1, scale);
+    let bodies = 0;
     for (const l of job.result.labels) {
+      const kind = l.kind || 'star';
+      if (kind !== 'star') bodies++;
+      ctx.strokeStyle = colors[kind] || colors.star;
+      ctx.fillStyle = colors[kind] || colors.star;
       ctx.beginPath();
-      ctx.arc(l.x, l.y, Math.max(6, 8 * scale), 0, 2 * Math.PI);
+      const r = kind === 'star' ? Math.max(6, 8 * scale) : Math.max(9, 12 * scale);
+      ctx.arc(l.x, l.y, r, 0, 2 * Math.PI);
       ctx.stroke();
-      ctx.fillText(l.name, l.x + 12 * scale, l.y - 8 * scale);
+      let text = l.name;
+      if (kind === 'moon' && l.phase != null) text += ` (${Math.round(l.phase * 100)}% lit)`;
+      ctx.fillText(text, l.x + (r + 4) * Math.max(1, scale), l.y - 8 * scale);
     }
-    status(`solved in ${job.solve_seconds}s — ${job.result.labels.length} labeled stars`);
+    const parts = [`${job.result.labels.length - bodies} stars`];
+    if (bodies) parts.push(`${bodies} solar-system ${bodies === 1 ? 'body' : 'bodies'}`);
+    status(`solved in ${job.solve_seconds}s — labeled ${parts.join(', ')}`);
   };
   img.hidden = false;
   img.src = '/jobs/' + id + '/image';
