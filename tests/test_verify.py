@@ -40,8 +40,7 @@ def warped_image(tmp_path):
 
 def test_matched_labels_snap_to_true_positions(warped_image):
     path, true_pos = warped_image
-    labels, _, meta = verify.apply(path, star_labels(PREDICTED), [],
-                                   WIDTH, HEIGHT)
+    labels, _, meta = verify.apply(path, star_labels(PREDICTED), [])
     assert meta["verified"] is True
     assert all(l["status"] == "matched" for l in labels)
     for lab, (tx, ty) in zip(labels, true_pos):
@@ -54,8 +53,7 @@ def test_matched_labels_snap_to_true_positions(warped_image):
 def test_unwarped_image_reports_clean(tmp_path):
     path = tmp_path / "clean.jpg"
     synth.render_points(str(path), PREDICTED, WIDTH, HEIGHT)
-    labels, _, meta = verify.apply(str(path), star_labels(PREDICTED), [],
-                                   WIDTH, HEIGHT)
+    labels, _, meta = verify.apply(str(path), star_labels(PREDICTED), [])
     assert all(l["status"] == "matched" for l in labels)
     assert meta["warped"] is False
     assert meta["p90_correction_px"] < 3.0
@@ -69,8 +67,7 @@ def test_cloud_hidden_star_flagged_and_interpolated(tmp_path):
     path = tmp_path / "cloud.jpg"
     synth.render_points(str(path), rendered, WIDTH, HEIGHT)
 
-    labels, _, meta = verify.apply(str(path), star_labels(PREDICTED), [],
-                                   WIDTH, HEIGHT)
+    labels, _, meta = verify.apply(str(path), star_labels(PREDICTED), [])
     hidden = labels[hidden_idx]
     assert hidden["status"] == "hidden"
     assert meta["stars_hidden"] == 1
@@ -84,8 +81,7 @@ def test_bodies_are_warp_corrected_but_not_snapped(warped_image):
     path, _ = warped_image
     body = {"name": "Jupiter", "x": 590.0, "y": 430.0, "mag": -2.0,
             "kind": "planet"}
-    labels, _, _ = verify.apply(path, star_labels(PREDICTED) + [body],
-                                [], WIDTH, HEIGHT)
+    labels, _, _ = verify.apply(path, star_labels(PREDICTED) + [body], [])
     jupiter = labels[-1]
     assert jupiter["status"] == "projected"
     dx, dy = warp(590.0, 430.0)
@@ -96,8 +92,7 @@ def test_constellation_segments_follow_the_field(warped_image):
     path, _ = warped_image
     figures = [{"name": "Testfig", "abbr": "Tst",
                 "segments": [[150.0, 120.0, 620.0, 800.0]]}]
-    _, out_figures, _ = verify.apply(path, star_labels(PREDICTED), figures,
-                                     WIDTH, HEIGHT)
+    _, out_figures, _ = verify.apply(path, star_labels(PREDICTED), figures)
     x1, y1, x2, y2 = out_figures[0]["segments"][0]
     d1 = warp(150.0, 120.0)
     d2 = warp(620.0, 800.0)
@@ -109,7 +104,7 @@ def test_unreadable_image_returns_originals(tmp_path):
     labels = star_labels(PREDICTED)
     figures = [{"name": "F", "abbr": "F", "segments": [[0.0, 0.0, 1.0, 1.0]]}]
     out_labels, out_figures, meta = verify.apply(
-        str(tmp_path / "missing.jpg"), labels, figures, WIDTH, HEIGHT)
+        str(tmp_path / "missing.jpg"), labels, figures)
     assert out_labels == labels
     assert out_figures == figures
     assert meta["verified"] is False

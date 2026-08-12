@@ -123,7 +123,7 @@ def _fit_field(matches, norm, lam=1e-3):
     return field, len(m)
 
 
-def apply(image_path, labels, figures, width, height):
+def apply(image_path, labels, figures):
     """Verify and correct labels/figures against the image. Returns
     (labels, figures, meta). Never raises on a bad image: the originals
     come back with meta["verified"] = False."""

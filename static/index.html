@@ -44,7 +44,7 @@ async function poll(id) {
   status('solving…');
   const t0 = Date.now();
   while (true) {
-    const job = await (await fetch('/jobs/' + id)).json();
+    const job = await (await fetch('/jobs/' + encodeURIComponent(id))).json();
     if (job.status === 'done') { render(id, job); return; }
     if (job.status === 'failed') { status('solve failed — ' + (job.error || 'unknown')); return; }
     status(`solving… (${Math.round((Date.now() - t0) / 1000)}s)`);
@@ -117,7 +117,7 @@ function render(id, job) {
            + (notes.length ? ` (${notes.join('; ')})` : ''));
   };
   img.hidden = false;
-  img.src = '/jobs/' + id + '/image';
+  img.src = '/jobs/' + encodeURIComponent(id) + '/image';
 }
 </script>
 </body>

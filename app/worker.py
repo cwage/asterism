@@ -51,8 +51,7 @@ def process(job):
     # stack warp. Best-effort like the layers above.
     try:
         labels, figures, verification = verify.apply(
-            job["image_path"], labels, figures,
-            exif_info["width"], exif_info["height"]
+            job["image_path"], labels, figures
         )
     except Exception:
         print(f"worker: verification failed for {job['id']}\n{traceback.format_exc()}")
