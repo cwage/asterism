@@ -128,7 +128,12 @@ async function poll(id) {
     const job = await (await fetch('/jobs/' + encodeURIComponent(id))).json();
     if (job.status === 'done') { render(id, job); return; }
     if (job.status === 'failed') { renderFailure(id, job); return; }
-    status(`solving… (${Math.round((Date.now() - t0) / 1000)}s)`);
+    const secs = Math.round((Date.now() - t0) / 1000);
+    if (job.status === 'queued' && job.queue_position > 0) {
+      status(`in queue — ${job.queue_position} ahead of you (${secs}s)`);
+    } else {
+      status(`solving… (${secs}s)`);
+    }
     await new Promise(r => setTimeout(r, 2000));
   }
 }

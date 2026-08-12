@@ -142,10 +142,24 @@ def _public_exif(exif_info):
     return out
 
 
+def _queue_position(conn, row):
+    """How many jobs run before this queued one: the one solving now plus
+    queued jobs ahead in FIFO order (created_at, then id — the same order
+    the worker consumes)."""
+    ahead = conn.execute(
+        "SELECT COUNT(*) AS n FROM jobs WHERE status = 'solving' "
+        "OR (status = 'queued' AND (created_at < :c "
+        "    OR (created_at = :c AND id < :i)))",
+        {"c": row["created_at"], "i": row["id"]},
+    ).fetchone()
+    return ahead["n"]
+
+
 @app.get("/jobs/{job_id}")
 def get_job(job_id: str):
     with db.get_conn() as conn:
         row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        position = _queue_position(conn, row) if row and row["status"] == "queued" else None
     if not row:
         raise HTTPException(404, _GONE)
     out = {
@@ -156,6 +170,8 @@ def get_job(job_id: str):
         "exif": _public_exif(json.loads(row["exif_json"]) if row["exif_json"] else None),
         "result": json.loads(row["result_json"]) if row["result_json"] else None,
     }
+    if position is not None:
+        out["queue_position"] = position
     return out
 
 
