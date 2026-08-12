@@ -1,7 +1,9 @@
-"""Job worker: poll SQLite for queued solves, run them, write back results."""
+"""Job worker: poll SQLite for queued solves, run them, write back results.
+Also the retention sweeper: this is not a photo-hosting service (#23)."""
 
 import json
 import os
+import shutil
 import time
 import traceback
 
@@ -10,6 +12,29 @@ from . import constellations, db, ephemeris, solver, verify
 # Below this many detected star-like sources, a quick job fails fast
 # instead of burning cpulimit tiers on daylight/food/pitch-black uploads.
 PRECHECK_MIN_STARS = int(os.environ.get("PRECHECK_MIN_STARS", "10"))
+
+RETENTION_HOURS = int(os.environ.get("RETENTION_HOURS", "24"))
+SWEEP_INTERVAL_SECONDS = 900
+
+
+def sweep_expired():
+    """Delete jobs (rows, uploads, solve artifacts) older than the retention
+    window. Returns how many were removed."""
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, image_path FROM jobs WHERE created_at < datetime('now', ?)",
+            (f"-{RETENTION_HOURS} hours",),
+        ).fetchall()
+        for row in rows:
+            if row["image_path"]:
+                try:
+                    os.unlink(row["image_path"])
+                except FileNotFoundError:
+                    pass
+            shutil.rmtree(os.path.join(db.DATA_DIR, "jobs", row["id"]),
+                          ignore_errors=True)
+            conn.execute("DELETE FROM jobs WHERE id = ?", (row["id"],))
+    return len(rows)
 
 
 def _col(job, name, default=None):
@@ -113,7 +138,17 @@ def process(job):
 def main():
     db.init_db()
     print("worker: polling for jobs")
+    last_sweep = 0.0
     while True:
+        if time.monotonic() - last_sweep > SWEEP_INTERVAL_SECONDS:
+            last_sweep = time.monotonic()
+            try:
+                n = sweep_expired()
+                if n:
+                    print(f"worker: retention sweep removed {n} expired job(s)")
+            except Exception:
+                print(f"worker: retention sweep failed\n{traceback.format_exc()}")
+
         with db.get_conn() as conn:
             job = conn.execute(
                 "SELECT * FROM jobs WHERE status = 'queued' ORDER BY created_at LIMIT 1"
