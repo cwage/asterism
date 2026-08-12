@@ -45,6 +45,20 @@ def _timescale():
     return _ts_cache
 
 
+def _parse_offset(offset):
+    """EXIF OffsetTime* string ('+02:00', '-0500', 'Z') -> timedelta or None."""
+    if not offset:
+        return None
+    offset = offset.strip()
+    if offset == "Z":
+        return timedelta(0)
+    m = re.fullmatch(r"([+-])(\d{2}):?(\d{2})", offset)
+    if not m:
+        return None
+    sign = 1 if m.group(1) == "+" else -1
+    return sign * timedelta(hours=int(m.group(2)), minutes=int(m.group(3)))
+
+
 def resolve_utc(exif_info):
     """Best-effort UTC instant for the exposure. Returns (datetime, source).
 
@@ -61,16 +75,10 @@ def resolve_utc(exif_info):
     except ValueError:
         return None, None
 
-    offset = exif_info.get("offset_time_original")
-    if offset:
-        m = re.fullmatch(r"([+-])(\d{2}):?(\d{2})", offset.strip())
-        if m:
-            sign = 1 if m.group(1) == "+" else -1
-            delta = timedelta(hours=int(m.group(2)), minutes=int(m.group(3)))
-            local = naive.replace(tzinfo=timezone(sign * delta))
-            return local.astimezone(timezone.utc), "exif_offset"
-        if offset.strip() in ("Z", "+00:00", "-00:00"):
-            return naive.replace(tzinfo=timezone.utc), "exif_offset"
+    delta = _parse_offset(exif_info.get("offset_time_original"))
+    if delta is not None:
+        local = naive.replace(tzinfo=timezone(delta))
+        return local.astimezone(timezone.utc), "exif_offset"
 
     lon = exif_info.get("lon")
     if lon is not None:
@@ -157,3 +165,110 @@ def annotate_bodies(wcs_path, width, height, exif_info):
             meta["moon_phase"] = body["phase"]
         labels.append(label)
     return labels, meta
+
+
+# ---- no-solve fallback (#7) ----
+
+# Below this altitude a body is behind trees/haze for practical purposes.
+FALLBACK_MIN_ALT_DEG = 3.0
+# No GPS (phones drop it while still recording heading): longitude from the
+# clock's UTC offset lands within about a zone, and a mid-northern latitude
+# gets above/below-horizon roughly right. Flagged so the UI can hedge.
+FALLBACK_GUESS_LAT = 38.0
+
+_COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+            "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
+
+
+def _compass(az):
+    return _COMPASS[round(az / 22.5) % 16]
+
+
+def _declination(lat, lon, when_utc):
+    """Magnetic declination in degrees (+E) from the World Magnetic Model.
+    EXIF headings are almost always magnetic; leaving this uncorrected is a
+    ~5 deg error in the eastern US and >15 deg in places."""
+    from pygeomag import GeoMag
+
+    year = when_utc.year + (when_utc.timetuple().tm_yday - 1) / 365.25
+    return float(GeoMag().calculate(glat=lat, glon=lon, alt=0, time=year).d)
+
+
+def fallback_guess(exif_info):
+    """When the solve fails, answer the question anyway: what was above the
+    horizon at the EXIF instant, and where relative to the compass heading
+    the phone recorded (#7). Returns None without a usable timestamp or any
+    location hint; may raise (missing ephemeris file) — the worker treats
+    the whole thing as best-effort."""
+    when_utc, time_source = resolve_utc(exif_info)
+    if when_utc is None:
+        return None
+
+    lat, lon = exif_info.get("lat"), exif_info.get("lon")
+    location_source = "gps"
+    if lat is None or lon is None:
+        delta = _parse_offset(exif_info.get("offset_time_original"))
+        if delta is None:
+            return None  # no location and no zone: alt/az would be fiction
+        lat = FALLBACK_GUESS_LAT
+        lon = max(-180.0, min(180.0, delta.total_seconds() / 3600.0 * 15.0))
+        location_source = "timezone_guess"
+
+    guess = {"time_utc": when_utc.isoformat(), "time_source": time_source,
+             "location_source": location_source}
+
+    heading_true = None
+    heading = exif_info.get("heading")
+    if heading is not None:
+        ref = (exif_info.get("heading_ref") or "M").upper()
+        if ref.startswith("T"):
+            heading_true = heading % 360.0
+        else:
+            try:
+                decl = _declination(lat, lon, when_utc)
+            except Exception:
+                decl = None  # uncorrected magnetic beats no heading at all
+            heading_true = (heading + (decl or 0.0)) % 360.0
+            if decl is not None:
+                guess["declination_deg"] = round(decl, 1)
+        guess["heading_true"] = round(heading_true, 1)
+
+    from skyfield import almanac
+    from skyfield.api import wgs84
+    from skyfield.magnitudelib import planetary_magnitude
+
+    eph = load_ephemeris()
+    t = _timescale().from_datetime(when_utc)
+    at = (eph["earth"] + wgs84.latlon(lat, lon)).at(t)
+
+    # Sun altitude gives the failure its context: daylight shot, twilight
+    # washing out the stars, or genuinely dark sky.
+    sun_alt, _, _ = at.observe(eph["sun"]).apparent().altaz()
+    guess["sun_alt_deg"] = round(float(sun_alt.degrees))
+
+    candidates = []
+    for name, key in BODIES:
+        pos = at.observe(eph[key]).apparent()
+        alt, az, _ = pos.altaz()
+        alt, az = float(alt.degrees), float(az.degrees)
+        if alt < FALLBACK_MIN_ALT_DEG:
+            continue
+        cand = {"name": name, "alt_deg": round(alt), "az_deg": round(az),
+                "direction": _compass(az),
+                "kind": "moon" if key == "moon" else "planet"}
+        try:
+            cand["mag"] = round(float(planetary_magnitude(pos)), 1)
+        except Exception:
+            cand["mag"] = None  # the Moon; phase carries the brightness story
+        if key == "moon":
+            cand["phase"] = round(
+                float(almanac.fraction_illuminated(eph, "moon", t)), 3)
+        if heading_true is not None:
+            cand["offset_deg"] = round(((az - heading_true + 180.0) % 360.0)
+                                       - 180.0)
+        candidates.append(cand)
+
+    # Brightest first; the Moon (no magnitude) outshines everything.
+    candidates.sort(key=lambda c: c["mag"] if c["mag"] is not None else -99.0)
+    guess["candidates"] = candidates
+    return guess

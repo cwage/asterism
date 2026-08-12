@@ -41,6 +41,12 @@
   .disclosure { font-size: 0.8rem; color: var(--faint); margin: 0.75rem 0 0; }
 
   #status { margin: 1rem 0 0.5rem; color: var(--dim); min-height: 1.5em; }
+  #guess { border: 1px solid #1c2634; border-radius: 10px; background: var(--panel);
+           padding: 0.75rem 1rem; margin: 0 0 0.75rem; font-size: 0.95rem; }
+  #guess:empty { display: none; }
+  #guess ul { margin: 0.4rem 0 0; padding-left: 1.3rem; }
+  #guess .name { color: var(--accent); }
+  #guess .hedge { color: var(--faint); font-size: 0.8rem; margin: 0.5rem 0 0; }
   #actions button { width: 100%; background: #1a2230; color: var(--ink);
                     border: 1px solid var(--line); border-radius: 10px;
                     padding: 0.9rem 1rem; font-size: 1rem; cursor: pointer; }
@@ -95,6 +101,7 @@ shown in results are rounded to city scale, and everything is deleted
 after 24 hours.</p>
 
 <div id="status"></div>
+<div id="guess"></div>
 <div id="actions"></div>
 <div id="wrap"><img id="photo" hidden><canvas id="overlay"></canvas></div>
 
@@ -123,6 +130,7 @@ if (jobParam) poll(jobParam);
 async function poll(id) {
   status('solving…');
   document.getElementById('actions').replaceChildren();
+  document.getElementById('guess').replaceChildren();
   const t0 = Date.now();
   while (true) {
     const job = await (await fetch('/jobs/' + encodeURIComponent(id))).json();
@@ -143,6 +151,7 @@ async function poll(id) {
 function renderFailure(id, job) {
   const f = job.result && job.result.failure;
   status('solve failed — ' + (job.error || 'unknown'));
+  if (f && f.guess) renderGuess(job, f.guess);
   if (!f || !f.can_deepen) return;
   // Failed fast on purpose; deeper attempts are the user's call (~2 min).
   const btn = document.createElement('button');
@@ -157,6 +166,57 @@ function renderFailure(id, job) {
   };
   document.getElementById('actions').replaceChildren(btn);
 }
+
+// No solve, but the EXIF instant + ephemeris still answer "what was that?"
+function renderGuess(job, g) {
+  const box = document.getElementById('guess');
+  box.replaceChildren();
+  const intro = document.createElement('p');
+  intro.style.margin = '0';
+  let context = '';
+  if (g.sun_alt_deg >= 0) context = ' The Sun was up — this looks like a daytime shot.';
+  else if (g.sun_alt_deg >= -12) context = ' The sky was still in twilight, which washes out stars.';
+  if (!g.candidates.length) {
+    intro.textContent = 'No bright solar-system objects were above the horizon when this was taken.' + context;
+    box.append(intro);
+    return;
+  }
+  intro.textContent = (g.heading_true != null
+    ? `Even without a star match: when this was taken you were facing ${compassName(g.heading_true)}, and these were up:`
+    : 'Even without a star match, these were up when this was taken:') + context;
+  const list = document.createElement('ul');
+  for (const c of g.candidates) {
+    const li = document.createElement('li');
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = c.name;
+    const bits = [`${c.direction}, ${c.alt_deg}° up`];
+    if (c.phase != null) bits.push(`${Math.round(c.phase * 100)}% lit`);
+    else if (c.mag != null) bits.push(`magnitude ${c.mag}`);
+    li.append(name, ` — ${bits.join(', ')}${offsetPhrase(job, c)}`);
+    list.append(li);
+  }
+  box.append(intro, list);
+  if (g.location_source === 'timezone_guess') {
+    const hedge = document.createElement('p');
+    hedge.className = 'hedge';
+    hedge.textContent = 'No GPS in this photo: location was estimated from its clock, so take directions loosely.';
+    box.append(hedge);
+  }
+}
+
+function offsetPhrase(job, c) {
+  if (c.offset_deg == null) return '';
+  const fb = job.exif && job.exif.fov_bounds;
+  const fovHalf = fb ? (fb[0] + fb[1]) / 4 : 35;  // half of the mid FOV guess
+  const abs = Math.abs(c.offset_deg);
+  if (abs <= fovHalf) return ' — likely in this shot';
+  if (abs > 120) return ' — behind you';
+  return ` — ~${abs}° to the ${c.offset_deg > 0 ? 'right' : 'left'} of where you pointed`;
+}
+
+const WINDS = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+const compassName = (az) => WINDS[Math.round(az / 22.5) % 16];
 
 function render(id, job) {
   const img = document.getElementById('photo');

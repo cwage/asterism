@@ -84,6 +84,26 @@ def test_no_stars_gate_fails_fast_without_solving(monkeypatch):
     assert "star-like sources" in error
 
 
+def test_failed_solve_carries_the_fallback_guess(monkeypatch):
+    monkeypatch.setattr(verify, "count_stars", lambda *a: 3)
+    guess = {"candidates": [{"name": "Venus"}], "sun_alt_deg": -8}
+    monkeypatch.setattr(ephemeris, "fallback_guess", lambda e: guess)
+    status, result, error = worker.process(JOB)
+    assert status == "failed"
+    assert result["failure"]["guess"] == guess
+
+
+def test_fallback_guess_crash_does_not_mask_the_failure(monkeypatch):
+    monkeypatch.setattr(verify, "count_stars", lambda *a: 3)
+    def boom(e):
+        raise RuntimeError("guess exploded")
+    monkeypatch.setattr(ephemeris, "fallback_guess", boom)
+    status, result, error = worker.process(JOB)
+    assert status == "failed"
+    assert result["failure"] == {"reason": "no_stars", "stars_detected": 3,
+                                 "can_deepen": True}
+
+
 def test_quick_mode_runs_only_the_first_tier(monkeypatch):
     seen = {}
     def record(image_path, out_dir, exif_info, tiers=None):

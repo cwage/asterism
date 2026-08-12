@@ -45,21 +45,27 @@ def make_wcs(ra, dec, fov_deg, width, height):
     return w
 
 
-def build_exif(f35mm=None, datetime_original=None, gps=None):
-    """PIL Exif with the fields app.exif reads. gps = (lat, lon) in degrees."""
+def build_exif(f35mm=None, datetime_original=None, gps=None, heading=None):
+    """PIL Exif with the fields app.exif reads. gps = (lat, lon) in degrees;
+    heading = (degrees, ref) with ref 'M' (magnetic) or 'T' (true)."""
     ex = Image.Exif()
     ifd = ex.get_ifd(EXIF_IFD)
     if f35mm is not None:
         ifd[TAG_FOCAL_35MM] = int(f35mm)
     if datetime_original is not None:
         ifd[TAG_DATETIME_ORIGINAL] = datetime_original
+    if gps is not None or heading is not None:
+        g = ex.get_ifd(GPS_IFD)
     if gps is not None:
         lat, lon = gps
-        g = ex.get_ifd(GPS_IFD)
         g[1] = "N" if lat >= 0 else "S"
         g[2] = _deg_to_dms(abs(lat))
         g[3] = "E" if lon >= 0 else "W"
         g[4] = _deg_to_dms(abs(lon))
+    if heading is not None:
+        deg, ref = heading
+        g[16] = ref
+        g[17] = deg
     return ex
 
 

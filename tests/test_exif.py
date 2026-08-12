@@ -31,6 +31,7 @@ def test_no_exif_falls_back_to_default_bounds(tmp_path):
     assert info["focal_35mm"] is None
     assert info["datetime_original"] is None
     assert info["lat"] is None and info["lon"] is None
+    assert info["heading"] is None and info["heading_ref"] is None
     assert (info["width"], info["height"]) == (320, 240)
 
 
@@ -59,6 +60,18 @@ def test_southern_western_gps_signs(tmp_path):
     info = exif.read_exif(path)
     assert info["lat"] == pytest.approx(-33.87, abs=1e-3)
     assert info["lon"] == pytest.approx(-151.21, abs=1e-3)
+
+
+def test_heading_read_from_gps_ifd(tmp_path):
+    # Pixel phones write GPSImgDirection (ref 'M') even in shots where they
+    # drop lat/lon — the #7 fallback depends on catching it.
+    path = tmp_path / "heading.jpg"
+    ex = synth.build_exif(heading=(171.5, "M"))
+    Image.new("RGB", (64, 64)).save(path, exif=ex)
+    info = exif.read_exif(path)
+    assert info["heading"] == pytest.approx(171.5)
+    assert info["heading_ref"] == "M"
+    assert info["lat"] is None and info["lon"] is None
 
 
 def test_strip_gps_removes_location_keeps_rest(tmp_path):

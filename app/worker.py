@@ -46,6 +46,18 @@ def _col(job, name, default=None):
     return default if val is None else val
 
 
+def _attach_guess(result, exif_info):
+    """A failed solve still gets a best-effort 'here's what was up' answer
+    from the ephemeris (#7). Never lets a guess failure mask the real result."""
+    try:
+        guess = ephemeris.fallback_guess(exif_info)
+    except Exception:
+        print(f"worker: fallback guess failed\n{traceback.format_exc()}")
+        guess = None
+    if guess:
+        result["failure"]["guess"] = guess
+
+
 def process(job):
     exif_info = json.loads(job["exif_json"])
     out_dir = os.path.join(db.DATA_DIR, "jobs", job["id"])
@@ -59,6 +71,7 @@ def process(job):
             result = {"success": False, "attempts": [], "total_seconds": 0.0,
                       "failure": {"reason": "no_stars", "stars_detected": n,
                                   "can_deepen": True}}
+            _attach_guess(result, exif_info)
             return "failed", result, (
                 f"only {n} star-like sources detected — cloudy, daylight, "
                 "or not a sky photo"
@@ -89,6 +102,7 @@ def process(job):
         remaining = len(plan) - len(result["attempts"])
         result["failure"] = {"reason": "no_match",
                              "can_deepen": mode != "deep" and remaining > 0}
+        _attach_guess(result, exif_info)
         return "failed", result, f"no solution (tried field widths: {tried})"
 
     labels = solver.annotate(
