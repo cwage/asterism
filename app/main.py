@@ -75,7 +75,8 @@ async def create_job(request: Request, image: UploadFile):
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(413, f"image too large (max {MAX_UPLOAD_BYTES // (1024*1024)}MB)")
 
-    job_id = uuid.uuid4().hex[:12]
+    # Full 128 bits: the result URL is the only access control (#21).
+    job_id = uuid.uuid4().hex
     ext = os.path.splitext(image.filename or "")[1].lower() or ".jpg"
     image_path = os.path.join(UPLOAD_DIR, f"{job_id}{ext}")
     with open(image_path, "wb") as f:
