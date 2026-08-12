@@ -29,7 +29,8 @@ def _gps_to_degrees(dms, ref):
 
 
 def read_exif(path):
-    """Return {fov_bounds, focal_35mm, datetime_original, lat, lon, width, height}."""
+    """Return {fov_bounds, focal_35mm, datetime_original, offset_time_original,
+    lat, lon, heading, heading_ref, width, height}."""
     info = {
         "fov_bounds": DEFAULT_FOV_BOUNDS,
         "focal_35mm": None,
