@@ -9,6 +9,9 @@
          max-width: 960px; margin: 2rem auto; padding: 0 1rem; }
   h1 { font-weight: 400; letter-spacing: 0.3em; }
   #status { margin: 1rem 0; color: #8fa1b3; }
+  #actions button { background: #1a2230; color: #cdd6e0; border: 1px solid #34435c;
+                    border-radius: 4px; padding: 0.5rem 1rem; cursor: pointer; }
+  #actions button:hover { background: #243044; }
   #wrap { position: relative; display: inline-block; max-width: 100%; }
   #wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
   #wrap img { display: block; max-width: 100%; }
@@ -19,6 +22,7 @@
 <p>Upload a night-sky photo; get back what's in it.</p>
 <input type="file" id="file" accept="image/*">
 <div id="status"></div>
+<div id="actions"></div>
 <div id="wrap"><img id="photo" hidden><canvas id="overlay"></canvas></div>
 
 <script>
@@ -42,14 +46,33 @@ if (jobParam) poll(jobParam);
 
 async function poll(id) {
   status('solving…');
+  document.getElementById('actions').replaceChildren();
   const t0 = Date.now();
   while (true) {
     const job = await (await fetch('/jobs/' + encodeURIComponent(id))).json();
     if (job.status === 'done') { render(id, job); return; }
-    if (job.status === 'failed') { status('solve failed — ' + (job.error || 'unknown')); return; }
+    if (job.status === 'failed') { renderFailure(id, job); return; }
     status(`solving… (${Math.round((Date.now() - t0) / 1000)}s)`);
     await new Promise(r => setTimeout(r, 2000));
   }
+}
+
+function renderFailure(id, job) {
+  const f = job.result && job.result.failure;
+  status('solve failed — ' + (job.error || 'unknown'));
+  if (!f || !f.can_deepen) return;
+  // Failed fast on purpose; deeper attempts are the user's call (~2 min).
+  const btn = document.createElement('button');
+  btn.textContent = f.reason === 'no_stars'
+    ? 'Solve anyway (may take ~2 minutes)'
+    : 'Dig deeper — try other field scales (~2 minutes)';
+  btn.onclick = async () => {
+    btn.remove();
+    const res = await fetch('/jobs/' + encodeURIComponent(id) + '/deepen', { method: 'POST' });
+    if (!res.ok) { status('could not restart job: ' + await res.text()); return; }
+    poll(id);
+  };
+  document.getElementById('actions').replaceChildren(btn);
 }
 
 function render(id, job) {
