@@ -98,6 +98,8 @@ def render_points(path, points, width=1200, height=900, amp=180.0, seed=11,
     arr += rng.normal(0.0, 2.0, arr.shape)
     if amps is None:
         amps = [amp] * len(points)
+    if len(amps) != len(points):
+        raise ValueError(f"amps has {len(amps)} entries for {len(points)} points")
     stamp_stars(arr, [(x, y, a) for (x, y), a in zip(points, amps)])
     img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8)).convert("RGB")
     img.save(path, quality=92)

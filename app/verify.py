@@ -44,7 +44,9 @@ def count_stars(image_path, grid=24, thr_sigma=5.0, min_amp=12.0,
     bg = np.kron(np.median(a.reshape(H // bh, bh, W // bw, bw), axis=(1, 3)),
                  np.ones((bh, bw), dtype=np.float32))
     det = a - bg
-    mad = np.median(np.abs(det))
+    # Center before the MAD: the block-median background can leave a small
+    # global offset that would otherwise bias the threshold.
+    mad = np.median(np.abs(det - np.median(det)))
     thr = max(thr_sigma * 1.4826 * mad, min_amp)
     # Strict local maxima over 8 neighbors; a tiny position-dependent
     # dither breaks the exact ties of saturated flat-topped stars.
