@@ -1,0 +1,7 @@
+# Keep the build context small: the release image fetches sky data in its
+# own stage, and local data dirs are bind-mounted, never COPYed.
+.git
+indexes/
+catalogs/
+data/
+photos/
