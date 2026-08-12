@@ -17,12 +17,18 @@
   h1 { font-weight: 400; letter-spacing: 0.3em; font-size: 1.6rem; margin: 0; }
   .tag { color: var(--dim); margin: 0.25rem 0 0; }
 
-  .upload { display: flex; align-items: center; justify-content: center;
-            gap: 0.6rem; width: 100%; padding: 1.1rem 1rem; cursor: pointer;
+  .upload { position: relative; display: flex; align-items: center;
+            justify-content: center; gap: 0.6rem; width: 100%;
+            padding: 1.1rem 1rem; cursor: pointer;
             border: 1px dashed var(--line); border-radius: 10px;
             background: var(--panel); color: var(--accent);
             font-size: 1.05rem; user-select: none; }
   .upload:active { background: #1a2230; }
+  /* Keep the input in the accessibility tree: it covers the label
+     invisibly, so it stays keyboard-focusable and screen-reader visible. */
+  .upload input { position: absolute; inset: 0; width: 100%; height: 100%;
+                  opacity: 0; cursor: pointer; }
+  .upload:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   details.about { margin: 1rem 0 0; border: 1px solid #1c2634;
                   border-radius: 10px; background: var(--panel); }
@@ -58,18 +64,18 @@
 </head>
 <body>
 <header>
-  <h1>a s t e r i s m</h1>
+  <h1>asterism</h1>
   <p class="tag">Point your phone at the night sky. Find out what you saw.</p>
 </header>
 
 <label class="upload" for="file">✦ Choose a night-sky photo
-  <input type="file" id="file" accept="image/*" hidden>
+  <input type="file" id="file" accept="image/*" aria-label="Choose a night-sky photo">
 </label>
 
 <details class="about">
   <summary>What is this?</summary>
-  <p>Upload a photo of the night sky — even a hazy, handheld phone shot.
-  asterism <em>plate-solves</em> it: the star pattern in your pixels is
+  <p>Upload a photo of the night sky — even a hazy, handheld phone shot —
+  and asterism <em>plate-solves</em> it: the star pattern in your pixels is
   matched against a map of the entire sky
   (<a href="https://astrometry.net/">astrometry.net</a>) to work out exactly
   where the camera was pointing, with no location or orientation data
