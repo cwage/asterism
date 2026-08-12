@@ -5,7 +5,9 @@
 #   user: "${UID:-1000}:${GID:-1000}"
 services:
   web:
-    build: .
+    build:
+      context: .
+      target: app
     ports:
       - "8000:8000"
     volumes:
@@ -16,7 +18,9 @@ services:
       - DATA_DIR=/data
 
   worker:
-    build: .
+    build:
+      context: .
+      target: app
     command: python -m app.worker
     volumes:
       - ./data:/data
