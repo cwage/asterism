@@ -7,17 +7,63 @@ import traceback
 
 from . import constellations, db, ephemeris, solver, verify
 
+# Below this many detected star-like sources, a quick job fails fast
+# instead of burning cpulimit tiers on daylight/food/pitch-black uploads.
+PRECHECK_MIN_STARS = int(os.environ.get("PRECHECK_MIN_STARS", "10"))
+
+
+def _col(job, name, default=None):
+    """Column access that works for sqlite Rows and plain dicts alike."""
+    try:
+        val = job[name]
+    except (KeyError, IndexError):
+        return default
+    return default if val is None else val
+
 
 def process(job):
     exif_info = json.loads(job["exif_json"])
     out_dir = os.path.join(db.DATA_DIR, "jobs", job["id"])
-    result = solver.solve_tiered(job["image_path"], out_dir, exif_info)
+    mode = _col(job, "mode", "quick")
+    plan = solver.tier_plan(exif_info)
+
+    if mode != "deep":
+        # Checkpoint 1: don't invoke the solver at all on zero-star images.
+        n = verify.count_stars(job["image_path"])
+        if n is not None and n < PRECHECK_MIN_STARS:
+            result = {"success": False, "attempts": [], "total_seconds": 0.0,
+                      "failure": {"reason": "no_stars", "stars_detected": n,
+                                  "can_deepen": True}}
+            return "failed", result, (
+                f"only {n} star-like sources detected — cloudy, daylight, "
+                "or not a sky photo"
+            )
+        # Checkpoint 2: quick mode tries only the most likely scale tier.
+        tiers = plan[:1]
+    else:
+        # Deep mode: whatever the quick pass didn't already try.
+        prior = json.loads(_col(job, "result_json") or "{}")
+        tried = {tuple(a["fov_bounds"]) for a in prior.get("attempts", [])}
+        tiers = [t for t in plan
+                 if (round(t[0], 1), round(t[1], 1)) not in tried]
+
+    result = solver.solve_tiered(job["image_path"], out_dir, exif_info,
+                                 tiers=tiers)
+    if mode == "deep":
+        # Keep the quick pass's attempts visible in the final record.
+        prior = json.loads(_col(job, "result_json") or "{}")
+        result["attempts"] = prior.get("attempts", []) + result["attempts"]
+        result["total_seconds"] = round(
+            result["total_seconds"] + (prior.get("total_seconds") or 0), 2)
 
     if not result["success"]:
         tried = ", ".join(
             f"{a['fov_bounds'][0]:.0f}-{a['fov_bounds'][1]:.0f}deg"
             for a in result["attempts"]
         )
+        remaining = len(plan) - len(result["attempts"])
+        result["failure"] = {"reason": "no_match",
+                             "can_deepen": mode != "deep" and remaining > 0}
         return "failed", result, f"no solution (tried field widths: {tried})"
 
     labels = solver.annotate(

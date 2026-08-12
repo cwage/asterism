@@ -19,6 +19,62 @@ SEARCH_RADIUS_FRAC = 0.025  # how far a stack can plausibly drag a star
 SNAP_RADIUS_FRAC = 0.006    # how close a source must be after correction
 WARP_FLAG_FRAC = 0.005      # p90 correction above this flags a warped image
 MIN_FIELD_MATCHES = 4       # below this, fall back to a constant shift
+CANDIDATE_AMP_FRAC = 0.25   # ignore match peaks far dimmer than the window's best
+BRIGHT_MAG = 1.5            # stars at least this bright get the amplitude sanity check
+
+
+def count_stars(image_path, grid=24, thr_sigma=5.0, min_amp=12.0,
+                max_count=500):
+    """Fast whole-frame count of star-like sources, for the pre-solve gate.
+
+    A star is a compact peak whose surroundings fall away: bright but
+    non-isolated maxima (cloud texture, foliage gaps, kitchen-table glare)
+    are rejected by requiring the annulus 4-10 px out to sit well below
+    the peak. Coarse block-median background handles sky gradients. The
+    gate stays permissive — its job is rejecting zero-star images, not
+    predicting solve success. Returns None if the image can't be read."""
+    try:
+        img = np.asarray(Image.open(image_path).convert("L"), dtype=np.float32)
+    except Exception:
+        return None
+    h, w = img.shape
+    bh, bw = max(8, h // grid), max(8, w // grid)
+    H, W = (h // bh) * bh, (w // bw) * bw
+    a = img[:H, :W]
+    bg = np.kron(np.median(a.reshape(H // bh, bh, W // bw, bw), axis=(1, 3)),
+                 np.ones((bh, bw), dtype=np.float32))
+    det = a - bg
+    # Center before the MAD: the block-median background can leave a small
+    # global offset that would otherwise bias the threshold.
+    mad = np.median(np.abs(det - np.median(det)))
+    thr = max(thr_sigma * 1.4826 * mad, min_amp)
+    # Strict local maxima over 8 neighbors; a tiny position-dependent
+    # dither breaks the exact ties of saturated flat-topped stars.
+    det = det + (np.arange(H * W, dtype=np.float32).reshape(H, W) % 7) * 1e-4
+    neigh = np.full_like(det, -np.inf)
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            if dy == dx == 0:
+                continue
+            shifted = np.roll(np.roll(det, dy, 0), dx, 1)
+            np.maximum(neigh, shifted, out=neigh)
+    cand = (det > thr) & (det > neigh)
+    cand[:10, :] = cand[-10:, :] = False
+    cand[:, :10] = cand[:, -10:] = False
+
+    ys, xs = np.where(cand)
+    order = np.argsort(det[ys, xs])[::-1][:4000]
+    count = 0
+    for i in order:
+        y, x = int(ys[i]), int(xs[i])
+        amp = det[y, x]
+        ring = det[y - 10:y + 11, x - 10:x + 11].copy()
+        ring[7:14, 7:14] = -np.inf  # mask the peak's own core
+        if ring.max() < max(0.35 * amp, thr):
+            count += 1
+            if count >= max_count:
+                break
+    return count
 
 
 def _detect_peaks(win, thr_sigma=5.0, min_amp=12.0, max_peaks=40):
@@ -93,9 +149,12 @@ def _tps_eval(coef, pts, at):
 
 def _fit_field(matches, norm, lam=1e-3):
     """Smooth displacement field from (x, y, dx, dy) matches. Returns
-    (field, n_used) where field(x, y) -> (dx, dy). One sigma-clip round
-    drops mismatches (e.g. a hidden star whose nearest peak is a neighbor)
-    before the final fit."""
+    (field, n_used) where field(x, y) -> (dx, dy).
+
+    Outliers (a cloud blob matched instead of the real star) are rejected
+    against a sigma-clipped affine fit first: a flexible TPS would bend
+    itself through its own outliers and hide them, a plane can't. The TPS
+    is then fitted to the affine's inliers only."""
     if not matches:
         return (lambda x, y: (0.0, 0.0)), 0
     m = np.asarray(matches, dtype=float)
@@ -104,16 +163,20 @@ def _fit_field(matches, norm, lam=1e-3):
         return (lambda x, y: (sx, sy)), len(m)
 
     pts = m[:, :2] / norm
-    for _ in range(2):
-        cx = _tps_solve(pts, m[:, 2], lam)
-        cy = _tps_solve(pts, m[:, 3], lam)
-        rx = _tps_eval(cx, pts, pts) - m[:, 2]
-        ry = _tps_eval(cy, pts, pts) - m[:, 3]
-        r = np.hypot(rx, ry)
-        keep = r < max(3.0 * 1.4826 * np.median(r), 3.0)
-        if keep.all() or keep.sum() < MIN_FIELD_MATCHES:
+    A = np.hstack([np.ones((len(m), 1)), pts])
+    keep = np.ones(len(m), dtype=bool)
+    for _ in range(3):
+        ax = np.linalg.lstsq(A[keep], m[keep, 2], rcond=None)[0]
+        ay = np.linalg.lstsq(A[keep], m[keep, 3], rcond=None)[0]
+        r = np.hypot(A @ ax - m[:, 2], A @ ay - m[:, 3])
+        new = r < max(3.0 * 1.4826 * np.median(r[keep]), 4.0)
+        if new.sum() < MIN_FIELD_MATCHES or (new == keep).all():
             break
-        m, pts = m[keep], pts[keep]
+        keep = new
+
+    m, pts = m[keep], pts[keep]
+    cx = _tps_solve(pts, m[:, 2], lam)
+    cy = _tps_solve(pts, m[:, 3], lam)
 
     def field(x, y):
         at = np.array([[x / norm, y / norm]])
@@ -145,7 +208,12 @@ def apply(image_path, labels, figures):
         peaks = _peaks_near(img, lab["x"], lab["y"], search_r)
         peaks_by_label.append(peaks)
         if peaks:
-            nearest = min(peaks, key=lambda p: (p[0] - lab["x"]) ** 2 +
+            # Nearest *credible* peak: a faint blob a few px closer must
+            # not out-compete the actual star (the Arcturus-vs-cloud-blob
+            # failure) — drop candidates far dimmer than the window's best.
+            amp_floor = CANDIDATE_AMP_FRAC * max(p[2] for p in peaks)
+            cands = [p for p in peaks if p[2] >= amp_floor]
+            nearest = min(cands, key=lambda p: (p[0] - lab["x"]) ** 2 +
                           (p[1] - lab["y"]) ** 2)
             matches.append((lab["x"], lab["y"],
                             nearest[0] - lab["x"], nearest[1] - lab["y"]))
@@ -159,8 +227,7 @@ def apply(image_path, labels, figures):
                      min(max(y, 0.0), height - 1.0))
 
     out = []
-    corrections = []
-    hidden = matched = 0
+    snaps = []  # (label, original_xy, corrected_xy, amp) for matched stars
     for lab, peaks in zip(labels, peaks_by_label):
         lab = dict(lab)
         dx, dy = field_at(lab["x"], lab["y"])
@@ -173,16 +240,30 @@ def apply(image_path, labels, figures):
                     if (p[0] - cx) ** 2 + (p[1] - cy) ** 2 <= snap_r ** 2]
             if near:
                 best = max(near, key=lambda p: p[2])
-                corrections.append(np.hypot(best[0] - lab["x"],
-                                            best[1] - lab["y"]))
+                snaps.append((lab, (lab["x"], lab["y"]), (cx, cy), best[2]))
                 lab["x"], lab["y"] = round(best[0], 1), round(best[1], 1)
                 lab["status"] = "matched"
-                matched += 1
             else:
                 lab["x"], lab["y"] = round(cx, 1), round(cy, 1)
                 lab["status"] = "hidden"
-                hidden += 1
         out.append(lab)
+
+    # Amplitude sanity for bright stars: a first-magnitude star "matched"
+    # to a peak far dimmer than the frame's typical match is cloud noise
+    # (or a star so dimmed by cloud that hidden is the honest answer).
+    if snaps:
+        med_amp = float(np.median([s[3] for s in snaps]))
+        for lab, _, (cx, cy), amp in snaps:
+            if lab["mag"] is not None and lab["mag"] <= BRIGHT_MAG \
+                    and amp < CANDIDATE_AMP_FRAC * med_amp:
+                lab["status"] = "hidden"
+                lab["x"], lab["y"] = round(cx, 1), round(cy, 1)
+
+    corrections = [np.hypot(lab["x"] - ox, lab["y"] - oy)
+                   for lab, (ox, oy), _, _ in snaps
+                   if lab["status"] == "matched"]
+    matched = sum(1 for lab in out if lab.get("status") == "matched")
+    hidden = sum(1 for lab in out if lab.get("status") == "hidden")
 
     out_figures = []
     for fig in figures:

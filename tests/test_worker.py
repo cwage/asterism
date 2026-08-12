@@ -1,13 +1,14 @@
 """Worker result assembly: star + body labels merge, ephemeris failures
-never sink a successful solve. Everything external is stubbed."""
+never sink a successful solve, quick/deep gating. Everything external is
+stubbed."""
 
 import json
 
 import pytest
 
-from app import constellations, db, ephemeris, solver, worker
+from app import constellations, db, ephemeris, solver, verify, worker
 
-JOB = {"id": "abc123", "image_path": "/photos/x.jpg",
+JOB = {"id": "abc123", "image_path": "/photos/x.jpg", "mode": "quick",
        "exif_json": json.dumps({"width": 100, "height": 100})}
 
 STARS = [{"name": "Sirius", "x": 10.0, "y": 10.0, "mag": -1.44, "kind": "star"}]
@@ -18,12 +19,14 @@ FIGURES = [{"name": "Orion", "abbr": "Ori", "segments": [[0.0, 0.0, 10.0, 10.0]]
 @pytest.fixture(autouse=True)
 def stub_solve(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DATA_DIR", str(tmp_path))
-    monkeypatch.setattr(solver, "solve_tiered", lambda *a: {
+    monkeypatch.setattr(solver, "solve_tiered", lambda *a, **k: {
         "success": True, "wcs_path": "/fake.wcs", "total_seconds": 1.0,
         "attempts": [{"fov_bounds": [30, 90], "seconds": 1.0, "success": True}],
     })
     monkeypatch.setattr(solver, "annotate", lambda *a, **k: list(STARS))
     monkeypatch.setattr(constellations, "annotate", lambda *a: list(FIGURES))
+    # Enough stars that the pre-solve gate stays open unless a test says so.
+    monkeypatch.setattr(verify, "count_stars", lambda *a: 50)
 
 
 def test_bodies_merge_ahead_of_stars(monkeypatch):
@@ -67,3 +70,51 @@ def test_constellations_crash_does_not_fail_the_job(monkeypatch):
     assert status == "done" and error is None
     assert result["labels"] == STARS  # no timestamp in JOB -> no bodies
     assert result["constellations"] == []
+
+
+def test_no_stars_gate_fails_fast_without_solving(monkeypatch):
+    monkeypatch.setattr(verify, "count_stars", lambda *a: 3)
+    def boom(*a, **k):
+        raise AssertionError("solver must not run on a zero-star image")
+    monkeypatch.setattr(solver, "solve_tiered", boom)
+    status, result, error = worker.process(JOB)
+    assert status == "failed"
+    assert result["failure"] == {"reason": "no_stars", "stars_detected": 3,
+                                 "can_deepen": True}
+    assert "star-like sources" in error
+
+
+def test_quick_mode_runs_only_the_first_tier(monkeypatch):
+    seen = {}
+    def record(image_path, out_dir, exif_info, tiers=None):
+        seen["tiers"] = tiers
+        return {"success": False, "total_seconds": 1.0, "log_tail": "",
+                "attempts": [{"fov_bounds": [30.0, 90.0], "seconds": 1.0,
+                              "success": False}]}
+    monkeypatch.setattr(solver, "solve_tiered", record)
+    status, result, error = worker.process(JOB)
+    assert seen["tiers"] == [solver.FALLBACK_TIERS[0]]  # no EXIF focal in JOB
+    assert status == "failed"
+    assert result["failure"] == {"reason": "no_match", "can_deepen": True}
+
+
+def test_deep_mode_skips_tiers_the_quick_pass_tried(monkeypatch):
+    monkeypatch.setattr(verify, "count_stars",
+                        lambda *a: pytest.fail("no pre-check in deep mode"))
+    seen = {}
+    def record(image_path, out_dir, exif_info, tiers=None):
+        seen["tiers"] = tiers
+        return {"success": False, "total_seconds": 2.0, "log_tail": "",
+                "attempts": [{"fov_bounds": [8.0, 35.0], "seconds": 2.0,
+                              "success": False}]}
+    monkeypatch.setattr(solver, "solve_tiered", record)
+    prior = {"attempts": [{"fov_bounds": [30.0, 90.0], "seconds": 60.0,
+                           "success": False}], "total_seconds": 60.0}
+    job = dict(JOB, mode="deep", result_json=json.dumps(prior))
+    status, result, error = worker.process(job)
+    assert seen["tiers"] == [solver.FALLBACK_TIERS[1]]
+    assert status == "failed"
+    # quick attempts stay visible, times accumulate, and it's the end of the road
+    assert [a["fov_bounds"] for a in result["attempts"]] == [[30.0, 90.0], [8.0, 35.0]]
+    assert result["total_seconds"] == 62.0
+    assert result["failure"] == {"reason": "no_match", "can_deepen": False}

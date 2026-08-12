@@ -61,15 +61,28 @@ def solve(image_path, out_dir, fov_bounds):
 FALLBACK_TIERS = [(30.0, 90.0), (8.0, 35.0)]
 
 
-def solve_tiered(image_path, out_dir, exif_info):
-    """Run solve() over successively broader scale guesses until one sticks.
-    Returns the last solve() result, with an `attempts` summary appended."""
+def tier_plan(exif_info):
+    """The scale tiers a full solve would try, in order: EXIF-derived
+    bounds first when trustworthy, then the fallbacks (deduped)."""
     tiers = []
     if exif_info.get("focal_35mm"):
         tiers.append(tuple(exif_info["fov_bounds"]))
     for t in FALLBACK_TIERS:
         if not any(abs(t[0] - u[0]) < 2 and abs(t[1] - u[1]) < 2 for u in tiers):
             tiers.append(t)
+    return tiers
+
+
+def solve_tiered(image_path, out_dir, exif_info, tiers=None):
+    """Run solve() over successively broader scale guesses until one sticks.
+    Returns the last solve() result, with an `attempts` summary appended.
+    `tiers` overrides the plan (the worker's quick/deep split)."""
+    if tiers is None:
+        tiers = tier_plan(exif_info)
+    if not tiers:
+        return {"success": False, "seconds": 0.0, "wcs_path": None,
+                "fov_bounds": [0.0, 0.0], "log_tail": "no untried field scales",
+                "attempts": [], "total_seconds": 0.0}
 
     attempts = []
     result = None

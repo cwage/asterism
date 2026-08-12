@@ -100,6 +100,72 @@ def test_constellation_segments_follow_the_field(warped_image):
     assert np.hypot(x2 - (620.0 + d2[0]), y2 - (800.0 + d2[1])) < 6.0
 
 
+def test_faint_decoy_does_not_steal_a_bright_star(tmp_path):
+    # The Arcturus failure: a faint cloud blob a few px nearer the predicted
+    # position must not out-compete the real (warp-dragged) star.
+    target = 8  # (1020, 760): large warp, true star ~27px from prediction
+    true_pos = [(x + warp(x, y)[0], y + warp(x, y)[1]) for x, y in PREDICTED]
+    px, py = PREDICTED[target]
+    decoy = (px - 15.0, py + 12.0)  # closer than the true star, wrong way
+    path = tmp_path / "decoy.jpg"
+    synth.render_points(str(path), true_pos + [decoy], WIDTH, HEIGHT,
+                        amps=[180.0] * len(true_pos) + [28.0])
+
+    labels = star_labels(PREDICTED)
+    labels[target]["mag"] = 0.0
+    out, _, _ = verify.apply(str(path), labels, [])
+    lab = out[target]
+    tx, ty = true_pos[target]
+    assert lab["status"] == "matched"
+    assert np.hypot(lab["x"] - tx, lab["y"] - ty) < 2.0
+
+
+def test_bright_star_matched_to_faint_blob_is_demoted(tmp_path):
+    # A first-magnitude star whose only nearby source is far dimmer than
+    # the frame's typical match is behind cloud: hidden, not matched.
+    target = 4  # mid-frame
+    true_pos = [(x + warp(x, y)[0], y + warp(x, y)[1]) for x, y in PREDICTED]
+    amps = [180.0] * len(true_pos)
+    amps[target] = 20.0  # only a dim smudge where the bright star should be
+    path = tmp_path / "smudge.jpg"
+    synth.render_points(str(path), true_pos, WIDTH, HEIGHT, amps=amps)
+
+    labels = star_labels(PREDICTED)
+    labels[target]["mag"] = -0.1
+    out, _, meta = verify.apply(str(path), labels, [])
+    assert out[target]["status"] == "hidden"
+    assert meta["stars_hidden"] == 1
+
+
+def test_field_fit_rejects_wild_outlier():
+    # A consistent (10, -5) shift plus one wild vector: the affine clip
+    # must discard the outlier instead of letting the TPS bend through it.
+    matches = [(x, y, 10.0, -5.0)
+               for x in (100.0, 600.0, 1100.0) for y in (100.0, 450.0, 800.0)]
+    matches.append((650.0, 500.0, -40.0, 60.0))
+    field, n_used = verify._fit_field(matches, 1200.0)
+    assert n_used == len(matches) - 1
+    dx, dy = field(650.0, 500.0)
+    assert abs(dx - 10.0) < 1.5 and abs(dy + 5.0) < 1.5
+
+
+def test_count_stars_on_starfield_and_starless_images(tmp_path):
+    starry = tmp_path / "starry.jpg"
+    synth.render_points(str(starry), PREDICTED, WIDTH, HEIGHT)
+    n = verify.count_stars(str(starry))
+    assert n >= len(PREDICTED) - 2  # JPEG may eat a marginal one
+
+    gradient = tmp_path / "gradient.jpg"
+    synth.render_gradient(str(gradient), WIDTH, HEIGHT)
+    assert verify.count_stars(str(gradient)) < 5
+
+    black = tmp_path / "black.jpg"
+    synth.render_black(str(black), WIDTH, HEIGHT)
+    assert verify.count_stars(str(black)) < 5
+
+    assert verify.count_stars(str(tmp_path / "missing.jpg")) is None
+
+
 def test_unreadable_image_returns_originals(tmp_path):
     labels = star_labels(PREDICTED)
     figures = [{"name": "F", "abbr": "F", "segments": [[0.0, 0.0, 1.0, 1.0]]}]

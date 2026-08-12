@@ -14,7 +14,10 @@ Final home: `asterism.quietlife.net`.
 - `worker` — same image, different command. Polls the SQLite job table, shells
   out to `solve-field` with scale hints derived from EXIF focal length, parses
   the resulting WCS with astropy, and projects a bright-star catalog (HYG) into
-  pixel coordinates. When the photo has an EXIF timestamp, the Moon and
+  pixel coordinates. Failures are gated (#4): a ~1s star-count pre-check
+  rejects zero-star uploads instantly, and a quick solve tries only the
+  likeliest scale tier — the client can then POST `/jobs/{id}/deepen` to
+  opt into the slower fallback tiers. When the photo has an EXIF timestamp, the Moon and
   naked-eye planets are computed with skyfield (JPL DE421, topocentric when
   GPS is present) and projected through the same WCS. Constellation stick
   figures (Stellarium's modern line set, resolved via HYG) are drawn the

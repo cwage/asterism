@@ -41,6 +41,25 @@ async def create_job(image: UploadFile):
     return {"id": job_id, "status": "queued"}
 
 
+@app.post("/jobs/{job_id}/deepen")
+def deepen_job(job_id: str):
+    """Re-queue a failed quick job to run the remaining solve tiers."""
+    with db.get_conn() as conn:
+        row = conn.execute(
+            "SELECT status, mode FROM jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "no such job")
+        if row["status"] != "failed" or row["mode"] == "deep":
+            raise HTTPException(409, "job is not eligible for a deeper solve")
+        # result_json is kept: the worker skips tiers the quick pass tried.
+        conn.execute(
+            "UPDATE jobs SET status = 'queued', mode = 'deep', error = NULL "
+            "WHERE id = ?", (job_id,),
+        )
+    return {"id": job_id, "status": "queued", "mode": "deep"}
+
+
 @app.get("/jobs/{job_id}")
 def get_job(job_id: str):
     with db.get_conn() as conn:

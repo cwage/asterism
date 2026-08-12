@@ -47,6 +47,29 @@ def test_success_stops_tier_iteration(monkeypatch, tmp_path):
     assert result["attempts"][0]["success"] is True
 
 
+def test_explicit_tiers_override_the_plan(monkeypatch, tmp_path):
+    tried = []
+    monkeypatch.setattr(solver, "solve", _stub_solve(tried))
+    info = {"focal_35mm": 27.0, "fov_bounds": (47.17, 94.33)}
+    result = solver.solve_tiered("x.jpg", str(tmp_path), info,
+                                 tiers=[(8.0, 35.0)])
+    assert tried == [(8.0, 35.0)]
+    assert len(result["attempts"]) == 1
+
+
+def test_empty_tiers_returns_clean_failure(monkeypatch, tmp_path):
+    monkeypatch.setattr(solver, "solve", _stub_solve([]))
+    result = solver.solve_tiered("x.jpg", str(tmp_path), {}, tiers=[])
+    assert result["success"] is False
+    assert result["attempts"] == []
+
+
+def test_tier_plan_matches_solve_order():
+    info = {"focal_35mm": 27.0, "fov_bounds": (47.17, 94.33)}
+    assert solver.tier_plan(info) == [(47.17, 94.33)] + solver.FALLBACK_TIERS
+    assert solver.tier_plan({"focal_35mm": None}) == solver.FALLBACK_TIERS
+
+
 def test_near_duplicate_exif_tier_deduped(monkeypatch, tmp_path):
     tried = []
     monkeypatch.setattr(solver, "solve", _stub_solve(tried))
