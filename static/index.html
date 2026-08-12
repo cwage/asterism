@@ -120,6 +120,8 @@ document.getElementById('file').addEventListener('change', async (e) => {
   const res = await fetch('/jobs', { method: 'POST', body: fd });
   if (!res.ok) { status('upload failed: ' + await res.text()); return; }
   const { id } = await res.json();
+  // The URL is the share link: make it bookmarkable the moment a job exists.
+  history.pushState(null, '', '?job=' + encodeURIComponent(id));
   poll(id);
 });
 
@@ -127,13 +129,24 @@ document.getElementById('file').addEventListener('change', async (e) => {
 const jobParam = new URLSearchParams(location.search).get('job');
 if (jobParam) poll(jobParam);
 
+// pushState above means back/forward move between results: re-render.
+window.addEventListener('popstate', () => location.reload());
+
 async function poll(id) {
   status('solving…');
   document.getElementById('actions').replaceChildren();
   document.getElementById('guess').replaceChildren();
   const t0 = Date.now();
   while (true) {
-    const job = await (await fetch('/jobs/' + encodeURIComponent(id))).json();
+    const res = await fetch('/jobs/' + encodeURIComponent(id));
+    if (!res.ok) {
+      // Expired or mistyped link: surface the API's explanation (it names
+      // the retention window) instead of polling a 404 forever.
+      const detail = (await res.json().catch(() => ({}))).detail;
+      status(detail || `error ${res.status}`);
+      return;
+    }
+    const job = await res.json();
     if (job.status === 'done') { render(id, job); return; }
     if (job.status === 'failed') { renderFailure(id, job); return; }
     const secs = Math.round((Date.now() - t0) / 1000);
