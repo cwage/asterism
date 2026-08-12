@@ -78,3 +78,31 @@ def test_near_duplicate_exif_tier_deduped(monkeypatch, tmp_path):
     info = {"focal_35mm": 50.0, "fov_bounds": (31.0, 89.0)}
     solver.solve_tiered("x.jpg", str(tmp_path), info)
     assert tried == [(31.0, 89.0), (8.0, 35.0)]
+
+
+def test_cfg_lists_only_fits_indexes(monkeypatch, tmp_path):
+    index_dir = tmp_path / "indexes"
+    index_dir.mkdir()
+    (index_dir / "index-4110.fits").touch()
+    (index_dir / "index-4108.fits").touch()
+    (index_dir / ".gitkeep").touch()
+    monkeypatch.setattr(solver, "INDEX_DIR", str(index_dir))
+
+    cfg = solver._write_cfg(str(tmp_path))
+    content = open(cfg).read()
+    assert f"index {index_dir}/index-4108.fits" in content
+    assert f"index {index_dir}/index-4110.fits" in content
+    assert ".gitkeep" not in content
+    assert "autoindex" not in content
+
+
+def test_cfg_falls_back_to_autoindex_without_fits(monkeypatch, tmp_path):
+    index_dir = tmp_path / "indexes"
+    index_dir.mkdir()
+    (index_dir / ".gitkeep").touch()
+    monkeypatch.setattr(solver, "INDEX_DIR", str(index_dir))
+
+    cfg = solver._write_cfg(str(tmp_path))
+    content = open(cfg).read()
+    assert "autoindex" in content
+    assert f"add_path {index_dir}" in content
