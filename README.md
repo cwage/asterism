@@ -29,6 +29,11 @@ Final home: `asterism.quietlife.net`.
   and stars with no visible source are flagged `hidden`.
 - Jobs/results live in `data/` (SQLite + uploaded images), bind-mounted into
   both containers.
+- The queue is deliberately single-worker: solve-field is CPU-bound and the
+  deploy is one shared-CPU machine, so concurrency would just make every
+  solve slower. FIFO by (created_at, id); the status API reports
+  `queue_position` for queued jobs; orphaned `solving` rows are re-queued at
+  worker startup.
 
 Phone photos have wide fields of view (~30–90°), which solve against the
 *wide* astrometry.net indexes — the small ones. The multi-GB index sets are

@@ -64,6 +64,27 @@ def test_sweep_expired_removes_old_jobs_and_files(tmp_path, monkeypatch):
     assert ids == ["newjob"]
 
 
+def test_queue_position_counts_solving_and_earlier_queued(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "asterism.db"))
+    db.init_db()
+    with db.get_conn() as conn:
+        conn.execute("INSERT INTO jobs (id, image_path, status, created_at) VALUES "
+                     "('busy', '/a.jpg', 'solving', '2026-08-12 05:00:00')")
+        conn.execute("INSERT INTO jobs (id, image_path, status, created_at) VALUES "
+                     "('first', '/b.jpg', 'queued', '2026-08-12 05:01:00')")
+        # same created_at as 'later': id breaks the tie, matching the worker
+        conn.execute("INSERT INTO jobs (id, image_path, status, created_at) VALUES "
+                     "('later', '/c.jpg', 'queued', '2026-08-12 05:02:00')")
+        conn.execute("INSERT INTO jobs (id, image_path, status, created_at) VALUES "
+                     "('tied', '/d.jpg', 'queued', '2026-08-12 05:02:00')")
+
+    assert main.get_job("first")["queue_position"] == 1   # just the solver
+    assert main.get_job("later")["queue_position"] == 2   # solver + first
+    assert main.get_job("tied")["queue_position"] == 3    # 'later' < 'tied' by id
+    assert "queue_position" not in main.get_job("busy")   # solving, not queued
+
+
 def test_orphaned_solving_jobs_requeued_on_startup(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DATA_DIR", str(tmp_path))
     monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "asterism.db"))

@@ -164,8 +164,11 @@ def main():
                 print(f"worker: retention sweep failed\n{traceback.format_exc()}")
 
         with db.get_conn() as conn:
+            # id tiebreak keeps FIFO deterministic when created_at (second
+            # resolution) collides — and matches the API's queue-position math.
             job = conn.execute(
-                "SELECT * FROM jobs WHERE status = 'queued' ORDER BY created_at LIMIT 1"
+                "SELECT * FROM jobs WHERE status = 'queued' "
+                "ORDER BY created_at, id LIMIT 1"
             ).fetchone()
             if job:
                 conn.execute(
