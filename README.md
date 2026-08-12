@@ -19,6 +19,11 @@ Final home: `asterism.quietlife.net`.
   GPS is present) and projected through the same WCS. Constellation stick
   figures (Stellarium's modern line set, resolved via HYG) are drawn the
   same way.
+- After projection, labels are verified against the pixels: each star label
+  is matched to a detected source near its predicted position, a smooth
+  residual field fitted from the matches corrects for computational-stack
+  warp (phone night modes can drag stars ~1° toward moving clouds — #28),
+  and stars with no visible source are flagged `hidden`.
 - Jobs/results live in `data/` (SQLite + uploaded images), bind-mounted into
   both containers.
 

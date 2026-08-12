@@ -36,6 +36,10 @@ document.getElementById('file').addEventListener('change', async (e) => {
   poll(id);
 });
 
+// Deep-link an existing job: /?job=<id> renders it without re-uploading.
+const jobParam = new URLSearchParams(location.search).get('job');
+if (jobParam) poll(jobParam);
+
 async function poll(id) {
   status('solving…');
   const t0 = Date.now();
@@ -80,10 +84,16 @@ function render(id, job) {
 
     ctx.font = `${Math.max(14, 16 * scale)}px system-ui`;
     ctx.lineWidth = Math.max(1, scale);
-    let bodies = 0;
+    let bodies = 0, hidden = 0;
     for (const l of job.result.labels) {
       const kind = l.kind || 'star';
       if (kind !== 'star') bodies++;
+      // 'hidden': verification found no star at this spot (cloud, most
+      // likely) — keep the label but make its uncertainty visible.
+      const dim = l.status === 'hidden';
+      if (dim) hidden++;
+      ctx.globalAlpha = dim ? 0.4 : 1;
+      ctx.setLineDash(dim ? [5 * scale, 5 * scale] : []);
       ctx.strokeStyle = colors[kind] || colors.star;
       ctx.fillStyle = colors[kind] || colors.star;
       ctx.beginPath();
@@ -94,10 +104,17 @@ function render(id, job) {
       if (kind === 'moon' && l.phase != null) text += ` (${Math.round(l.phase * 100)}% lit)`;
       ctx.fillText(text, l.x + (r + 4) * Math.max(1, scale), l.y - 8 * scale);
     }
+    ctx.globalAlpha = 1;
+    ctx.setLineDash([]);
     const parts = [`${job.result.labels.length - bodies} stars`];
     if (bodies) parts.push(`${bodies} solar-system ${bodies === 1 ? 'body' : 'bodies'}`);
     if (figures.length) parts.push(`${figures.length} constellation${figures.length === 1 ? '' : 's'}`);
-    status(`solved in ${job.solve_seconds}s — labeled ${parts.join(', ')}`);
+    const notes = [];
+    if (hidden) notes.push(`${hidden} hidden by cloud`);
+    const v = job.result.verification;
+    if (v && v.warped) notes.push('image stacking warp corrected');
+    status(`solved in ${job.solve_seconds}s — labeled ${parts.join(', ')}`
+           + (notes.length ? ` (${notes.join('; ')})` : ''));
   };
   img.hidden = false;
   img.src = '/jobs/' + id + '/image';

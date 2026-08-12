@@ -70,6 +70,35 @@ def _deg_to_dms(deg):
     return (d, m, s)
 
 
+def stamp_stars(arr, stars):
+    """Add Gaussian star stamps to a float image array in place.
+    stars = [(x, y, amp), ...] in pixel coordinates."""
+    height, width = arr.shape
+    sigma = 1.3
+    r = 5
+    yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
+    stamp = np.exp(-(xx ** 2 + yy ** 2) / (2 * sigma ** 2))
+    for x, y, amp in stars:
+        xi, yi = int(round(x)), int(round(y))
+        x0, x1 = max(0, xi - r), min(width, xi + r + 1)
+        y0, y1 = max(0, yi - r), min(height, yi + r + 1)
+        arr[y0:y1, x0:x1] += amp * stamp[
+            y0 - (yi - r):stamp.shape[0] - ((yi + r + 1) - y1),
+            x0 - (xi - r):stamp.shape[1] - ((xi + r + 1) - x1),
+        ]
+
+
+def render_points(path, points, width=1200, height=900, amp=180.0, seed=11):
+    """Render Gaussian stars at explicit pixel positions over a flat noisy
+    background — ground truth for verification tests, no WCS involved."""
+    rng = np.random.default_rng(seed)
+    arr = np.full((height, width), 10.0)
+    arr += rng.normal(0.0, 2.0, arr.shape)
+    stamp_stars(arr, [(x, y, amp) for x, y in points])
+    img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8)).convert("RGB")
+    img.save(path, quality=92)
+
+
 def render_starfield(path, ra=95.0, dec=-10.0, fov_deg=50.0, width=1600,
                      height=1200, max_mag=5.5, seed=42, f35mm=39):
     """Render a star field and save it as JPEG with a matching EXIF focal
@@ -85,24 +114,13 @@ def render_starfield(path, ra=95.0, dec=-10.0, fov_deg=50.0, width=1600,
     arr = np.full((height, width), 10.0)
     arr += rng.normal(0.0, 2.0, arr.shape)
 
-    sigma = 1.3
-    r = 5
-    yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
-    stamp = np.exp(-(xx ** 2 + yy ** 2) / (2 * sigma ** 2))
-
     # TAN projection sends the antipodal hemisphere to wild pixel values;
     # keep only stars that genuinely land on the frame.
+    r = 5
     ok = np.isfinite(xs) & np.isfinite(ys) & \
         (xs > -r) & (xs < width + r) & (ys > -r) & (ys < height + r)
-    for x, y, mag in zip(xs[ok], ys[ok], mags[ok]):
-        amp = 255.0 * 10 ** (-0.4 * (mag - 3.0))
-        xi, yi = int(round(x)), int(round(y))
-        x0, x1 = max(0, xi - r), min(width, xi + r + 1)
-        y0, y1 = max(0, yi - r), min(height, yi + r + 1)
-        arr[y0:y1, x0:x1] += amp * stamp[
-            y0 - (yi - r):stamp.shape[0] - ((yi + r + 1) - y1),
-            x0 - (xi - r):stamp.shape[1] - ((xi + r + 1) - x1),
-        ]
+    stamp_stars(arr, [(x, y, 255.0 * 10 ** (-0.4 * (mag - 3.0)))
+                      for x, y, mag in zip(xs[ok], ys[ok], mags[ok])])
 
     img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8)).convert("RGB")
     img.save(path, quality=92, exif=build_exif(f35mm=f35mm))

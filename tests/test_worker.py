@@ -36,6 +36,17 @@ def test_bodies_merge_ahead_of_stars(monkeypatch):
     assert result["constellations"] == FIGURES
 
 
+def test_verification_meta_survives_missing_image(monkeypatch):
+    # JOB's image path doesn't exist: verification must degrade gracefully
+    # and leave the labels untouched rather than sinking the solve.
+    monkeypatch.setattr(ephemeris, "annotate_bodies",
+                        lambda *a: ([], {"time_source": None}))
+    status, result, error = worker.process(JOB)
+    assert status == "done" and error is None
+    assert result["verification"]["verified"] is False
+    assert result["labels"] == STARS
+
+
 def test_ephemeris_crash_does_not_fail_the_job(monkeypatch):
     def boom(*a):
         raise RuntimeError("ephemeris exploded")
