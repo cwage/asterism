@@ -1,8 +1,10 @@
 import json
 import os
+import time
 import uuid
+from collections import defaultdict, deque
 
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 
 from . import db, exif
@@ -13,6 +15,49 @@ db.init_db()
 UPLOAD_DIR = os.path.join(db.DATA_DIR, "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# Abuse limits (#10): every accepted upload is worker CPU (worst case ~200s
+# for an unsolvable image in deep mode), so the open endpoint gets caps.
+MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))
+UPLOADS_PER_HOUR = int(os.environ.get("UPLOADS_PER_HOUR", "12"))
+MAX_QUEUE_DEPTH = int(os.environ.get("MAX_QUEUE_DEPTH", "20"))
+
+# Expired links 404 identically to typos; say why that might be (#23).
+RETENTION_HOURS = int(os.environ.get("RETENTION_HOURS", "24"))
+_GONE = f"no such job (results expire after {RETENTION_HOURS} hours)"
+
+_upload_log = defaultdict(deque)  # client ip -> recent upload monotonic times
+
+
+def _client_ip(request):
+    # Fly's proxy puts the real client address in Fly-Client-IP; the socket
+    # peer is the proxy itself. Fall back for local dev.
+    return (request.headers.get("fly-client-ip")
+            or (request.client.host if request.client else "unknown"))
+
+
+def _rate_limited(ip, now=None):
+    """Sliding one-hour window per client IP. Counts attempts, not successes,
+    so a rejected upload isn't a free retry."""
+    now = time.monotonic() if now is None else now
+    log = _upload_log[ip]
+    while log and log[0] <= now - 3600:
+        log.popleft()
+    if len(log) >= UPLOADS_PER_HOUR:
+        return True
+    log.append(now)
+    if len(_upload_log) > 10000:  # shed empty entries under IP churn
+        for key in [k for k, v in _upload_log.items() if not v][:5000]:
+            del _upload_log[key]
+    return False
+
+
+def _queue_depth():
+    with db.get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM jobs WHERE status IN ('queued', 'solving')"
+        ).fetchone()
+    return row["n"]
+
 
 @app.get("/")
 def index():
@@ -20,12 +65,21 @@ def index():
 
 
 @app.post("/jobs")
-async def create_job(image: UploadFile):
+async def create_job(request: Request, image: UploadFile):
+    if _rate_limited(_client_ip(request)):
+        raise HTTPException(429, "rate limit: try again in a bit")
+    if _queue_depth() >= MAX_QUEUE_DEPTH:
+        raise HTTPException(503, "solve queue is full: try again in a few minutes")
+
+    data = await image.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, f"image too large (max {MAX_UPLOAD_BYTES // (1024*1024)}MB)")
+
     job_id = uuid.uuid4().hex[:12]
     ext = os.path.splitext(image.filename or "")[1].lower() or ".jpg"
     image_path = os.path.join(UPLOAD_DIR, f"{job_id}{ext}")
     with open(image_path, "wb") as f:
-        f.write(await image.read())
+        f.write(data)
 
     try:
         exif_info = exif.read_exif(image_path)
@@ -93,7 +147,7 @@ def get_job(job_id: str):
     with db.get_conn() as conn:
         row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
     if not row:
-        raise HTTPException(404, "no such job")
+        raise HTTPException(404, _GONE)
     out = {
         "id": row["id"],
         "status": row["status"],
@@ -112,5 +166,5 @@ def get_job_image(job_id: str):
             "SELECT image_path FROM jobs WHERE id = ?", (job_id,)
         ).fetchone()
     if not row or not os.path.exists(row["image_path"]):
-        raise HTTPException(404, "no such job")
+        raise HTTPException(404, _GONE)
     return FileResponse(row["image_path"])
