@@ -21,7 +21,10 @@ Final home: `asterism.quietlife.net`.
   naked-eye planets are computed with skyfield (JPL DE421, topocentric when
   GPS is present) and projected through the same WCS. Constellation stick
   figures (Stellarium's modern line set, resolved via HYG) are drawn the
-  same way.
+  same way. When a solve fails outright, the same ephemeris still answers
+  the question from EXIF alone (#7): timestamp + GPS + compass heading
+  (declination-corrected via the World Magnetic Model) → "you were facing S;
+  the bright object was Venus, WSW, to your right".
 - After projection, labels are verified against the pixels: each star label
   is matched to a detected source near its predicted position, a smooth
   residual field fitted from the matches corrects for computational-stack
@@ -84,8 +87,7 @@ It prints per-image solve success, timing, and the scale hints used.
 1. **Local MVP** (this repo): upload → solve → star labels on canvas. ✅
 2. **Ephemeris layer**: Skyfield + EXIF time/GPS → label the Moon and planets
    (the thing astrometry.net can't do). ← you are here. Still open: proper
-   timezone handling (#6) and the graceful-failure path — no solve, but time +
-   GPS + compass heading → "you were facing SW, that was probably Jupiter" (#7).
+   timezone handling (#6).
 3. **Fly.io deploy**: single app, web + worker processes, indexes baked into
    the image.
 4. **Differentiators**: satellite/streak ID from archived TLEs, LLM narration,

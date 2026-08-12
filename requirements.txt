@@ -6,4 +6,5 @@ pillow
 piexif
 numpy
 skyfield
+pygeomag
 pytest

@@ -11,6 +11,8 @@ TAG_FOCAL_LENGTH = 37386
 TAG_FOCAL_35MM = 41989
 TAG_DATETIME_ORIGINAL = 36867
 TAG_OFFSET_TIME_ORIGINAL = 36881
+TAG_GPS_IMG_DIRECTION_REF = 16  # 'M' magnetic / 'T' true
+TAG_GPS_IMG_DIRECTION = 17
 
 # Fallback when EXIF gives us nothing: generous phone-plausible field widths.
 DEFAULT_FOV_BOUNDS = (30.0, 90.0)
@@ -27,7 +29,8 @@ def _gps_to_degrees(dms, ref):
 
 
 def read_exif(path):
-    """Return {fov_bounds, focal_35mm, datetime_original, lat, lon, width, height}."""
+    """Return {fov_bounds, focal_35mm, datetime_original, offset_time_original,
+    lat, lon, heading, heading_ref, width, height}."""
     info = {
         "fov_bounds": DEFAULT_FOV_BOUNDS,
         "focal_35mm": None,
@@ -35,6 +38,8 @@ def read_exif(path):
         "offset_time_original": None,
         "lat": None,
         "lon": None,
+        "heading": None,
+        "heading_ref": None,
     }
     with Image.open(path) as img:
         info["width"], info["height"] = img.size
@@ -63,6 +68,19 @@ def read_exif(path):
         lat = _gps_to_degrees(gps.get(2), gps.get(1))
         lon = _gps_to_degrees(gps.get(4), gps.get(3))
         info["lat"], info["lon"] = lat, lon
+
+        # Compass heading at capture: phones record this even when they drop
+        # lat/lon, and it's what makes the no-solve fallback (#7) possible.
+        direction = gps.get(TAG_GPS_IMG_DIRECTION)
+        if direction is not None:
+            try:
+                heading = float(direction)
+            except (TypeError, ValueError, ZeroDivisionError):
+                heading = None
+            if heading is not None and math.isfinite(heading):
+                info["heading"] = heading % 360.0
+                ref = gps.get(TAG_GPS_IMG_DIRECTION_REF)
+                info["heading_ref"] = (str(ref).strip() or None) if ref else None
 
     return info
 

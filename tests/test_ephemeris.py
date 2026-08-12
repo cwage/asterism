@@ -138,6 +138,72 @@ def test_annotate_bodies_projects_into_frame(tmp_path):
         assert 0 <= l["x"] < width and 0 <= l["y"] < height
 
 
+# ---- no-solve fallback (#7) ----
+
+# The real case that motivated the issue: Pixel 9a dusk shots from Nashville,
+# 2026-08-11 20:10 CDT. Venus was the only planet up (az ~254 true, alt ~16,
+# mag -4.4); the phone recorded a magnetic heading of ~170 but no GPS fix in
+# some frames. Local declination is about -4.2 (WMM).
+VENUS_EXIF = {
+    "datetime_original": "2026:08:11 20:10:00",
+    "offset_time_original": "-05:00",
+    "lat": 36.1, "lon": -86.8,
+    "heading": 170.0, "heading_ref": "M",
+}
+
+
+def test_compass_names():
+    assert ephemeris._compass(0) == "N"
+    assert ephemeris._compass(254) == "WSW"
+    assert ephemeris._compass(359) == "N"
+
+
+def test_declination_matches_wmm_for_nashville():
+    from datetime import datetime, timezone
+    d = ephemeris._declination(36.1, -86.8, datetime(2026, 8, 12, tzinfo=timezone.utc))
+    assert d == pytest.approx(-4.2, abs=0.5)
+
+
+@needs_de421
+def test_fallback_guess_identifies_venus_at_dusk():
+    guess = ephemeris.fallback_guess(VENUS_EXIF)
+    assert guess["location_source"] == "gps"
+    assert -15 <= guess["sun_alt_deg"] <= 0  # dusk, not night
+    # magnetic 170 corrected by ~-4.2 declination
+    assert guess["heading_true"] == pytest.approx(165.8, abs=1.0)
+
+    venus = next(c for c in guess["candidates"] if c["name"] == "Venus")
+    assert venus["az_deg"] == pytest.approx(254, abs=4)
+    assert venus["alt_deg"] == pytest.approx(16, abs=4)
+    assert venus["mag"] < -3.5
+    assert venus["direction"] == "WSW"
+    # Venus sat well to the right of where the phone pointed
+    assert venus["offset_deg"] == pytest.approx(88, abs=6)
+
+    # brightest first
+    mags = [c["mag"] if c["mag"] is not None else -99 for c in guess["candidates"]]
+    assert mags == sorted(mags)
+
+
+@needs_de421
+def test_fallback_guess_without_gps_uses_timezone_and_hedges():
+    guess = ephemeris.fallback_guess({
+        "datetime_original": "2026:08:11 20:10:00",
+        "offset_time_original": "-05:00",
+    })
+    assert guess["location_source"] == "timezone_guess"
+    assert "heading_true" not in guess  # no heading recorded
+    for c in guess["candidates"]:
+        assert "offset_deg" not in c
+
+
+def test_fallback_guess_needs_time_and_some_location_hint():
+    assert ephemeris.fallback_guess({}) is None
+    # timestamp but no GPS and no zone: alt/az would be fiction
+    assert ephemeris.fallback_guess(
+        {"datetime_original": "2026:08:11 20:10:00"}) is None
+
+
 @needs_de421
 def test_annotate_bodies_without_timestamp_is_quiet(tmp_path):
     wcs = synth.make_wcs(ra=95.0, dec=-10.0, fov_deg=40.0, width=100, height=100)
