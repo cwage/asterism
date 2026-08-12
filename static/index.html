@@ -5,31 +5,95 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>asterism</title>
 <style>
-  body { background: #0b0e14; color: #cdd6e0; font-family: system-ui, sans-serif;
-         max-width: 960px; margin: 2rem auto; padding: 0 1rem; }
-  h1 { font-weight: 400; letter-spacing: 0.3em; }
-  #status { margin: 1rem 0; color: #8fa1b3; }
-  #actions button { background: #1a2230; color: #cdd6e0; border: 1px solid #34435c;
-                    border-radius: 4px; padding: 0.5rem 1rem; cursor: pointer; }
+  :root {
+    --bg: #0b0e14; --ink: #cdd6e0; --dim: #8fa1b3; --faint: #6b7a8d;
+    --line: #34435c; --panel: #131a26; --accent: #78c8ff;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--ink);
+         font-family: system-ui, sans-serif; line-height: 1.5;
+         max-width: 960px; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
+  header { margin: 1rem 0 1.5rem; }
+  h1 { font-weight: 400; letter-spacing: 0.3em; font-size: 1.6rem; margin: 0; }
+  .tag { color: var(--dim); margin: 0.25rem 0 0; }
+
+  .upload { display: flex; align-items: center; justify-content: center;
+            gap: 0.6rem; width: 100%; padding: 1.1rem 1rem; cursor: pointer;
+            border: 1px dashed var(--line); border-radius: 10px;
+            background: var(--panel); color: var(--accent);
+            font-size: 1.05rem; user-select: none; }
+  .upload:active { background: #1a2230; }
+
+  details.about { margin: 1rem 0 0; border: 1px solid #1c2634;
+                  border-radius: 10px; background: var(--panel); }
+  details.about summary { cursor: pointer; padding: 0.7rem 1rem;
+                          color: var(--dim); user-select: none; }
+  details.about p { margin: 0.25rem 0 0.9rem; padding: 0 1rem; color: var(--dim);
+                    font-size: 0.95rem; }
+  details.about a { color: var(--accent); }
+
+  .disclosure { font-size: 0.8rem; color: var(--faint); margin: 0.75rem 0 0; }
+
+  #status { margin: 1rem 0 0.5rem; color: var(--dim); min-height: 1.5em; }
+  #actions button { width: 100%; background: #1a2230; color: var(--ink);
+                    border: 1px solid var(--line); border-radius: 10px;
+                    padding: 0.9rem 1rem; font-size: 1rem; cursor: pointer; }
   #actions button:hover { background: #243044; }
-  .disclosure { font-size: 0.85rem; color: #6b7a8d; margin-top: 0.5rem; }
-  #wrap { position: relative; display: inline-block; max-width: 100%; }
+
+  #wrap { position: relative; display: inline-block; max-width: 100%;
+          margin-top: 0.75rem; border-radius: 6px; overflow: hidden; }
   #wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
   #wrap img { display: block; max-width: 100%; }
+
+  footer { margin-top: 2rem; font-size: 0.8rem; color: var(--faint); }
+  footer a { color: var(--faint); }
+
+  @media (min-width: 700px) {
+    body { padding-top: 3rem; }
+    h1 { font-size: 2rem; }
+    .upload { width: auto; padding: 1rem 2.5rem; }
+    #actions button { width: auto; }
+  }
 </style>
 </head>
 <body>
-<h1>asterism</h1>
-<p>Upload a night-sky photo; get back what's in it.</p>
-<input type="file" id="file" accept="image/*">
+<header>
+  <h1>a s t e r i s m</h1>
+  <p class="tag">Point your phone at the night sky. Find out what you saw.</p>
+</header>
+
+<label class="upload" for="file">✦ Choose a night-sky photo
+  <input type="file" id="file" accept="image/*" hidden>
+</label>
+
+<details class="about">
+  <summary>What is this?</summary>
+  <p>Upload a photo of the night sky — even a hazy, handheld phone shot.
+  asterism <em>plate-solves</em> it: the star pattern in your pixels is
+  matched against a map of the entire sky
+  (<a href="https://astrometry.net/">astrometry.net</a>) to work out exactly
+  where the camera was pointing, with no location or orientation data
+  needed.</p>
+  <p>It then names the stars it can see, draws the constellation figures,
+  and — when the photo carries a timestamp — marks the Moon and planets
+  computed for that instant. Labels it can't verify against an actual dot
+  in your photo (clouds, usually) are drawn dashed.</p>
+  <p>No account, no app: your phone camera is the instrument.
+  <a href="https://github.com/cwage/asterism">Source on GitHub.</a></p>
+</details>
+
 <p class="disclosure">Uploads are public: anyone with the result link can view
 your photo and its labels. GPS metadata is removed from the stored photo
 (uploads with location data we can't remove are rejected), coordinates
 shown in results are rounded to city scale, and everything is deleted
 after 24 hours.</p>
+
 <div id="status"></div>
 <div id="actions"></div>
 <div id="wrap"><img id="photo" hidden><canvas id="overlay"></canvas></div>
+
+<footer><a href="https://github.com/cwage/asterism">asterism</a> — phone-first
+plate solving.</footer>
 
 <script>
 const status = (m) => document.getElementById('status').textContent = m;
