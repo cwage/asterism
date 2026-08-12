@@ -14,9 +14,21 @@ _catalog_cache = None
 
 
 def _write_cfg(out_dir):
+    # List index files explicitly: autoindex tries every file in the dir and
+    # logs a load failure for non-index files like .gitkeep (issue #17).
     cfg = os.path.join(out_dir, "astrometry.cfg")
+    try:
+        index_files = sorted(f for f in os.listdir(INDEX_DIR)
+                             if f.endswith(".fits"))
+    except OSError:
+        index_files = []
+    lines = ["inparallel"]
+    if index_files:
+        lines += [f"index {os.path.join(INDEX_DIR, f)}" for f in index_files]
+    else:
+        lines += [f"add_path {INDEX_DIR}", "autoindex"]
     with open(cfg, "w") as f:
-        f.write(f"add_path {INDEX_DIR}\nautoindex\ninparallel\n")
+        f.write("\n".join(lines) + "\n")
     return cfg
 
 
