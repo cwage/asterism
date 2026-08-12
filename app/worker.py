@@ -5,7 +5,7 @@ import os
 import time
 import traceback
 
-from . import constellations, db, ephemeris, solver
+from . import constellations, db, ephemeris, solver, verify
 
 
 def process(job):
@@ -44,9 +44,23 @@ def process(job):
         print(f"worker: constellations failed for {job['id']}\n{traceback.format_exc()}")
         figures = []
 
-    result["labels"] = bodies + labels
+    labels = bodies + labels
+
+    # Verification closes the loop against the pixels (issue #28): snap
+    # labels to detected sources, flag cloud-hidden stars, correct for
+    # stack warp. Best-effort like the layers above.
+    try:
+        labels, figures, verification = verify.apply(
+            job["image_path"], labels, figures
+        )
+    except Exception:
+        print(f"worker: verification failed for {job['id']}\n{traceback.format_exc()}")
+        verification = {"verified": False, "error": "verification failed"}
+
+    result["labels"] = labels
     result["ephemeris"] = eph_meta
     result["constellations"] = figures
+    result["verification"] = verification
     return "done", result, None
 
 
