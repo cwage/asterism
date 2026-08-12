@@ -135,8 +135,22 @@ def process(job):
     return "done", result, None
 
 
+def recover_orphans():
+    """Re-queue 'solving' rows at startup. We are the only worker, so any
+    such row is an orphan from a previous life (Fly auto-stop mid-solve, a
+    crash) — left alone it would count against the queue-depth cap until
+    retention reaped it. Returns how many were re-queued."""
+    with db.get_conn() as conn:
+        return conn.execute(
+            "UPDATE jobs SET status = 'queued' WHERE status = 'solving'"
+        ).rowcount
+
+
 def main():
     db.init_db()
+    n = recover_orphans()
+    if n:
+        print(f"worker: re-queued {n} orphaned solving job(s)")
     print("worker: polling for jobs")
     last_sweep = 0.0
     while True:

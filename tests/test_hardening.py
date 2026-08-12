@@ -1,8 +1,6 @@
 """Public-endpoint hardening: per-IP rate limiting (#10) and the retention
 sweep (#23)."""
 
-import os
-
 import pytest
 
 from app import db, main, worker
@@ -64,6 +62,23 @@ def test_sweep_expired_removes_old_jobs_and_files(tmp_path, monkeypatch):
     with db.get_conn() as conn:
         ids = [r["id"] for r in conn.execute("SELECT id FROM jobs")]
     assert ids == ["newjob"]
+
+
+def test_orphaned_solving_jobs_requeued_on_startup(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "asterism.db"))
+    db.init_db()
+    with db.get_conn() as conn:
+        conn.execute("INSERT INTO jobs (id, image_path, status) VALUES "
+                     "('stuck', '/x.jpg', 'solving')")
+        conn.execute("INSERT INTO jobs (id, image_path, status) VALUES "
+                     "('fine', '/y.jpg', 'done')")
+
+    assert worker.recover_orphans() == 1
+
+    with db.get_conn() as conn:
+        rows = {r["id"]: r["status"] for r in conn.execute("SELECT id, status FROM jobs")}
+    assert rows == {"stuck": "queued", "fine": "done"}
 
 
 def test_sweep_survives_missing_files(tmp_path, monkeypatch):

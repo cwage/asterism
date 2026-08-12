@@ -21,6 +21,10 @@ MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(20 * 1024 * 1024))
 UPLOADS_PER_HOUR = int(os.environ.get("UPLOADS_PER_HOUR", "12"))
 MAX_QUEUE_DEPTH = int(os.environ.get("MAX_QUEUE_DEPTH", "20"))
 
+# Expired links 404 identically to typos; say why that might be (#23).
+RETENTION_HOURS = int(os.environ.get("RETENTION_HOURS", "24"))
+_GONE = f"no such job (results expire after {RETENTION_HOURS} hours)"
+
 _upload_log = defaultdict(deque)  # client ip -> recent upload monotonic times
 
 
@@ -143,7 +147,7 @@ def get_job(job_id: str):
     with db.get_conn() as conn:
         row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
     if not row:
-        raise HTTPException(404, "no such job")
+        raise HTTPException(404, _GONE)
     out = {
         "id": row["id"],
         "status": row["status"],
@@ -162,5 +166,5 @@ def get_job_image(job_id: str):
             "SELECT image_path FROM jobs WHERE id = ?", (job_id,)
         ).fetchone()
     if not row or not os.path.exists(row["image_path"]):
-        raise HTTPException(404, "no such job")
+        raise HTTPException(404, _GONE)
     return FileResponse(row["image_path"])
