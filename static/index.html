@@ -129,8 +129,10 @@ async function poll(id) {
     if (job.status === 'done') { render(id, job); return; }
     if (job.status === 'failed') { renderFailure(id, job); return; }
     const secs = Math.round((Date.now() - t0) / 1000);
-    if (job.status === 'queued' && job.queue_position > 0) {
-      status(`in queue — ${job.queue_position} ahead of you (${secs}s)`);
+    if (job.status === 'queued') {
+      status(job.queue_position > 0
+        ? `in queue — ${job.queue_position} ahead of you (${secs}s)`
+        : `up next… (${secs}s)`);
     } else {
       status(`solving… (${secs}s)`);
     }
