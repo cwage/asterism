@@ -65,3 +65,19 @@ def read_exif(path):
         info["lat"], info["lon"] = lat, lon
 
     return info
+
+
+def strip_gps(path):
+    """Remove the GPS IFD from a JPEG in place, losslessly (segment surgery,
+    pixels untouched). Called after read_exif() has captured precise
+    coordinates into the job record — the stored file is served publicly
+    (#22), so it must not carry the photographer's location. Raises on
+    non-JPEG input; callers treat this as best-effort."""
+    import piexif
+
+    exif_dict = piexif.load(path)
+    if not exif_dict.get("GPS"):
+        return False
+    exif_dict["GPS"] = {}
+    piexif.insert(piexif.dump(exif_dict), path)
+    return True

@@ -12,6 +12,7 @@
   #actions button { background: #1a2230; color: #cdd6e0; border: 1px solid #34435c;
                     border-radius: 4px; padding: 0.5rem 1rem; cursor: pointer; }
   #actions button:hover { background: #243044; }
+  .disclosure { font-size: 0.85rem; color: #6b7a8d; margin-top: 0.5rem; }
   #wrap { position: relative; display: inline-block; max-width: 100%; }
   #wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
   #wrap img { display: block; max-width: 100%; }
@@ -21,6 +22,10 @@
 <h1>asterism</h1>
 <p>Upload a night-sky photo; get back what's in it.</p>
 <input type="file" id="file" accept="image/*">
+<p class="disclosure">Uploads are public: anyone with the result link can view
+your photo and its labels. GPS metadata is removed from the stored photo
+(uploads with location data we can't remove are rejected), and coordinates
+shown in results are rounded to city scale.</p>
 <div id="status"></div>
 <div id="actions"></div>
 <div id="wrap"><img id="photo" hidden><canvas id="overlay"></canvas></div>

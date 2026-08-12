@@ -33,6 +33,20 @@ async def create_job(image: UploadFile):
         os.unlink(image_path)
         raise HTTPException(400, f"could not read image: {e}")
 
+    # Precise GPS is captured into the job record above (the ephemeris layer
+    # wants it); the stored file is served publicly, so scrub it (#22).
+    # Fail closed: if the image carries GPS we cannot strip (non-JPEG or a
+    # piexif failure), reject rather than serve location data back out.
+    try:
+        exif.strip_gps(image_path)
+    except Exception:
+        if exif_info.get("lat") is not None or exif_info.get("lon") is not None:
+            os.unlink(image_path)
+            raise HTTPException(
+                415, "this image format carries GPS metadata we can't remove; "
+                     "strip location data and re-upload"
+            )
+
     with db.get_conn() as conn:
         conn.execute(
             "INSERT INTO jobs (id, image_path, exif_json) VALUES (?, ?, ?)",
@@ -60,6 +74,20 @@ def deepen_job(job_id: str):
     return {"id": job_id, "status": "queued", "mode": "deep"}
 
 
+def _public_exif(exif_info):
+    """Round GPS for the public payload: results are shareable by link, and
+    precise coordinates are usually someone's backyard (#22). One decimal
+    (~11 km) is plenty to say which planet was where; the worker keeps the
+    full-precision copy in the job record."""
+    if not exif_info:
+        return exif_info
+    out = dict(exif_info)
+    for key in ("lat", "lon"):
+        if out.get(key) is not None:
+            out[key] = round(out[key], 1)
+    return out
+
+
 @app.get("/jobs/{job_id}")
 def get_job(job_id: str):
     with db.get_conn() as conn:
@@ -71,7 +99,7 @@ def get_job(job_id: str):
         "status": row["status"],
         "error": row["error"],
         "solve_seconds": row["solve_seconds"],
-        "exif": json.loads(row["exif_json"]) if row["exif_json"] else None,
+        "exif": _public_exif(json.loads(row["exif_json"]) if row["exif_json"] else None),
         "result": json.loads(row["result_json"]) if row["result_json"] else None,
     }
     return out
