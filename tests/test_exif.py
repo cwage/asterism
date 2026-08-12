@@ -66,7 +66,8 @@ def test_strip_gps_removes_location_keeps_rest(tmp_path):
     ex = synth.build_exif(f35mm=27, datetime_original="2021:07:30 23:52:43",
                           gps=(49.1415, 6.1170))
     Image.new("RGB", (64, 64), (30, 40, 50)).save(path, exif=ex, quality=92)
-    before = np.asarray(Image.open(path))
+    with Image.open(path) as img:
+        before = np.asarray(img).copy()
 
     assert exif.strip_gps(path) is True
 
@@ -76,7 +77,19 @@ def test_strip_gps_removes_location_keeps_rest(tmp_path):
     assert info["focal_35mm"] == 27.0
     assert info["datetime_original"] == "2021:07:30 23:52:43"
     # lossless: pixel data untouched, not a re-encode
-    assert np.array_equal(before, np.asarray(Image.open(path)))
+    with Image.open(path) as img:
+        after = np.asarray(img).copy()
+    assert np.array_equal(before, after)
+
+
+def test_strip_gps_raises_on_non_jpeg(tmp_path):
+    # The upload path treats a strip failure on a GPS-bearing image as a
+    # rejection (fail closed); a PNG must raise, not silently succeed.
+    path = str(tmp_path / "gps.png")
+    Image.new("RGB", (64, 64)).save(path,
+                                    exif=synth.build_exif(gps=(49.1, 6.1)))
+    with pytest.raises(Exception):
+        exif.strip_gps(path)
 
 
 def test_strip_gps_no_gps_is_a_noop(tmp_path):

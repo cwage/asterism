@@ -35,11 +35,17 @@ async def create_job(image: UploadFile):
 
     # Precise GPS is captured into the job record above (the ephemeris layer
     # wants it); the stored file is served publicly, so scrub it (#22).
-    # Best-effort: non-JPEG uploads fall through to the API-level redaction.
+    # Fail closed: if the image carries GPS we cannot strip (non-JPEG or a
+    # piexif failure), reject rather than serve location data back out.
     try:
         exif.strip_gps(image_path)
     except Exception:
-        pass
+        if exif_info.get("lat") is not None or exif_info.get("lon") is not None:
+            os.unlink(image_path)
+            raise HTTPException(
+                415, "this image format carries GPS metadata we can't remove; "
+                     "strip location data and re-upload"
+            )
 
     with db.get_conn() as conn:
         conn.execute(

@@ -23,8 +23,9 @@
 <p>Upload a night-sky photo; get back what's in it.</p>
 <input type="file" id="file" accept="image/*">
 <p class="disclosure">Uploads are public: anyone with the result link can view
-your photo and its labels. Location metadata is removed from the stored photo,
-and coordinates shown in results are rounded to city scale.</p>
+your photo and its labels. GPS metadata is removed from the stored photo
+(uploads with location data we can't remove are rejected), and coordinates
+shown in results are rounded to city scale.</p>
 <div id="status"></div>
 <div id="actions"></div>
 <div id="wrap"><img id="photo" hidden><canvas id="overlay"></canvas></div>
