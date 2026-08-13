@@ -87,7 +87,8 @@ def render(image_path, result, share_host, out_path):
     endpoint treats that as a 500 it can log."""
     from PIL import Image, ImageDraw, ImageFont
 
-    photo = Image.open(image_path).convert("RGB")
+    with Image.open(image_path) as src:
+        photo = src.convert("RGB")
     scale = CARD_WIDTH / photo.width
     photo = photo.resize((CARD_WIDTH, round(photo.height * scale)),
                          Image.LANCZOS)
@@ -185,5 +186,9 @@ def render(image_path, result, share_host, out_path):
               font=font_cap, fill=DIM)
 
     out = Image.alpha_composite(card.convert("RGBA"), overlay).convert("RGB")
-    out.save(out_path, "PNG")
+    # Atomic publish: concurrent requests may render the same card; nobody
+    # must ever be served a partially-written file.
+    tmp_path = f"{out_path}.tmp{os.getpid()}"
+    out.save(tmp_path, "PNG")
+    os.replace(tmp_path, out_path)
     return out_path
