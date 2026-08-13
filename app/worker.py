@@ -7,7 +7,7 @@ import shutil
 import time
 import traceback
 
-from . import constellations, db, ephemeris, solver, verify
+from . import constellations, db, dso, ephemeris, solver, verify
 
 # Below this many detected star-like sources, a quick job fails fast
 # instead of burning cpulimit tiers on daylight/food/pitch-black uploads.
@@ -129,7 +129,16 @@ def process(job):
         print(f"worker: constellations failed for {job['id']}\n{traceback.format_exc()}")
         figures = []
 
-    labels = bodies + labels
+    # Naked-eye deep-sky objects (#16), best-effort like the layers above.
+    try:
+        dsos = dso.annotate(
+            result["wcs_path"], exif_info["width"], exif_info["height"]
+        )
+    except Exception:
+        print(f"worker: dso annotation failed for {job['id']}\n{traceback.format_exc()}")
+        dsos = []
+
+    labels = bodies + labels + dsos
 
     # Verification closes the loop against the pixels (issue #28): snap
     # labels to detected sources, flag cloud-hidden stars, correct for

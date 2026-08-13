@@ -87,8 +87,9 @@
   where the camera was pointing, with no location or orientation data
   needed.</p>
   <p>It then names the stars it can see, draws the constellation figures,
-  and — when the photo carries a timestamp — marks the Moon and planets
-  computed for that instant. Labels it can't verify against an actual dot
+  circles the naked-eye deep-sky objects in frame (the Pleiades, the Orion
+  Nebula, Andromeda), and — when the photo carries a timestamp — marks the
+  Moon and planets computed for that instant. Labels it can't verify against an actual dot
   in your photo (clouds, usually) are drawn dashed.</p>
   <p>No account, no app: your phone camera is the instrument.
   <a href="https://github.com/cwage/asterism">Source on GitHub.</a></p>
@@ -257,7 +258,8 @@ function render(id, job) {
     const scale = img.naturalWidth / 1000;  // keep label size sane on big photos
     const colors = { star: 'rgba(120, 200, 255, 0.9)',
                      planet: 'rgba(255, 200, 90, 0.95)',
-                     moon: 'rgba(255, 235, 170, 0.95)' };
+                     moon: 'rgba(255, 235, 170, 0.95)',
+                     dso: 'rgba(200, 160, 255, 0.9)' };
     // Constellation figures go down first, under the labels.
     const figures = job.result.constellations || [];
     ctx.strokeStyle = 'rgba(150, 170, 210, 0.35)';
@@ -279,10 +281,11 @@ function render(id, job) {
 
     ctx.font = `${Math.max(14, 16 * scale)}px system-ui`;
     ctx.lineWidth = Math.max(1, scale);
-    let bodies = 0, hidden = 0;
+    let bodies = 0, hidden = 0, dsos = 0;
     for (const l of job.result.labels) {
       const kind = l.kind || 'star';
-      if (kind !== 'star') bodies++;
+      if (kind === 'dso') dsos++;
+      else if (kind !== 'star') bodies++;
       // 'hidden': verification found no star at this spot (cloud, most
       // likely) — keep the label but make its uncertainty visible.
       const dim = l.status === 'hidden';
@@ -292,7 +295,9 @@ function render(id, job) {
       ctx.strokeStyle = colors[kind] || colors.star;
       ctx.fillStyle = colors[kind] || colors.star;
       ctx.beginPath();
-      const r = kind === 'star' ? Math.max(6, 8 * scale) : Math.max(9, 12 * scale);
+      // DSOs are extended: circle the object's actual extent when known.
+      const r = l.radius_px ? Math.max(9, l.radius_px)
+        : kind === 'star' ? Math.max(6, 8 * scale) : Math.max(9, 12 * scale);
       ctx.arc(l.x, l.y, r, 0, 2 * Math.PI);
       ctx.stroke();
       let text = l.name;
@@ -301,8 +306,9 @@ function render(id, job) {
     }
     ctx.globalAlpha = 1;
     ctx.setLineDash([]);
-    const parts = [`${job.result.labels.length - bodies} stars`];
+    const parts = [`${job.result.labels.length - bodies - dsos} stars`];
     if (bodies) parts.push(`${bodies} solar-system ${bodies === 1 ? 'body' : 'bodies'}`);
+    if (dsos) parts.push(`${dsos} deep-sky object${dsos === 1 ? '' : 's'}`);
     if (figures.length) parts.push(`${figures.length} constellation${figures.length === 1 ? '' : 's'}`);
     const notes = [];
     if (hidden) notes.push(`${hidden} hidden by cloud`);
