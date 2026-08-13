@@ -70,6 +70,20 @@ def test_tier_plan_matches_solve_order():
     assert solver.tier_plan({"focal_35mm": None}) == solver.FALLBACK_TIERS
 
 
+def test_ultrawide_exif_tier_skipped():
+    # f35=11mm -> ~117 deg estimated field: beyond index coverage (#46),
+    # so the plan starts straight at the fallbacks.
+    info = {"focal_35mm": 11.0, "fov_bounds": (82.0, 164.0)}
+    assert solver.tier_plan(info) == solver.FALLBACK_TIERS
+
+
+def test_moderately_wide_exif_tier_kept():
+    # f35=16mm -> ~96.7 deg: wide but within coverage, EXIF tier stays
+    # first. Bounds follow read_exif's bracketing (fov * 0.7, fov * 1.4).
+    info = {"focal_35mm": 16.0, "fov_bounds": (67.7, 135.4)}
+    assert solver.tier_plan(info)[0] == (67.7, 135.4)
+
+
 def test_near_duplicate_exif_tier_deduped(monkeypatch, tmp_path):
     tried = []
     monkeypatch.setattr(solver, "solve", _stub_solve(tried))

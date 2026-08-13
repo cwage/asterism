@@ -2,6 +2,7 @@
 project the bright-star catalog through the resulting WCS."""
 
 import csv
+import math
 import os
 import re
 import subprocess
@@ -73,13 +74,25 @@ def solve(image_path, out_dir, fov_bounds):
 # than ~5 degrees needs index files we don't ship in v1.
 FALLBACK_TIERS = [(30.0, 90.0), (8.0, 35.0)]
 
+# Widest field the shipped indexes (4108-4119, quads to ~30 deg) can
+# plausibly solve. Bench 2026-08-13 (#46): 0/9 ultrawide shots whose EXIF
+# put the field at ~117 deg solved on any tier — their EXIF tier just
+# burned ~70s each before the fallbacks got their (equally doomed) turn.
+MAX_EXIF_FIELD = 110.0
+
 
 def tier_plan(exif_info):
     """The scale tiers a full solve would try, in order: EXIF-derived
-    bounds first when trustworthy, then the fallbacks (deduped)."""
+    bounds first when trustworthy, then the fallbacks (deduped).
+    An EXIF tier implying a field wider than the indexes cover (#46,
+    ultrawide lenses) is skipped — the fallbacks still run in case the
+    EXIF was lying about the optics."""
     tiers = []
-    if exif_info.get("focal_35mm"):
-        tiers.append(tuple(exif_info["fov_bounds"]))
+    f35 = exif_info.get("focal_35mm")
+    if f35:
+        fov = math.degrees(2 * math.atan(36.0 / (2 * f35)))
+        if fov <= MAX_EXIF_FIELD:
+            tiers.append(tuple(exif_info["fov_bounds"]))
     for t in FALLBACK_TIERS:
         if not any(abs(t[0] - u[0]) < 2 and abs(t[1] - u[1]) < 2 for u in tiers):
             tiers.append(t)
