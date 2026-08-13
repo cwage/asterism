@@ -100,8 +100,33 @@ def solve_tiered(image_path, out_dir, exif_info, tiers=None):
     return result
 
 
+# HYG's three-letter Greek abbreviations (`bayer` column) -> the letter itself.
+GREEK_LETTERS = {
+    "Alp": "α", "Bet": "β", "Gam": "γ", "Del": "δ", "Eps": "ε", "Zet": "ζ",
+    "Eta": "η", "The": "θ", "Iot": "ι", "Kap": "κ", "Lam": "λ", "Mu": "μ",
+    "Nu": "ν", "Xi": "ξ", "Omi": "ο", "Pi": "π", "Rho": "ρ", "Sig": "σ",
+    "Tau": "τ", "Ups": "υ", "Phi": "φ", "Chi": "χ", "Psi": "ψ", "Ome": "ω",
+}
+_SUPERSCRIPTS = str.maketrans("123456789", "¹²³⁴⁵⁶⁷⁸⁹")
+
+
+def _bayer_name(row):
+    """Display name like "α Lup" or "γ² Vel" from HYG's `bayer`/`con`
+    columns, or None when the row has no usable Bayer designation."""
+    bayer = (row.get("bayer") or "").strip()
+    con = (row.get("con") or "").strip()
+    if not bayer or not con:
+        return None
+    abbr, _, index = bayer.partition("-")
+    letter = GREEK_LETTERS.get(abbr)
+    if not letter:
+        return None
+    return f"{letter}{index.translate(_SUPERSCRIPTS)} {con}"
+
+
 def load_catalog():
-    """HYG database rows for stars with proper names, brightest first.
+    """HYG database rows for bright stars, brightest first: proper-named
+    stars plus Bayer designations for the bright stars without one.
     HYG stores RA in hours; convert to degrees."""
     global _catalog_cache
     if _catalog_cache is not None:
@@ -111,7 +136,15 @@ def load_catalog():
     with open(path, newline="") as f:
         for row in csv.DictReader(f):
             name = (row.get("proper") or "").strip()
-            if not name or name == "Sol":
+            if name == "Sol":
+                continue
+            if not name:
+                # Unnamed secondary components (Castor B and friends) would
+                # duplicate their primary's designation at the same pixel.
+                if (row.get("comp") or "1").strip() not in ("", "1"):
+                    continue
+                name = _bayer_name(row)
+            if not name:
                 continue
             try:
                 mag = float(row["mag"])
