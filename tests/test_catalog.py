@@ -40,6 +40,8 @@ def test_existing_filters_unchanged(mini_catalog):
 def test_bayer_name_parsing():
     assert solver._bayer_name({"bayer": "Alp", "con": "Lup"}) == "α Lup"
     assert solver._bayer_name({"bayer": "Gam-2", "con": "Vel"}) == "γ² Vel"
+    # Unhyphenated index form, in case the unpinned upstream csv drifts.
+    assert solver._bayer_name({"bayer": "Gam2", "con": "Vel"}) == "γ² Vel"
     assert solver._bayer_name({"bayer": "", "con": "Aur"}) is None
     assert solver._bayer_name({"bayer": "Alp", "con": ""}) is None
     assert solver._bayer_name({"bayer": "Xyz", "con": "Ori"}) is None

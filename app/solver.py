@@ -3,6 +3,7 @@ project the bright-star catalog through the resulting WCS."""
 
 import csv
 import os
+import re
 import subprocess
 import time
 
@@ -112,16 +113,20 @@ _SUPERSCRIPTS = str.maketrans("123456789", "¹²³⁴⁵⁶⁷⁸⁹")
 
 def _bayer_name(row):
     """Display name like "α Lup" or "γ² Vel" from HYG's `bayer`/`con`
-    columns, or None when the row has no usable Bayer designation."""
+    columns, or None when the row has no usable Bayer designation.
+    hygdata_v41 writes component indices as "Gam-2"; accept "Gam2" too,
+    since fetch-catalog.sh pulls an unpinned CURRENT csv that could drift."""
     bayer = (row.get("bayer") or "").strip()
     con = (row.get("con") or "").strip()
     if not bayer or not con:
         return None
-    abbr, _, index = bayer.partition("-")
-    letter = GREEK_LETTERS.get(abbr)
+    m = re.fullmatch(r"([A-Za-z]+)-?(\d?)", bayer)
+    if not m:
+        return None
+    letter = GREEK_LETTERS.get(m.group(1))
     if not letter:
         return None
-    return f"{letter}{index.translate(_SUPERSCRIPTS)} {con}"
+    return f"{letter}{m.group(2).translate(_SUPERSCRIPTS)} {con}"
 
 
 def load_catalog():
