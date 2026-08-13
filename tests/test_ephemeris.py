@@ -33,7 +33,8 @@ def test_resolve_utc_prefers_exif_offset():
     when, source = ephemeris.resolve_utc({
         "datetime_original": "2021:08:15 23:30:00",
         "offset_time_original": "+02:00",
-        "lon": -90.0,  # would give a very different answer; must be ignored
+        # GPS would give a very different answer; must be ignored
+        "lat": 36.2, "lon": -90.0,
     })
     assert source == "exif_offset"
     assert when == datetime(2021, 8, 15, 21, 30, tzinfo=timezone.utc)
@@ -48,10 +49,42 @@ def test_resolve_utc_negative_offset():
     assert when == datetime(2024, 4, 8, 18, 17, tzinfo=timezone.utc)
 
 
-def test_resolve_utc_gps_longitude_fallback():
+def test_resolve_utc_gps_timezone_is_dst_aware():
+    # Nashville in July is CDT (UTC-5); the crude lon/15 guess says UTC-6.
+    when, source = ephemeris.resolve_utc({
+        "datetime_original": "2025:07:04 22:00:00",
+        "lat": 36.16, "lon": -86.78,
+    })
+    assert source == "gps_timezone"
+    assert when == datetime(2025, 7, 5, 3, 0, tzinfo=timezone.utc)
+
+
+def test_resolve_utc_gps_timezone_winter():
+    # Same spot in January is CST (UTC-6).
+    when, source = ephemeris.resolve_utc({
+        "datetime_original": "2025:01:04 22:00:00",
+        "lat": 36.16, "lon": -86.78,
+    })
+    assert source == "gps_timezone"
+    assert when == datetime(2025, 1, 5, 4, 0, tzinfo=timezone.utc)
+
+
+def test_resolve_utc_gps_longitude_fallback(monkeypatch):
+    # Zone lookup failing (or unknown zone) falls back to the crude guess.
+    monkeypatch.setattr(ephemeris, "_zone_from_gps", lambda lat, lon: None)
     when, source = ephemeris.resolve_utc({
         "datetime_original": "2024:01:01 00:00:00",
-        "lon": -90.0,  # ~UTC-6
+        "lat": 36.2, "lon": -90.0,  # ~UTC-6
+    })
+    assert source == "gps_longitude"
+    assert when == datetime(2024, 1, 1, 6, 0, tzinfo=timezone.utc)
+
+
+def test_resolve_utc_longitude_only_skips_zone_lookup():
+    # No latitude: the polygon lookup can't run, crude guess still can.
+    when, source = ephemeris.resolve_utc({
+        "datetime_original": "2024:01:01 00:00:00",
+        "lon": -90.0,
     })
     assert source == "gps_longitude"
     assert when == datetime(2024, 1, 1, 6, 0, tzinfo=timezone.utc)

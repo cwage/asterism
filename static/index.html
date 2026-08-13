@@ -192,6 +192,7 @@ function renderGuess(job, g) {
   if (!g.candidates.length) {
     intro.textContent = 'No bright solar-system objects were above the horizon when this was taken.' + context;
     box.append(intro);
+    appendGuessHedges(box, g);
     return;
   }
   intro.textContent = (g.heading_true != null
@@ -210,10 +211,25 @@ function renderGuess(job, g) {
     list.append(li);
   }
   box.append(intro, list);
+  appendGuessHedges(box, g);
+}
+
+// The guess is only as good as its assumptions — surface them even when the
+// answer is "nothing was up" (a wrong instant can be exactly why it's empty).
+function appendGuessHedges(box, g) {
+  const hedges = [];
   if (g.location_source === 'timezone_guess') {
+    hedges.push('No GPS in this photo: location was estimated from its clock, so take directions loosely.');
+  }
+  if (g.time_source === 'assumed_utc') {
+    hedges.push('No timezone in this photo: its clock was assumed to be UTC, which can shift these positions by hours.');
+  } else if (g.time_source === 'gps_longitude') {
+    hedges.push('Timezone estimated from GPS longitude, so positions may be off by an hour or two.');
+  }
+  for (const text of hedges) {
     const hedge = document.createElement('p');
     hedge.className = 'hedge';
-    hedge.textContent = 'No GPS in this photo: location was estimated from its clock, so take directions loosely.';
+    hedge.textContent = text;
     box.append(hedge);
   }
 }
@@ -292,6 +308,13 @@ function render(id, job) {
     if (hidden) notes.push(`${hidden} hidden by cloud`);
     const v = job.result.verification;
     if (v && v.warped) notes.push('image stacking warp corrected');
+    // Surface the timestamp assumption (#6): planet/Moon spots are only as
+    // good as the instant they were computed for.
+    const eph = job.result.ephemeris;
+    if (bodies && eph) {
+      if (eph.time_source === 'assumed_utc') notes.push('no timezone in the photo — Moon/planet positions assume its clock was UTC');
+      else if (eph.time_source === 'gps_longitude') notes.push('timezone estimated from GPS longitude — Moon/planet positions may be off by an hour or two');
+    }
     status(`solved in ${job.solve_seconds}s — labeled ${parts.join(', ')}`
            + (notes.length ? ` (${notes.join('; ')})` : ''));
   };
