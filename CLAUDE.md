@@ -25,6 +25,11 @@
   synthetic (`tests/synth.py`) — keep it that way.
 - Full-corpus bench takes hours (~45s/image, ~200s per failure). Sample instead.
 
+## Deploy workflow
+- Deploy BEFORE merging: `fly deploy` from the feature branch, verify it works
+  in prod, and only then merge the PR. main stays pristine as the rollback
+  target — if the deploy misbehaves, redeploy main.
+
 ## Domain gotchas
 - HYG catalog: `ra` column is in HOURS (multiply by 15); `proper` is the name
   column; the Sol row must stay excluded.
