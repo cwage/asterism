@@ -170,13 +170,24 @@ function renderHistory() {
     const a = document.createElement('a');
     a.href = '?job=' + encodeURIComponent(h.id);
     if (h.outcome === 'failed') a.className = 'failed';
-    a.title = (h.outcome === 'failed' ? 'solve failed — ' : '')
+    const desc = (h.outcome === 'failed' ? 'solve failed — uploaded ' : 'uploaded ')
       + new Date(h.t).toLocaleString();
+    a.title = desc;
     const img = document.createElement('img');
     img.src = '/jobs/' + encodeURIComponent(h.id) + '/image';
-    img.alt = 'previously uploaded photo';
+    img.alt = desc;
     img.loading = 'lazy';
-    img.onerror = () => a.remove();  // job pruned server-side before its 24h
+    img.onerror = async () => {
+      a.remove();
+      // Forget the entry only when the job is definitively gone (pruned
+      // early server-side): a transient fetch hiccup must not erase a
+      // live job from the history.
+      try {
+        const res = await fetch('/jobs/' + encodeURIComponent(h.id));
+        if (res.status === 404 || res.status === 410)
+          saveHistory(loadHistory().filter(x => x.id !== h.id));
+      } catch {}
+    };
     a.append(img);
     row.append(a);
   }
