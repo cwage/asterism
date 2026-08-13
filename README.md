@@ -29,7 +29,10 @@ Final home: `asterism.quietlife.net`.
   is matched to a detected source near its predicted position, a smooth
   residual field fitted from the matches corrects for computational-stack
   warp (phone night modes can drag stars ~1° toward moving clouds — #28),
-  and stars with no visible source are flagged `hidden`.
+  and stars with no visible source are flagged `hidden`. Deep-sky objects
+  get an extended-source check instead of point snapping (#50): core
+  brightness against a surrounding annulus (or resolved member stars for
+  clusters), so a label never circles "Andromeda Galaxy" over bare sky-glow.
 - Jobs/results live in `data/` (SQLite + uploaded images), bind-mounted into
   both containers.
 - The queue is deliberately single-worker: solve-field is CPU-bound and the

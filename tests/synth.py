@@ -94,11 +94,21 @@ def stamp_stars(arr, stars):
         ]
 
 
+def stamp_blobs(arr, blobs):
+    """Add wide Gaussian blobs (diffuse DSO stand-ins) to a float image
+    array in place. blobs = [(x, y, amp, sigma)] in pixel coordinates."""
+    height, width = arr.shape
+    yy, xx = np.mgrid[0:height, 0:width]
+    for x, y, amp, sigma in blobs:
+        arr += amp * np.exp(-((xx - x) ** 2 + (yy - y) ** 2) / (2 * sigma ** 2))
+
+
 def render_points(path, points, width=1200, height=900, amp=180.0, seed=11,
-                  amps=None):
+                  amps=None, blobs=None):
     """Render Gaussian stars at explicit pixel positions over a flat noisy
     background — ground truth for verification tests, no WCS involved.
-    `amps` overrides the uniform amplitude per point."""
+    `amps` overrides the uniform amplitude per point; `blobs` adds diffuse
+    [(x, y, amp, sigma)] Gaussians (synthetic nebulae/galaxies)."""
     rng = np.random.default_rng(seed)
     arr = np.full((height, width), 10.0)
     arr += rng.normal(0.0, 2.0, arr.shape)
@@ -107,6 +117,8 @@ def render_points(path, points, width=1200, height=900, amp=180.0, seed=11,
     if len(amps) != len(points):
         raise ValueError(f"amps has {len(amps)} entries for {len(points)} points")
     stamp_stars(arr, [(x, y, a) for (x, y), a in zip(points, amps)])
+    if blobs:
+        stamp_blobs(arr, blobs)
     img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8)).convert("RGB")
     img.save(path, quality=92)
 

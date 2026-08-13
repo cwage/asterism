@@ -9,6 +9,11 @@ So instead of trusting the projection blindly: detect the actual source
 near each predicted position, fit a smooth residual field over the
 confident matches, re-place every label through that field, then snap
 each star label to its source — or mark it hidden when nothing is there.
+
+DSOs are extended, so they are never snapped to a point source; instead
+their pixels are checked photometrically (#50) — core aperture against a
+surrounding annulus, or resolved member stars for clusters — and a DSO
+with no measurable signal at its position is marked hidden too.
 """
 
 import numpy as np
@@ -21,6 +26,19 @@ WARP_FLAG_FRAC = 0.005      # p90 correction above this flags a warped image
 MIN_FIELD_MATCHES = 4       # below this, fall back to a constant shift
 CANDIDATE_AMP_FRAC = 0.25   # ignore match peaks far dimmer than the window's best
 BRIGHT_MAG = 1.5            # stars at least this bright get the amplitude sanity check
+
+# DSO photometric check (#50): core aperture vs. surrounding annulus, both
+# as multiples of the object's catalog extent radius.
+DSO_CORE_FRAC = 0.5
+DSO_ANNULUS = (1.6, 2.6)
+DSO_MIN_EXCESS = 1.5        # ADU floor — denoised night modes can have near-zero MAD
+DSO_NOISE_FRAC = 0.5        # ...otherwise demand this fraction of the local pixel noise
+DSO_DEFAULT_RADIUS_FRAC = 0.008  # aperture when the catalog has no size
+# Open clusters are resolved star groups, not diffuse glow: a median over
+# the core would reject a perfectly visible Pleiades. They pass on detected
+# point sources too.
+DSO_CLUSTER_TYPES = {"OC", "OC+Neb", "Ast", "MWSC"}
+DSO_CLUSTER_MIN_PEAKS = 3
 
 
 def count_stars(image_path, grid=24, thr_sigma=5.0, min_amp=12.0,
@@ -186,6 +204,51 @@ def _fit_field(matches, norm, lam=1e-3):
     return field, len(m)
 
 
+def _dso_glow_visible(img, x, y, r):
+    """Extended-source check: median brightness inside DSO_CORE_FRAC * r
+    against the DSO_ANNULUS ring, thresholded on the annulus's own noise.
+    Medians keep field stars in either aperture from bending the answer,
+    and a smooth sky gradient cancels between the symmetric apertures.
+    Returns True/False, or None when too little of the aperture is
+    on-frame to judge."""
+    h, w = img.shape
+    r_out = DSO_ANNULUS[1] * r
+    x0, x1 = int(np.floor(x - r_out)), int(np.ceil(x + r_out)) + 1
+    y0, y1 = int(np.floor(y - r_out)), int(np.ceil(y + r_out)) + 1
+    x0, x1 = max(0, x0), min(w, x1)
+    y0, y1 = max(0, y0), min(h, y1)
+    if x1 <= x0 or y1 <= y0:
+        return None
+    yy, xx = np.mgrid[y0:y1, x0:x1]
+    d = np.hypot(xx - x, yy - y)
+    win = img[y0:y1, x0:x1]
+    core = win[d <= DSO_CORE_FRAC * r]
+    ann = win[(d >= DSO_ANNULUS[0] * r) & (d <= r_out)]
+    # Both apertures must be mostly on-frame, or the medians mean nothing.
+    core_area = np.pi * (DSO_CORE_FRAC * r) ** 2
+    ann_area = np.pi * (DSO_ANNULUS[1] ** 2 - DSO_ANNULUS[0] ** 2) * r ** 2
+    if core.size < max(12, 0.5 * core_area) or ann.size < 0.5 * ann_area:
+        return None
+    med_ann = float(np.median(ann))
+    noise = 1.4826 * float(np.median(np.abs(ann - med_ann)))
+    excess = float(np.median(core)) - med_ann
+    return excess >= max(DSO_MIN_EXCESS, DSO_NOISE_FRAC * noise)
+
+
+def _dso_visible(img, lab, x, y, width):
+    """Is there anything at the DSO's (warp-corrected) position? Cluster
+    types pass on resolved member stars across their extent; everything
+    (clusters included — an unresolved cluster is a glow patch) can pass
+    on a core-over-annulus brightness excess. None means "couldn't
+    judge"."""
+    r = float(lab.get("radius_px") or width * DSO_DEFAULT_RADIUS_FRAC)
+    r = min(max(r, 8.0), 0.25 * width)
+    if lab.get("dso_type") in DSO_CLUSTER_TYPES \
+            and len(_peaks_near(img, x, y, r)) >= DSO_CLUSTER_MIN_PEAKS:
+        return True
+    return _dso_glow_visible(img, x, y, r)
+
+
 def apply(image_path, labels, figures):
     """Verify and correct labels/figures against the image. Returns
     (labels, figures, meta). Never raises on a bad image: the originals
@@ -232,9 +295,14 @@ def apply(image_path, labels, figures):
         lab = dict(lab)
         dx, dy = field_at(lab["x"], lab["y"])
         cx, cy = lab["x"] + dx, lab["y"] + dy
-        if peaks is None:  # moon/planet: correct for warp, nothing to snap
+        if peaks is None:  # moon/planet/DSO: correct for warp, nothing to snap
             lab["status"] = "projected"
             lab["x"], lab["y"] = round(cx, 1), round(cy, 1)
+            # A DSO label must not circle empty sky-glow (#50): check the
+            # pixels for extended-source signal at the corrected position.
+            if lab.get("kind") == "dso" \
+                    and _dso_visible(img, lab, cx, cy, width) is False:
+                lab["status"] = "hidden"
         else:
             near = [p for p in peaks
                     if (p[0] - cx) ** 2 + (p[1] - cy) ** 2 <= snap_r ** 2]
@@ -263,7 +331,10 @@ def apply(image_path, labels, figures):
                    for lab, (ox, oy), _, _ in snaps
                    if lab["status"] == "matched"]
     matched = sum(1 for lab in out if lab.get("status") == "matched")
-    hidden = sum(1 for lab in out if lab.get("status") == "hidden")
+    hidden = sum(1 for lab in out if lab.get("status") == "hidden"
+                 and lab.get("kind") == "star")
+    dsos_hidden = sum(1 for lab in out if lab.get("status") == "hidden"
+                      and lab.get("kind") == "dso")
 
     out_figures = []
     for fig in figures:
@@ -280,6 +351,7 @@ def apply(image_path, labels, figures):
         "verified": True,
         "stars_matched": matched,
         "stars_hidden": hidden,
+        "dsos_hidden": dsos_hidden,
         "field_matches": n_used,
         "median_correction_px": round(float(np.median(corrections)), 1)
         if corrections else 0.0,

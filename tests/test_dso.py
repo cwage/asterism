@@ -50,6 +50,9 @@ def test_annotate_projects_pleiades(taurus_wcs_file):
     assert labels, "Pleiades should project in-frame"
     m45 = next(l for l in labels if "M45" in l["name"])
     assert m45["kind"] == "dso"
+    # The catalog type rides along so verification can tell resolved
+    # clusters from diffuse glow (#50).
+    assert m45["dso_type"] == "OC"
     assert 0 <= m45["x"] < WIDTH and 0 <= m45["y"] < HEIGHT
     # 40 deg over 1000 px -> 0.04 deg/px; 0.917 deg radius -> ~23 px.
     assert m45["radius_px"] == pytest.approx(0.917 / 0.04, rel=0.1)
