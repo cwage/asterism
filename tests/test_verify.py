@@ -137,6 +137,88 @@ def test_bright_star_matched_to_faint_blob_is_demoted(tmp_path):
     assert meta["stars_hidden"] == 1
 
 
+# A spot >100px from every PREDICTED star, so the DSO apertures see only
+# sky (and the cluster tests' own members).
+DSO_POS = (850.0, 250.0)
+
+
+def dso_label(**over):
+    lab = {"name": "Andromeda Galaxy (M31)", "x": DSO_POS[0], "y": DSO_POS[1],
+           "mag": 3.6, "kind": "dso", "dso_type": "Gxy", "radius_px": 60.0}
+    lab.update(over)
+    return lab
+
+
+def test_dso_over_empty_sky_is_hidden(warped_image):
+    # The 2026-08-13 failure: WCS position exactly right, nothing there.
+    path, _ = warped_image
+    labels, _, meta = verify.apply(path, star_labels(PREDICTED) + [dso_label()], [])
+    m31 = labels[-1]
+    assert m31["status"] == "hidden"
+    assert meta["dsos_hidden"] == 1
+    assert meta["stars_hidden"] == 0  # DSOs don't inflate the star count
+    # its position still follows the warp correction
+    dx, dy = warp(*DSO_POS)
+    assert np.hypot(m31["x"] - (DSO_POS[0] + dx),
+                    m31["y"] - (DSO_POS[1] + dy)) < 6.0
+
+
+def test_dso_with_diffuse_glow_stays_projected(tmp_path):
+    true_pos = [(x + warp(x, y)[0], y + warp(x, y)[1]) for x, y in PREDICTED]
+    dx, dy = warp(*DSO_POS)
+    glow = (DSO_POS[0] + dx, DSO_POS[1] + dy, 25.0, 30.0)
+    path = tmp_path / "glow.jpg"
+    synth.render_points(str(path), true_pos, WIDTH, HEIGHT, blobs=[glow])
+
+    labels, _, meta = verify.apply(str(path), star_labels(PREDICTED) + [dso_label()], [])
+    assert labels[-1]["status"] == "projected"
+    assert meta["dsos_hidden"] == 0
+
+
+def test_visible_cluster_stays_projected(tmp_path):
+    # An open cluster's light is resolved member stars, not diffuse glow:
+    # the core median barely moves, yet the cluster is plainly visible.
+    true_pos = [(x + warp(x, y)[0], y + warp(x, y)[1]) for x, y in PREDICTED]
+    dx, dy = warp(*DSO_POS)
+    cx, cy = DSO_POS[0] + dx, DSO_POS[1] + dy
+    members = [(cx, cy), (cx + 25, cy + 10), (cx - 20, cy + 18),
+               (cx + 15, cy - 25), (cx - 28, cy - 12)]
+    path = tmp_path / "cluster.jpg"
+    synth.render_points(str(path), true_pos + members, WIDTH, HEIGHT,
+                        amps=[180.0] * len(true_pos) + [100.0] * len(members))
+
+    pleiades = dso_label(name="Pleiades (M45)", dso_type="OC", mag=1.6)
+    labels, _, meta = verify.apply(str(path), star_labels(PREDICTED) + [pleiades], [])
+    assert labels[-1]["status"] == "projected"
+    assert meta["dsos_hidden"] == 0
+
+
+def test_cluster_over_empty_sky_is_hidden(warped_image):
+    path, _ = warped_image
+    pleiades = dso_label(name="Pleiades (M45)", dso_type="OC", mag=1.6)
+    labels, _, meta = verify.apply(path, star_labels(PREDICTED) + [pleiades], [])
+    assert labels[-1]["status"] == "hidden"
+    assert meta["dsos_hidden"] == 1
+
+
+def test_dso_without_catalog_size_uses_default_aperture(warped_image):
+    path, _ = warped_image
+    lab = dso_label()
+    del lab["radius_px"]
+    labels, _, meta = verify.apply(path, star_labels(PREDICTED) + [lab], [])
+    assert labels[-1]["status"] == "hidden"
+
+
+def test_dso_mostly_off_frame_gets_benefit_of_the_doubt(tmp_path):
+    # Apertures mostly off-frame -> can't judge -> stays projected.
+    path = tmp_path / "corner.jpg"
+    synth.render_points(str(path), PREDICTED, WIDTH, HEIGHT)
+    corner = dso_label(x=5.0, y=5.0)
+    labels, _, meta = verify.apply(str(path), star_labels(PREDICTED) + [corner], [])
+    assert labels[-1]["status"] == "projected"
+    assert meta["dsos_hidden"] == 0
+
+
 def test_field_fit_rejects_wild_outlier():
     # A consistent (10, -5) shift plus one wild vector: the affine clip
     # must discard the outlier instead of letting the TPS bend through it.

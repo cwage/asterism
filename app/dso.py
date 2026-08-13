@@ -2,9 +2,12 @@
 phone night mode can plausibly catch, projected through the solved WCS like
 the star catalog. Positions and sizes from the HYG repo's dso.csv.
 
-These are extended, diffuse objects, so verification treats them like the
-Moon and planets: warp-corrected but never snapped to a point source or
-declared cloud-hidden (kind != "star" -> status "projected")."""
+These are extended objects, so verification never snaps them to a point
+source. Instead their pixels are checked photometrically (#50): a DSO with
+no measurable signal at its position — sky-glow where Andromeda should be —
+is flagged "hidden" like a clouded-out star. The catalog `type` rides along
+on the label because the check differs by type: clusters are resolved star
+groups, not diffuse glow."""
 
 import csv
 import os
@@ -41,7 +44,8 @@ def load_catalog():
     objects = []
     with open(path, newline="") as f:
         for row in csv.DictReader(f):
-            if (row.get("type") or "").strip() in SKIP_TYPES:
+            obj_type = (row.get("type") or "").strip()
+            if obj_type in SKIP_TYPES:
                 continue
             try:
                 mag = float(row["mag"])
@@ -66,7 +70,7 @@ def load_catalog():
             except (KeyError, ValueError):
                 radius_deg = None
             objects.append({"name": name, "ra": ra, "dec": dec, "mag": mag,
-                            "radius_deg": radius_deg})
+                            "radius_deg": radius_deg, "type": obj_type})
     objects.sort(key=lambda o: o["mag"])
     _catalog_cache = objects
     return objects
@@ -94,7 +98,7 @@ def annotate(wcs_path, width, height, max_labels=8):
         if not (0 <= x < width and 0 <= y < height):
             continue
         label = {"name": obj["name"], "x": round(x, 1), "y": round(y, 1),
-                 "mag": obj["mag"], "kind": "dso"}
+                 "mag": obj["mag"], "kind": "dso", "dso_type": obj["type"]}
         if obj["radius_deg"] and deg_per_px > 0:
             label["radius_px"] = round(obj["radius_deg"] / deg_per_px, 1)
         labels.append(label)
