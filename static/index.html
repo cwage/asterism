@@ -68,6 +68,11 @@
                     border: 1px solid var(--line); border-radius: 10px;
                     padding: 0.9rem 1rem; font-size: 1rem; cursor: pointer; }
   #actions button:hover { background: #243044; }
+  #actions a.cardlink { display: inline-block; padding: 0.6rem 1.1rem;
+                        border: 1px solid var(--line); border-radius: 10px;
+                        background: var(--panel); color: var(--accent);
+                        text-decoration: none; font-size: 0.95rem; }
+  #actions a.cardlink:hover { background: #1a2230; }
 
   #wrap { position: relative; display: inline-block; max-width: 100%;
           margin-top: 0.75rem; border-radius: 6px; overflow: hidden; }
@@ -512,6 +517,12 @@ function render(id, job) {
     canvas.height = img.naturalHeight;
     document.getElementById('controls').hidden = false;
     draw();
+    // Server-rendered share card (#13): labels burned in, unfurl-ready.
+    const cardLink = document.createElement('a');
+    cardLink.href = '/jobs/' + encodeURIComponent(id) + '/card';
+    cardLink.textContent = '✦ download share card';
+    cardLink.className = 'cardlink';
+    document.getElementById('actions').replaceChildren(cardLink);
     // The status line reflects the full result, not the current layer state.
     const labels = job.result.labels;
     const bodies = labels.filter(l => l.kind && l.kind !== 'star' && l.kind !== 'dso').length;

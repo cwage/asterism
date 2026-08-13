@@ -27,10 +27,12 @@ def sweep_expired():
         ).fetchall()
         for row in rows:
             if row["image_path"]:
-                try:
-                    os.unlink(row["image_path"])
-                except FileNotFoundError:
-                    pass
+                # The share card (#13) is cached beside the upload.
+                for path in (row["image_path"], row["image_path"] + ".card.png"):
+                    try:
+                        os.unlink(path)
+                    except FileNotFoundError:
+                        pass
             shutil.rmtree(os.path.join(db.DATA_DIR, "jobs", row["id"]),
                           ignore_errors=True)
             conn.execute("DELETE FROM jobs WHERE id = ?", (row["id"],))
