@@ -49,6 +49,15 @@
   #history img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
   #status { margin: 1rem 0 0.5rem; color: var(--dim); min-height: 1.5em; }
+  #controls { display: flex; flex-wrap: wrap; gap: 0.4rem 1.1rem; align-items: center;
+              border: 1px solid #1c2634; border-radius: 10px; background: var(--panel);
+              padding: 0.55rem 0.9rem; margin: 0 0 0.5rem; font-size: 0.9rem;
+              color: var(--dim); }
+  #controls label { display: inline-flex; align-items: center; gap: 0.35rem;
+                    cursor: pointer; user-select: none; }
+  #controls input[type="range"] { width: 110px; accent-color: var(--accent); }
+  #controls input[type="checkbox"] { accent-color: var(--accent); }
+  #mag-val { min-width: 2.2em; color: var(--ink); }
   #guess { border: 1px solid #1c2634; border-radius: 10px; background: var(--panel);
            padding: 0.75rem 1rem; margin: 0 0 0.75rem; font-size: 0.95rem; }
   #guess:empty { display: none; }
@@ -114,6 +123,15 @@ after 24 hours.</p>
 <div id="status"></div>
 <div id="guess"></div>
 <div id="actions"></div>
+<div id="controls" hidden>
+  <label><input type="checkbox" id="lay-stars" checked> stars</label>
+  <label><input type="checkbox" id="lay-solar" checked> moon &amp; planets</label>
+  <label><input type="checkbox" id="lay-dso" checked> deep-sky</label>
+  <label><input type="checkbox" id="lay-con" checked> constellations</label>
+  <label class="mag">faintest star: mag
+    <input type="range" id="mag-limit" min="1" max="4.5" step="0.25" value="4.5">
+    <span id="mag-val">4.5</span></label>
+</div>
 <div id="wrap"><img id="photo" hidden><canvas id="overlay"></canvas></div>
 
 <footer><a href="https://github.com/cwage/asterism">asterism</a> — phone-first
@@ -222,6 +240,7 @@ async function poll(id) {
   status('solving…');
   document.getElementById('actions').replaceChildren();
   document.getElementById('guess').replaceChildren();
+  document.getElementById('controls').hidden = true;
   const t0 = Date.now();
   while (true) {
     const res = await fetch('/jobs/' + encodeURIComponent(id));
@@ -334,66 +353,172 @@ function offsetPhrase(job, c) {
 const WINDS = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
 const compassName = (az) => WINDS[Math.round(az / 22.5) % 16];
 
+// ---- label layout (#18): pure helpers, exercised by the node harness ----
+
+function rectsOverlap(a, b) {
+  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+// First candidate spot where a w×h text box fits on-frame without
+// overlapping anything already placed (edge-adjacent boxes are fine);
+// null when every spot is taken (the marker stays, the text yields).
+function placeText(placed, candidates, w, h, frameW, frameH) {
+  for (const c of candidates) {
+    const r = { x: c.x, y: c.y, w, h };
+    if (r.x < 0 || r.y < 0 || r.x + w > frameW || r.y + h > frameH) continue;
+    if (placed.some(p => rectsOverlap(p, r))) continue;
+    placed.push(r);
+    return r;
+  }
+  return null;
+}
+
+function labelVisible(l, state) {
+  const kind = l.kind || 'star';
+  if (kind === 'star') return state.stars && l.mag != null && l.mag <= state.magLimit;
+  if (kind === 'dso') return state.dso;
+  return state.solar;  // moon + planets
+}
+
+// Text competes for space brightest-first; the Moon, planets, and DSOs are
+// few and important, so they place before the star crowd.
+function labelPriority(l) {
+  const kind = l.kind || 'star';
+  const tier = kind === 'moon' ? -3 : kind === 'planet' ? -2
+    : kind === 'dso' ? -1 : 0;
+  return tier * 100 + (l.mag ?? 0);
+}
+
+// ---- rendering ----
+
+let shownJob = null;
+
+function controlState() {
+  return {
+    stars: document.getElementById('lay-stars').checked,
+    solar: document.getElementById('lay-solar').checked,
+    dso: document.getElementById('lay-dso').checked,
+    constellations: document.getElementById('lay-con').checked,
+    magLimit: parseFloat(document.getElementById('mag-limit').value),
+  };
+}
+
+function draw() {
+  if (!shownJob) return;
+  const img = document.getElementById('photo');
+  const canvas = document.getElementById('overlay');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  const state = controlState();
+  const scale = img.naturalWidth / 1000;  // keep label size sane on big photos
+  const colors = { star: 'rgba(120, 200, 255, 0.9)',
+                   planet: 'rgba(255, 200, 90, 0.95)',
+                   moon: 'rgba(255, 235, 170, 0.95)',
+                   dso: 'rgba(200, 160, 255, 0.9)' };
+  const placed = [];  // rects text must keep clear of
+
+  // Constellation figures go down first, under everything; their names wait
+  // for the text pass so star labels outrank them.
+  const conNames = [];
+  if (state.constellations) {
+    ctx.strokeStyle = 'rgba(150, 170, 210, 0.35)';
+    ctx.lineWidth = Math.max(1, 1.5 * scale);
+    for (const c of shownJob.result.constellations || []) {
+      ctx.beginPath();
+      for (const [x1, y1, x2, y2] of c.segments) { ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); }
+      ctx.stroke();
+      const pts = c.segments.flatMap(([x1, y1, x2, y2]) => [[x1, y1], [x2, y2]])
+        .filter(([x, y]) => x >= 0 && x < W && y >= 0 && y < H);
+      if (pts.length) {
+        conNames.push({ name: c.name,
+                        x: pts.reduce((s, p) => s + p[0], 0) / pts.length,
+                        y: pts.reduce((s, p) => s + p[1], 0) / pts.length });
+      }
+    }
+  }
+
+  // Markers first; their footprints seed the keep-clear zones.
+  const labels = (shownJob.result.labels || []).filter(l => labelVisible(l, state));
+  ctx.lineWidth = Math.max(1, scale);
+  const markers = [];
+  for (const l of labels) {
+    const kind = l.kind || 'star';
+    // 'hidden': verification found no star at this spot (cloud, most
+    // likely) — keep the label but make its uncertainty visible.
+    const dim = l.status === 'hidden';
+    ctx.globalAlpha = dim ? 0.4 : 1;
+    ctx.setLineDash(dim ? [5 * scale, 5 * scale] : []);
+    ctx.strokeStyle = colors[kind] || colors.star;
+    ctx.beginPath();
+    // DSOs are extended: circle the object's actual extent when known.
+    const r = l.radius_px ? Math.max(9, l.radius_px)
+      : kind === 'star' ? Math.max(6, 8 * scale) : Math.max(9, 12 * scale);
+    ctx.arc(l.x, l.y, r, 0, 2 * Math.PI);
+    ctx.stroke();
+    markers.push({ l, r, dim, kind });
+    placed.push({ x: l.x - r, y: l.y - r, w: 2 * r, h: 2 * r });
+  }
+  ctx.setLineDash([]);
+
+  // Text competes for space in priority order: right of the marker, then
+  // left, above, below; a label that fits nowhere keeps its circle only.
+  const fontPx = Math.max(14, 16 * scale);
+  ctx.font = `${fontPx}px system-ui`;
+  const textH = fontPx * 1.2;
+  const gap = 4 * Math.max(1, scale);
+  for (const m of [...markers].sort((a, b) => labelPriority(a.l) - labelPriority(b.l))) {
+    const { l, r, dim, kind } = m;
+    let text = l.name;
+    if (kind === 'moon' && l.phase != null) text += ` (${Math.round(l.phase * 100)}% lit)`;
+    const w = ctx.measureText(text).width;
+    const spot = placeText(placed, [
+      { x: l.x + r + gap, y: l.y - textH / 2 },
+      { x: l.x - r - gap - w, y: l.y - textH / 2 },
+      { x: l.x - w / 2, y: l.y - r - gap - textH },
+      { x: l.x - w / 2, y: l.y + r + gap },
+    ], w, textH, W, H);
+    if (!spot) continue;
+    ctx.globalAlpha = dim ? 0.4 : 1;
+    ctx.fillStyle = colors[kind] || colors.star;
+    ctx.fillText(text, spot.x, spot.y + fontPx * 0.85);
+  }
+
+  // Constellation names take whatever space is left near their centroid.
+  const conPx = Math.max(13, 15 * scale);
+  ctx.font = `italic ${conPx}px system-ui`;
+  ctx.fillStyle = 'rgba(150, 170, 210, 0.6)';
+  ctx.globalAlpha = 1;
+  for (const c of conNames) {
+    const w = ctx.measureText(c.name).width;
+    const h = conPx * 1.2;
+    const spot = placeText(placed, [
+      { x: c.x - w / 2, y: c.y - h / 2 },
+      { x: c.x - w / 2, y: c.y + h },
+      { x: c.x - w / 2, y: c.y - 2 * h },
+    ], w, h, W, H);
+    if (spot) ctx.fillText(c.name, spot.x, spot.y + conPx * 0.85);
+  }
+  ctx.globalAlpha = 1;
+}
+
 function render(id, job) {
   markJob(id, 'done');
+  shownJob = job;
   const img = document.getElementById('photo');
   const canvas = document.getElementById('overlay');
   img.onload = () => {
     canvas.width = img.naturalWidth;
     canvas.height = img.naturalHeight;
-    const ctx = canvas.getContext('2d');
-    const scale = img.naturalWidth / 1000;  // keep label size sane on big photos
-    const colors = { star: 'rgba(120, 200, 255, 0.9)',
-                     planet: 'rgba(255, 200, 90, 0.95)',
-                     moon: 'rgba(255, 235, 170, 0.95)',
-                     dso: 'rgba(200, 160, 255, 0.9)' };
-    // Constellation figures go down first, under the labels.
+    document.getElementById('controls').hidden = false;
+    draw();
+    // The status line reflects the full result, not the current layer state.
+    const labels = job.result.labels;
+    const bodies = labels.filter(l => l.kind && l.kind !== 'star' && l.kind !== 'dso').length;
+    const dsos = labels.filter(l => l.kind === 'dso').length;
+    const hidden = labels.filter(l => l.status === 'hidden').length;
     const figures = job.result.constellations || [];
-    ctx.strokeStyle = 'rgba(150, 170, 210, 0.35)';
-    ctx.lineWidth = Math.max(1, 1.5 * scale);
-    ctx.fillStyle = 'rgba(150, 170, 210, 0.6)';
-    ctx.font = `italic ${Math.max(13, 15 * scale)}px system-ui`;
-    for (const c of figures) {
-      ctx.beginPath();
-      for (const [x1, y1, x2, y2] of c.segments) { ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); }
-      ctx.stroke();
-      const pts = c.segments.flatMap(([x1, y1, x2, y2]) => [[x1, y1], [x2, y2]])
-        .filter(([x, y]) => x >= 0 && x < canvas.width && y >= 0 && y < canvas.height);
-      if (pts.length) {
-        const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
-        const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
-        ctx.fillText(c.name, cx, cy);
-      }
-    }
-
-    ctx.font = `${Math.max(14, 16 * scale)}px system-ui`;
-    ctx.lineWidth = Math.max(1, scale);
-    let bodies = 0, hidden = 0, dsos = 0;
-    for (const l of job.result.labels) {
-      const kind = l.kind || 'star';
-      if (kind === 'dso') dsos++;
-      else if (kind !== 'star') bodies++;
-      // 'hidden': verification found no star at this spot (cloud, most
-      // likely) — keep the label but make its uncertainty visible.
-      const dim = l.status === 'hidden';
-      if (dim) hidden++;
-      ctx.globalAlpha = dim ? 0.4 : 1;
-      ctx.setLineDash(dim ? [5 * scale, 5 * scale] : []);
-      ctx.strokeStyle = colors[kind] || colors.star;
-      ctx.fillStyle = colors[kind] || colors.star;
-      ctx.beginPath();
-      // DSOs are extended: circle the object's actual extent when known.
-      const r = l.radius_px ? Math.max(9, l.radius_px)
-        : kind === 'star' ? Math.max(6, 8 * scale) : Math.max(9, 12 * scale);
-      ctx.arc(l.x, l.y, r, 0, 2 * Math.PI);
-      ctx.stroke();
-      let text = l.name;
-      if (kind === 'moon' && l.phase != null) text += ` (${Math.round(l.phase * 100)}% lit)`;
-      ctx.fillText(text, l.x + (r + 4) * Math.max(1, scale), l.y - 8 * scale);
-    }
-    ctx.globalAlpha = 1;
-    ctx.setLineDash([]);
-    const parts = [`${job.result.labels.length - bodies - dsos} stars`];
+    const parts = [`${labels.length - bodies - dsos} stars`];
     if (bodies) parts.push(`${bodies} solar-system ${bodies === 1 ? 'body' : 'bodies'}`);
     if (dsos) parts.push(`${dsos} deep-sky object${dsos === 1 ? '' : 's'}`);
     if (figures.length) parts.push(`${figures.length} constellation${figures.length === 1 ? '' : 's'}`);
@@ -414,6 +539,14 @@ function render(id, job) {
   img.hidden = false;
   img.src = '/jobs/' + encodeURIComponent(id) + '/image';
 }
+
+for (const layId of ['lay-stars', 'lay-solar', 'lay-dso', 'lay-con'])
+  document.getElementById(layId).addEventListener('change', draw);
+document.getElementById('mag-limit').addEventListener('input', () => {
+  document.getElementById('mag-val').textContent =
+    document.getElementById('mag-limit').value;
+  draw();
+});
 </script>
 </body>
 </html>
