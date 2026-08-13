@@ -9,7 +9,9 @@ set -uo pipefail
 python -u -m app.worker &
 WORKER=$!
 
-uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+# --proxy-headers: trust Fly's X-Forwarded-Proto so request.base_url says
+# https — the OpenGraph og:image URL (#13) must not point at http.
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips '*' &
 WEB=$!
 
 shutdown() {

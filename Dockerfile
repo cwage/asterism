@@ -18,7 +18,8 @@ ENV ASTROMETRY_INDEX_DIR=/indexes \
     CATALOG_DIR=/catalogs \
     DATA_DIR=/data
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", \
+     "--proxy-headers", "--forwarded-allow-ips", "*"]
 
 # Local dev / CI target: data dirs come from bind mounts (docker-compose)
 # or the CI actions/cache — the image stays lean.
