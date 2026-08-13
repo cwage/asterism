@@ -1,6 +1,6 @@
 import pytest
 
-from app import solver
+from app import dso, solver
 
 # Realistic-enough rows in HYG column format (ra in hours). Includes rows
 # load_catalog must filter out: the Sun, an unnamed star with no Bayer
@@ -32,3 +32,27 @@ def mini_catalog(tmp_path, monkeypatch):
     solver._catalog_cache = None
     yield
     solver._catalog_cache = None
+
+
+# Real dso.csv rows (ra in hours, r1 = major axis in arcmin) plus rows
+# load_catalog must filter: too faint, a dark nebula, and an anonymous
+# non-Messier cluster.
+MINI_DSO = """ra,dec,type,const,mag,name,id1,cat1,r1
+3.79,24.117,OC,Tau,1.6,Pleiades,45,M,110
+0.712306,41.2683,Gxy,And,3.6,,31,M,190.5
+5.58811,-5.39083,OC+Neb,Ori,4,,42,M,90
+8.67283,19.6719,OC,Cnc,3.1,Praesepe,44,M,95
+12.4433,-63.0864,DN,Cru,0,Coalsack,99,C,420
+7.28,-37.97,OC,Pup,2.1,,135,Col,50
+5.5,32.55,OC,Aur,7.4,,37,M,15
+"""
+
+
+@pytest.fixture()
+def mini_dso_catalog(tmp_path, monkeypatch):
+    """Self-contained DSO catalog so fast tests don't need catalogs/dso.csv."""
+    (tmp_path / "dso.csv").write_text(MINI_DSO)
+    monkeypatch.setattr(dso, "CATALOG_DIR", str(tmp_path))
+    dso._catalog_cache = None
+    yield
+    dso._catalog_cache = None
