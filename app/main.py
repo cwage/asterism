@@ -1,13 +1,14 @@
 import json
 import os
+import re
 import time
 import uuid
 from collections import defaultdict, deque
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
-from . import db, exif
+from . import card, db, exif
 
 app = FastAPI(title="asterism")
 db.init_db()
@@ -60,7 +61,22 @@ def _queue_depth():
 
 
 @app.get("/")
-def index():
+def index(request: Request, job: str | None = None):
+    # Share links (?job=...) get OpenGraph tags pointing at the rendered
+    # card (#13) so unfurls show the annotated photo. Job ids are uuid4
+    # hex; anything else is served untouched (the frontend handles bad ids).
+    if job and re.fullmatch(r"[0-9a-f]{32}", job):
+        with open("static/index.html") as f:
+            html = f.read()
+        base = str(request.base_url).rstrip("/")
+        meta = (
+            '<meta property="og:title" content="asterism — what you saw">\n'
+            '<meta property="og:description" content="A night-sky photo, '
+            'plate-solved and labeled from its star pattern.">\n'
+            f'<meta property="og:image" content="{base}/jobs/{job}/card">\n'
+            '<meta name="twitter:card" content="summary_large_image">\n'
+        )
+        return HTMLResponse(html.replace("</head>", meta + "</head>"))
     return FileResponse("static/index.html")
 
 
@@ -185,3 +201,24 @@ def get_job_image(job_id: str):
     if not row or not os.path.exists(row["image_path"]):
         raise HTTPException(404, _GONE)
     return FileResponse(row["image_path"])
+
+
+@app.get("/jobs/{job_id}/card")
+def get_job_card(job_id: str, request: Request):
+    """Share card (#13): the annotated photo as a PNG, rendered once per
+    job and cached beside the upload (same retention sweep collects it)."""
+    with db.get_conn() as conn:
+        row = conn.execute(
+            "SELECT image_path, status, result_json FROM jobs WHERE id = ?",
+            (job_id,),
+        ).fetchone()
+    if not row or not os.path.exists(row["image_path"]):
+        raise HTTPException(404, _GONE)
+    if row["status"] != "done" or not row["result_json"]:
+        raise HTTPException(409, "no card until the solve finishes")
+    card_path = row["image_path"] + ".card.png"
+    if not os.path.exists(card_path):
+        card.render(row["image_path"], json.loads(row["result_json"]),
+                    request.url.hostname or "asterism", card_path)
+    return FileResponse(card_path, media_type="image/png",
+                        filename=f"asterism-{job_id[:8]}.png")
