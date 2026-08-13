@@ -6,16 +6,34 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 export function makeEl() {
-  return {
-    children: [], className: '', textContent: '', title: '', href: '',
-    src: '', alt: '', loading: '', hidden: false, checked: true,
+  const el = {
+    children: [], parent: null, className: '', textContent: '', title: '',
+    href: '', src: '', alt: '', loading: '', hidden: false, checked: true,
     value: '4.5', onerror: null, onload: null, style: {},
-    append(...c) { this.children.push(...c); },
-    replaceChildren(...c) { this.children = c; },
-    remove() {},
+    append(...c) {
+      for (const child of c) {
+        if (child && typeof child === 'object') child.parent = el;
+        el.children.push(child);
+      }
+    },
+    replaceChildren(...c) {
+      for (const old of el.children)
+        if (old && typeof old === 'object' && old.parent === el) old.parent = null;
+      el.children = [];
+      el.append(...c);
+    },
+    // Faithful to DOM Element.remove(): detach from the parent's children,
+    // so tests can observe what the page's a.remove() actually does.
+    remove() {
+      if (!el.parent) return;
+      const i = el.parent.children.indexOf(el);
+      if (i >= 0) el.parent.children.splice(i, 1);
+      el.parent = null;
+    },
     addEventListener() {},
     getContext() { return null; },
   };
+  return el;
 }
 
 export function loadPage() {

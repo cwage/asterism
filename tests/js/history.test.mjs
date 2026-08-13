@@ -63,6 +63,7 @@ test('image error forgets the job only on a definitive 404', async () => {
   await dead.children[0].onerror();
   assert.ok(!JSON.parse(store[KEY]).some(h => h.id === 'dead'),
     'dead job dropped from storage on 404');
+  assert.ok(!row.children.includes(dead), 'thumbnail detached from the DOM');
 
   sandbox.fetch = async () => { throw new Error('network'); };
   await flaky.children[0].onerror();
