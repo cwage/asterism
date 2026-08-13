@@ -7,4 +7,6 @@ piexif
 numpy
 skyfield
 pygeomag
+timezonefinder
+tzdata
 pytest

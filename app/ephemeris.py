@@ -25,6 +25,7 @@ BODIES = [
 
 _eph_cache = None
 _ts_cache = None
+_tzf_cache = None
 
 
 def load_ephemeris():
@@ -59,13 +60,26 @@ def _parse_offset(offset):
     return sign * timedelta(hours=int(m.group(2)), minutes=int(m.group(3)))
 
 
+def _zone_from_gps(lat, lon):
+    """IANA zone name for the coordinates, from timezonefinder's offline
+    index (covers oceans as Etc/GMT+N zones). None when lookup fails."""
+    global _tzf_cache
+    from timezonefinder import TimezoneFinder
+
+    if _tzf_cache is None:
+        _tzf_cache = TimezoneFinder()
+    return _tzf_cache.timezone_at(lat=lat, lng=lon)
+
+
 def resolve_utc(exif_info):
     """Best-effort UTC instant for the exposure. Returns (datetime, source).
 
-    EXIF DateTimeOriginal is local time with no zone. Preference order:
-    OffsetTimeOriginal when present, else a crude zone guess from GPS
+    EXIF DateTimeOriginal is local time with no zone. Preference order (#6):
+    OffsetTimeOriginal when present, else the IANA zone at the GPS fix
+    (DST-correct for the photo's date), else a crude zone guess from GPS
     longitude (right to within an hour or two — the Moon moves 0.55 deg/hr,
-    planets far less), else assume UTC. Proper zone lookup is issue #6.
+    planets far less), else assume UTC. The source string lets the UI
+    surface whatever assumption was made.
     """
     dto = exif_info.get("datetime_original")
     if not dto:
@@ -80,7 +94,18 @@ def resolve_utc(exif_info):
         local = naive.replace(tzinfo=timezone(delta))
         return local.astimezone(timezone.utc), "exif_offset"
 
-    lon = exif_info.get("lon")
+    lat, lon = exif_info.get("lat"), exif_info.get("lon")
+    if lat is not None and lon is not None:
+        try:
+            from zoneinfo import ZoneInfo
+
+            zone = _zone_from_gps(lat, lon)
+            if zone:
+                local = naive.replace(tzinfo=ZoneInfo(zone))
+                return local.astimezone(timezone.utc), "gps_timezone"
+        except Exception:
+            pass  # unknown zone or lookup failure: fall through to cruder guesses
+
     if lon is not None:
         delta = timedelta(hours=round(lon / 15.0))
         local = naive.replace(tzinfo=timezone(delta))
