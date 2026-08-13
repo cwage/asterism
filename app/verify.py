@@ -243,9 +243,13 @@ def _dso_visible(img, lab, x, y, width):
     judge"."""
     r = float(lab.get("radius_px") or width * DSO_DEFAULT_RADIUS_FRAC)
     r = min(max(r, 8.0), 0.25 * width)
-    if lab.get("dso_type") in DSO_CLUSTER_TYPES \
-            and len(_peaks_near(img, x, y, r)) >= DSO_CLUSTER_MIN_PEAKS:
-        return True
+    if lab.get("dso_type") in DSO_CLUSTER_TYPES:
+        # _peaks_near searches a square window; keep only peaks truly
+        # within the extent radius so corner field stars don't count.
+        members = [p for p in _peaks_near(img, x, y, r)
+                   if (p[0] - x) ** 2 + (p[1] - y) ** 2 <= r * r]
+        if len(members) >= DSO_CLUSTER_MIN_PEAKS:
+            return True
     return _dso_glow_visible(img, x, y, r)
 
 
