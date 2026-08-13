@@ -10,6 +10,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  frontend-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run frontend logic tests
+        run: node --test tests/js/*.test.mjs
+
   fast-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -20,6 +28,7 @@ jobs:
         with:
           path: |
             catalogs/hyg.csv
+            catalogs/dso.csv
             catalogs/de421.bsp
             catalogs/constellations.fab
           key: catalog-${{ hashFiles('scripts/fetch-catalog.sh') }}
@@ -40,6 +49,7 @@ jobs:
         with:
           path: |
             catalogs/hyg.csv
+            catalogs/dso.csv
             catalogs/de421.bsp
             catalogs/constellations.fab
             indexes/*.fits
