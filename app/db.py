@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     result_json TEXT,
     error TEXT,
     solve_seconds REAL,
-    mode TEXT NOT NULL DEFAULT 'quick'
+    mode TEXT NOT NULL DEFAULT 'quick',
+    orphan_recoveries INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -30,15 +31,17 @@ def init_db():
     os.makedirs(DATA_DIR, exist_ok=True)
     with get_conn() as conn:
         conn.execute(SCHEMA)
-        # Pre-`mode` databases: bolt the column on (SQLite has no
+        # Older databases: bolt missing columns on (SQLite has no
         # ADD COLUMN IF NOT EXISTS). web and worker init concurrently,
         # so losing the ALTER race is fine.
         cols = [r[1] for r in conn.execute("PRAGMA table_info(jobs)")]
-        if "mode" not in cols:
-            try:
-                conn.execute(
-                    "ALTER TABLE jobs ADD COLUMN mode TEXT NOT NULL DEFAULT 'quick'"
-                )
-            except sqlite3.OperationalError as e:
-                if "duplicate column" not in str(e):
-                    raise
+        for name, decl in (
+            ("mode", "TEXT NOT NULL DEFAULT 'quick'"),
+            ("orphan_recoveries", "INTEGER NOT NULL DEFAULT 0"),
+        ):
+            if name not in cols:
+                try:
+                    conn.execute(f"ALTER TABLE jobs ADD COLUMN {name} {decl}")
+                except sqlite3.OperationalError as e:
+                    if "duplicate column" not in str(e):
+                        raise

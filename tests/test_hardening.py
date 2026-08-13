@@ -95,11 +95,35 @@ def test_orphaned_solving_jobs_requeued_on_startup(tmp_path, monkeypatch):
         conn.execute("INSERT INTO jobs (id, image_path, status) VALUES "
                      "('fine', '/y.jpg', 'done')")
 
-    assert worker.recover_orphans() == 1
+    assert worker.recover_orphans() == (1, 0)
 
     with db.get_conn() as conn:
-        rows = {r["id"]: r["status"] for r in conn.execute("SELECT id, status FROM jobs")}
-    assert rows == {"stuck": "queued", "fine": "done"}
+        rows = {r["id"]: (r["status"], r["orphan_recoveries"])
+                for r in conn.execute("SELECT * FROM jobs")}
+    assert rows == {"stuck": ("queued", 1), "fine": ("done", 0)}
+
+
+def test_repeatedly_orphaned_job_is_abandoned(tmp_path, monkeypatch):
+    """A job whose solve keeps crashing the worker (e.g. an OOM-inducing
+    image) must not be re-queued forever — that turns one bad upload into
+    a machine boot loop."""
+    monkeypatch.setattr(db, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "asterism.db"))
+    db.init_db()
+    with db.get_conn() as conn:
+        conn.execute("INSERT INTO jobs (id, image_path, status, orphan_recoveries) "
+                     "VALUES ('poison', '/x.jpg', 'solving', ?)",
+                     (worker.MAX_ORPHAN_RECOVERIES,))
+        conn.execute("INSERT INTO jobs (id, image_path, status) VALUES "
+                     "('stuck', '/y.jpg', 'solving')")
+
+    assert worker.recover_orphans() == (1, 1)
+
+    with db.get_conn() as conn:
+        rows = {r["id"]: r for r in conn.execute("SELECT * FROM jobs")}
+    assert rows["poison"]["status"] == "failed"
+    assert "interrupted repeatedly" in rows["poison"]["error"]
+    assert rows["stuck"]["status"] == "queued"
 
 
 def test_sweep_survives_missing_files(tmp_path, monkeypatch):

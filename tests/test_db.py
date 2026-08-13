@@ -1,4 +1,4 @@
-"""Schema migration: pre-`mode` databases gain the column on init."""
+"""Schema migration: older databases gain missing columns on init."""
 
 import sqlite3
 
@@ -23,5 +23,8 @@ def test_init_db_adds_mode_column_to_old_schema(tmp_path, monkeypatch):
     db.init_db()  # idempotent
 
     with db.get_conn() as conn:
-        row = conn.execute("SELECT mode FROM jobs WHERE id = 'old1'").fetchone()
+        row = conn.execute(
+            "SELECT mode, orphan_recoveries FROM jobs WHERE id = 'old1'"
+        ).fetchone()
         assert row["mode"] == "quick"
+        assert row["orphan_recoveries"] == 0
