@@ -78,9 +78,10 @@ def test_ultrawide_exif_tier_skipped():
 
 
 def test_moderately_wide_exif_tier_kept():
-    # f35=16mm -> ~97 deg: wide but within coverage, EXIF tier stays first.
-    info = {"focal_35mm": 16.0, "fov_bounds": (58.4, 116.9)}
-    assert solver.tier_plan(info)[0] == (58.4, 116.9)
+    # f35=16mm -> ~96.7 deg: wide but within coverage, EXIF tier stays
+    # first. Bounds follow read_exif's bracketing (fov * 0.7, fov * 1.4).
+    info = {"focal_35mm": 16.0, "fov_bounds": (67.7, 135.4)}
+    assert solver.tier_plan(info)[0] == (67.7, 135.4)
 
 
 def test_near_duplicate_exif_tier_deduped(monkeypatch, tmp_path):
