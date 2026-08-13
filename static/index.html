@@ -359,9 +359,9 @@ function rectsOverlap(a, b) {
   return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 }
 
-// First candidate spot where a w×h text box fits on-frame without touching
-// anything already placed; null when every spot is taken (the marker stays,
-// the text yields).
+// First candidate spot where a w×h text box fits on-frame without
+// overlapping anything already placed (edge-adjacent boxes are fine);
+// null when every spot is taken (the marker stays, the text yields).
 function placeText(placed, candidates, w, h, frameW, frameH) {
   for (const c of candidates) {
     const r = { x: c.x, y: c.y, w, h };
