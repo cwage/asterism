@@ -50,6 +50,45 @@ def test_synthetic_field_solves_with_exif_hint(starfield, tmp_path):
     assert any(l["name"] == "Sirius" for l in labels)
 
 
+# Phone telephoto: a 10x periscope (~240mm equivalent) is ~8.6 deg wide, a
+# 5x (~120mm) ~17. Nothing was built for these — they solve because the
+# shipped indexes reach narrower than the fallback tiers ever ask. These
+# tests exist so an index-fetch change can't silently drop that coverage.
+@pytest.mark.parametrize("fov_deg,f35mm", [(17.1, 120), (8.6, 240)],
+                         ids=["5x-telephoto", "10x-periscope"])
+def test_phone_telephoto_solves_from_its_exif_hint(fov_deg, f35mm, tmp_path):
+    path = tmp_path / "tele.jpg"
+    synth.render_starfield(str(path), ra=95.0, dec=-10.0, fov_deg=fov_deg,
+                           width=1600, height=1200, max_mag=9.0, f35mm=f35mm)
+    info = exif.read_exif(path)
+    assert info["fov_bounds"][0] < fov_deg < info["fov_bounds"][1]
+
+    result = solver.solve_tiered(str(path), str(tmp_path / "out"), info)
+    assert result["success"], result["log_tail"]
+    assert result["attempts"][0]["success"], "the EXIF tier should solve directly"
+
+    with fits.open(result["wcs_path"]) as hdul:
+        wcs = WCS(hdul[0].header)
+    ra, dec = wcs.all_pix2world(info["width"] / 2, info["height"] / 2, 0)
+    assert _angular_sep(float(ra), float(dec), 95.0, -10.0) < 1.0
+
+
+def test_narrow_field_solves_from_the_fallback_tier_without_exif(tmp_path):
+    # A telephoto shot stripped of EXIF (screenshot, re-encode): no focal
+    # length to hint with, so only the fallback chain can catch it.
+    path = tmp_path / "noexif.jpg"
+    synth.render_starfield(str(path), ra=95.0, dec=-10.0, fov_deg=4.0,
+                           width=1600, height=1200, max_mag=9.0, f35mm=None)
+    info = exif.read_exif(path)
+    assert info["focal_35mm"] is None
+
+    tiers = solver.tier_plan(info)
+    assert tiers == solver.FALLBACK_TIERS, "no EXIF: the plan is the fallbacks"
+    result = solver.solve_tiered(str(path), str(tmp_path / "out"), info,
+                                 tiers=[solver.FALLBACK_TIERS[-1]])
+    assert result["success"], result["log_tail"]
+
+
 @pytest.mark.parametrize("render", [
     synth.render_noise, synth.render_black, synth.render_gradient,
 ], ids=["noise", "black", "gradient"])

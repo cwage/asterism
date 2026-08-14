@@ -91,7 +91,8 @@ def test_near_duplicate_exif_tier_deduped(monkeypatch, tmp_path):
     # should suppress the duplicate fallback attempt.
     info = {"focal_35mm": 50.0, "fov_bounds": (31.0, 89.0)}
     solver.solve_tiered("x.jpg", str(tmp_path), info)
-    assert tried == [(31.0, 89.0), (8.0, 35.0)]
+    # the EXIF tier stands in for the first fallback; the rest still run
+    assert tried == [(31.0, 89.0)] + solver.FALLBACK_TIERS[1:]
 
 
 def test_cfg_lists_only_fits_indexes(monkeypatch, tmp_path):

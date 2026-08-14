@@ -70,9 +70,16 @@ def solve(image_path, out_dir, fov_bounds):
 
 # Scale ranges tried in order when we have no (trustworthy) EXIF hint, or when
 # the EXIF-derived range fails (crops keep focal length but shrink the field).
-# Phone-typical widths first, then the cropped/zoomed range. Anything narrower
-# than ~5 degrees needs index files we don't ship in v1.
-FALLBACK_TIERS = [(30.0, 90.0), (8.0, 35.0)]
+# Phone-typical widths first, then the cropped/zoomed range, then telephoto.
+#
+# The shipped indexes (4108-4119) reach narrower than they were specified for:
+# measured 2026-08-14, synthetic fields solve in ~0.7s down to 2.5 deg and
+# fail below that. A 10x phone periscope is ~8.6 deg and a 5x is ~17, so the
+# telephoto tier is about photos whose EXIF didn't survive (screenshots,
+# re-encodes) — with a focal length present, tier_plan hints the scale
+# directly and never needs it. It runs last because a miss costs a full
+# CPU_LIMIT, and only deep mode gets past the first tier.
+FALLBACK_TIERS = [(30.0, 90.0), (8.0, 35.0), (2.5, 10.0)]
 
 # Widest field the shipped indexes (4108-4119, quads to ~30 deg) can
 # plausibly solve. Bench 2026-08-13 (#46): 0/9 ultrawide shots whose EXIF

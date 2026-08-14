@@ -185,7 +185,8 @@ def test_deep_mode_skips_tiers_the_quick_pass_tried(monkeypatch):
                            "success": False}], "total_seconds": 60.0}
     job = dict(JOB, mode="deep", result_json=json.dumps(prior))
     status, result, error = worker.process(job)
-    assert seen["tiers"] == [solver.FALLBACK_TIERS[1]]
+    # everything the quick pass didn't try, telephoto tier included
+    assert seen["tiers"] == solver.FALLBACK_TIERS[1:]
     assert status == "failed"
     # quick attempts stay visible, times accumulate, and it's the end of the road
     assert [a["fov_bounds"] for a in result["attempts"]] == [[30.0, 90.0], [8.0, 35.0]]

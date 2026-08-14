@@ -55,8 +55,10 @@ Final home: `asterism.quietlife.net`.
   worker startup.
 
 Phone photos have wide fields of view (~30–90°), which solve against the
-*wide* astrometry.net indexes — the small ones. The multi-GB index sets are
-only needed for narrow (telescope) fields, which are out of scope for v1.
+*wide* astrometry.net indexes — the small ones. Phone **telephoto** shots
+work too, without any extra data: the shipped set reaches down to ~2.5°,
+and a 10x periscope is only ~8.6° wide. The multi-GB index sets are needed
+below that, for genuine telescope fields, which stay out of scope (#19).
 
 ## Quickstart
 
