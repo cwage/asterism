@@ -152,9 +152,10 @@ FEED_LIMIT = 24
 def feed():
     """The homepage's public "recently solved" strip: successful solves
     across everyone, newest first, for as long as retention keeps them.
-    Uploads are public by design (the disclosure says so); this only lists
-    what unlisted links could already reach. The narration caption (#12)
-    rides along as alt text when the worker produced one."""
+    This deliberately makes recent solves discoverable — job links used
+    to be unlisted — and the upload-page disclosure says so before anyone
+    uploads. The narration caption (#12) rides along as alt text when the
+    worker produced one."""
     with db.get_conn() as conn:
         rows = conn.execute(
             "SELECT id, created_at, result_json FROM jobs "

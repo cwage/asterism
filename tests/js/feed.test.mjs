@@ -28,9 +28,27 @@ test('feed renders server order with captioned alt text', async () => {
   // captionless entries still get descriptive alt text
   assert.ok(row.children[1].children[0].alt.includes('a solved night-sky photo'));
 
-  // a thumb whose image 404s (job reaped mid-view) removes itself
-  row.children[0].children[0].onerror();
+  // an image error alone doesn't hide the thumb (transient hiccup)...
+  sandbox.fetch = async () => { throw new Error('network blip'); };
+  await row.children[0].children[0].onerror();
+  assert.equal(row.children.length, 2);
+  sandbox.fetch = async () => ({ status: 500 });
+  await row.children[0].children[0].onerror();
+  assert.equal(row.children.length, 2);
+  // ...only a confirmed-gone job (reaped mid-view) does
+  sandbox.fetch = async (url) => {
+    assert.equal(url, '/jobs/bbb');
+    return { status: 404 };
+  };
+  await row.children[0].children[0].onerror();
   assert.equal(row.children.length, 1);
+});
+
+test('malformed feed payload leaves the page alone', async () => {
+  const { sandbox, els } = loadPage();
+  sandbox.fetch = async () => ({ ok: true, json: async () => ({}) });
+  await sandbox.renderFeed();
+  assert.equal(els.feed.children.length, 0);
 });
 
 test('empty feed renders nothing', async () => {

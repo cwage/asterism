@@ -163,6 +163,7 @@ async function renderFeed() {
     if (!res.ok) return;
     jobs = (await res.json()).jobs;
   } catch { return; }  // the feed is decoration: never break the page
+  if (!Array.isArray(jobs)) return;
   box.replaceChildren();
   if (!jobs.length) return;
   const title = document.createElement('p');
@@ -182,7 +183,14 @@ async function renderFeed() {
     img.src = '/jobs/' + encodeURIComponent(j.id) + '/image';
     img.alt = desc;
     img.loading = 'lazy';
-    img.onerror = () => a.remove();  // reaped mid-view: drop the thumb
+    img.onerror = async () => {
+      // Drop the thumb only when the job is definitively gone (reaped
+      // early): a transient fetch hiccup must not hide a live solve.
+      try {
+        const res = await fetch('/jobs/' + encodeURIComponent(j.id));
+        if (res.status === 404 || res.status === 410) a.remove();
+      } catch {}
+    };
     a.append(img);
     row.append(a);
   }
