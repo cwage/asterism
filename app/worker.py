@@ -20,13 +20,33 @@ SWEEP_INTERVAL_SECONDS = 900
 
 def sweep_expired():
     """Delete jobs (rows, uploads, solve artifacts) older than the retention
-    window. Returns how many were removed."""
+    window. Returns how many were removed.
+
+    Featured jobs (#67) are exempt: a handful of good solves are kept as
+    permanent examples so the homepage feed isn't empty on a quiet day.
+    Hiding a job clears the flag, so the kill switch (#60) always wins and
+    nothing can be both invisible and immortal."""
+    removed = 0
     with db.get_conn() as conn:
         rows = conn.execute(
-            "SELECT id, image_path FROM jobs WHERE created_at < datetime('now', ?)",
+            "SELECT id, image_path FROM jobs "
+            "WHERE created_at < datetime('now', ?) AND featured = 0",
             (f"-{RETENTION_HOURS} hours",),
         ).fetchall()
         for row in rows:
+            # Delete first, re-checking featured, and only touch the bytes if
+            # the row was actually ours to take. sqlite3 opens no transaction
+            # for the SELECT above, so /feature can commit in the gap — and
+            # unlink() has no transaction to roll back, so unlinking first
+            # would destroy a job that had just been marked permanent. From
+            # the first DELETE onward we hold the write lock, so nothing else
+            # can interleave; a crash mid-loop rolls the deletes back and
+            # leaves rows whose files are gone, which the next sweep collects.
+            if not conn.execute(
+                "DELETE FROM jobs WHERE id = ? AND featured = 0", (row["id"],)
+            ).rowcount:
+                continue
+            removed += 1
             if row["image_path"]:
                 # The share card (#13) is cached beside the upload.
                 for path in (row["image_path"], row["image_path"] + ".card.png"):
@@ -36,8 +56,7 @@ def sweep_expired():
                         pass
             shutil.rmtree(os.path.join(db.DATA_DIR, "jobs", row["id"]),
                           ignore_errors=True)
-            conn.execute("DELETE FROM jobs WHERE id = ?", (row["id"],))
-    return len(rows)
+    return removed
 
 
 def _col(job, name, default=None):

@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     solve_seconds REAL,
     mode TEXT NOT NULL DEFAULT 'quick',
     orphan_recoveries INTEGER NOT NULL DEFAULT 0,
-    hidden INTEGER NOT NULL DEFAULT 0
+    hidden INTEGER NOT NULL DEFAULT 0,
+    featured INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -40,6 +41,7 @@ def init_db():
             ("mode", "TEXT NOT NULL DEFAULT 'quick'"),
             ("orphan_recoveries", "INTEGER NOT NULL DEFAULT 0"),
             ("hidden", "INTEGER NOT NULL DEFAULT 0"),
+            ("featured", "INTEGER NOT NULL DEFAULT 0"),
         ):
             if name not in cols:
                 try:

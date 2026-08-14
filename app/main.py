@@ -180,7 +180,13 @@ def hide_job(job_id: str, request: Request):
         ).fetchone()
         if not row:
             raise HTTPException(404, _GONE)
-        conn.execute("UPDATE jobs SET hidden = 1 WHERE id = ?", (job_id,))
+        # featured = 0 as well: the kill switch outranks the showcase (#67).
+        # Leaving both set would strand a job that is invisible *and* exempt
+        # from the sweep, so its bytes would never leave the disk.
+        if not conn.execute(
+            "UPDATE jobs SET hidden = 1, featured = 0 WHERE id = ?", (job_id,)
+        ).rowcount:
+            raise HTTPException(404, _GONE)  # swept between the two statements
     # The cached card is the amplification path — share links unfurl it (#13)
     # — so drop it now instead of waiting on the sweep.
     if row["image_path"]:
@@ -189,6 +195,65 @@ def hide_job(job_id: str, request: Request):
         except FileNotFoundError:
             pass
     return {"id": job_id, "hidden": True}
+
+
+@app.post("/jobs/{job_id}/unhide")
+def unhide_job(job_id: str, request: Request):
+    """Undo a hide (#67). Previously this meant `fly ssh console` and a
+    Python one-liner against the volume, which is a bad thing to be
+    improvising when the reason you're doing it is that you hid the wrong id."""
+    _require_admin(request)
+    with db.get_conn() as conn:
+        if not conn.execute(
+            "UPDATE jobs SET hidden = 0 WHERE id = ?", (job_id,)
+        ).rowcount:
+            raise HTTPException(404, _GONE)
+    return {"id": job_id, "hidden": False}
+
+
+@app.post("/jobs/{job_id}/feature")
+def feature_job(job_id: str, request: Request):
+    """Exempt a job from the retention sweep (#67), keeping it as a permanent
+    example so the feed has something in it on a quiet day.
+
+    Refuses hidden jobs: featuring one would be asking the sweep to never
+    collect something we have already decided shouldn't be visible."""
+    _require_admin(request)
+    with db.get_conn() as conn:
+        # Every precondition rides in the UPDATE rather than a SELECT before
+        # it. Check-then-set loses to anything that commits in the gap: a
+        # concurrent /hide would leave the job hidden *and* featured, which is
+        # invisible *and* exempt from the sweep, so its bytes would never
+        # leave the disk — the one state these two flags must never reach.
+        # Work out which error to report only after losing.
+        if not conn.execute(
+            "UPDATE jobs SET featured = 1 "
+            "WHERE id = ? AND hidden = 0 AND status = 'done'",
+            (job_id,),
+        ).rowcount:
+            row = conn.execute(
+                "SELECT status, hidden FROM jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+            if not row:  # swept, or never existed
+                raise HTTPException(404, _GONE)
+            if row["hidden"]:
+                raise HTTPException(409, "unhide the job before featuring it")
+            raise HTTPException(409, "only a solved job can be featured")
+    return {"id": job_id, "featured": True}
+
+
+@app.post("/jobs/{job_id}/unfeature")
+def unfeature_job(job_id: str, request: Request):
+    """Drop a job back into the normal retention window (#67). The next sweep
+    collects it if it is already older than RETENTION_HOURS, which is usually
+    the point."""
+    _require_admin(request)
+    with db.get_conn() as conn:
+        if not conn.execute(
+            "UPDATE jobs SET featured = 0 WHERE id = ?", (job_id,)
+        ).rowcount:
+            raise HTTPException(404, _GONE)
+    return {"id": job_id, "featured": False}
 
 
 FEED_LIMIT = 24
