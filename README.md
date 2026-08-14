@@ -98,13 +98,13 @@ the only copy is lost the fix is to set a new one, not to recover it.
 
 ### If you hide the wrong one
 
-Recoverable inside the retention window; after that the sweep has deleted the
-row and the bytes and nothing brings it back. There is no `sqlite3` CLI in the
-image, so it is Python. `fly ssh console -a asterism`, then:
+```
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" https://asterism.quietlife.net/jobs/JOB_ID/unhide
+```
 
-```
-python -c "import sqlite3; c=sqlite3.connect('/data/asterism.db'); print(c.execute(\"UPDATE jobs SET hidden=0 WHERE id='JOB_ID'\").rowcount); c.commit()"
-```
+Only works inside the retention window — once the sweep has deleted the row and
+the bytes, nothing brings it back. Note that hiding clears `featured`, and
+unhiding does not restore it: re-featuring is a separate decision.
 
 ### What hiding does, and what it doesn't
 
@@ -139,6 +139,33 @@ them if that changes.
 
 With no `ADMIN_TOKEN` configured the endpoint 404s for everyone — unset means
 absent, not open, so local dev and CI have nothing to poke at.
+
+## Featuring a solve
+
+Everything is deleted after `RETENTION_HOURS`, which leaves the homepage feed
+empty whenever nobody has uploaded in a day — bad for a site that has to explain
+itself to someone arriving cold. Featuring a job (#67) exempts it from the
+retention sweep, so a handful of good solves stay on as permanent examples:
+
+```
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" https://asterism.quietlife.net/jobs/JOB_ID/feature
+```
+
+`/unfeature` puts it back in the normal retention window, where the next sweep
+collects it if it is already older than `RETENTION_HOURS` — usually the point.
+
+Same `ADMIN_TOKEN` gate as the kill switch, and the same way of finding a job id
+(see the runbook above). Only a solved job can be featured, and a hidden one
+can't be: featuring is a request that the sweep never collect something, which
+is the wrong thing to ask about a job that has been pulled from the site.
+Hiding therefore clears the flag — the kill switch always wins, so nothing ends
+up invisible *and* immortal.
+
+Featuring changes retention, not placement. The feed is still
+`ORDER BY created_at DESC LIMIT 24`, so a featured solve is kept forever but
+sinks out of the strip once 24 newer solves exist. On a quiet site that never
+happens, which is the case this exists for. Storage grows monotonically by
+design; a few dozen phone JPEGs and their cards is nothing against the volume.
 
 ## Quickstart
 

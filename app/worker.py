@@ -20,10 +20,16 @@ SWEEP_INTERVAL_SECONDS = 900
 
 def sweep_expired():
     """Delete jobs (rows, uploads, solve artifacts) older than the retention
-    window. Returns how many were removed."""
+    window. Returns how many were removed.
+
+    Featured jobs (#67) are exempt: a handful of good solves are kept as
+    permanent examples so the homepage feed isn't empty on a quiet day.
+    Hiding a job clears the flag, so the kill switch (#60) always wins and
+    nothing can be both invisible and immortal."""
     with db.get_conn() as conn:
         rows = conn.execute(
-            "SELECT id, image_path FROM jobs WHERE created_at < datetime('now', ?)",
+            "SELECT id, image_path FROM jobs "
+            "WHERE created_at < datetime('now', ?) AND featured = 0",
             (f"-{RETENTION_HOURS} hours",),
         ).fetchall()
         for row in rows:
