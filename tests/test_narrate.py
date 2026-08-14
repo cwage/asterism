@@ -85,7 +85,18 @@ def test_empty_reply_fields_return_none():
 
 def test_no_labels_skips_the_call():
     client = FakeClient()
-    assert narrate.annotate({"labels": []}, client=client) is None
+    result = {"labels": [], "verification": {"verified": True}}
+    assert narrate.annotate(result, client=client) is None
+    assert client.calls == []
+
+
+def test_unverified_result_skips_the_call():
+    # Verification failed -> labels carry no status fields, so the model
+    # couldn't be honest about clouds. No call, no spend.
+    client = FakeClient()
+    result = dict(RESULT, verification={"verified": False,
+                                        "error": "image unreadable"})
+    assert narrate.annotate(result, client=client) is None
     assert client.calls == []
 
 

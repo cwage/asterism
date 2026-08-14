@@ -76,6 +76,10 @@ def _payload(result):
 def annotate(result, client=None):
     """Narration dict {caption, text, model} or None when unavailable.
     Raises on API/parse errors — the worker treats those as best-effort."""
+    # Unverified labels carry no status fields, so the model couldn't be
+    # honest about what was actually visible — skip the call entirely.
+    if not (result.get("verification") or {}).get("verified"):
+        return None
     payload = _payload(result)
     if not payload["labels"]:
         return None
