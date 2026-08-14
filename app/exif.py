@@ -11,6 +11,7 @@ TAG_FOCAL_LENGTH = 37386
 TAG_FOCAL_35MM = 41989
 TAG_DATETIME_ORIGINAL = 36867
 TAG_OFFSET_TIME_ORIGINAL = 36881
+TAG_EXPOSURE_TIME = 33434
 TAG_GPS_IMG_DIRECTION_REF = 16  # 'M' magnetic / 'T' true
 TAG_GPS_IMG_DIRECTION = 17
 
@@ -30,12 +31,13 @@ def _gps_to_degrees(dms, ref):
 
 def read_exif(path):
     """Return {fov_bounds, focal_35mm, datetime_original, offset_time_original,
-    lat, lon, heading, heading_ref, width, height}."""
+    exposure_seconds, lat, lon, heading, heading_ref, width, height}."""
     info = {
         "fov_bounds": DEFAULT_FOV_BOUNDS,
         "focal_35mm": None,
         "datetime_original": None,
         "offset_time_original": None,
+        "exposure_seconds": None,
         "lat": None,
         "lon": None,
         "heading": None,
@@ -63,6 +65,17 @@ def read_exif(path):
     oto = exif_ifd.get(TAG_OFFSET_TIME_ORIGINAL)
     if oto:
         info["offset_time_original"] = str(oto)
+
+    # Exposure time feeds the satellite-crossing window (#11): phone astro
+    # modes record the per-frame value (e.g. 16s) as a rational.
+    exp = exif_ifd.get(TAG_EXPOSURE_TIME)
+    if exp is not None:
+        try:
+            exp = float(exp)
+            if math.isfinite(exp) and 0 < exp < 3600:
+                info["exposure_seconds"] = exp
+        except (TypeError, ValueError, ZeroDivisionError):
+            pass
 
     if gps:
         lat = _gps_to_degrees(gps.get(2), gps.get(1))

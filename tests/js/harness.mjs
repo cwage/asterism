@@ -5,11 +5,42 @@
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
+// Recording 2D context: draw() is the biggest chunk of the page's logic,
+// and it only needs a handful of canvas calls. Every operation is logged
+// with the state that was current when it ran, so tests can assert what
+// was drawn (and how) without a real canvas.
+export function makeCtx() {
+  const ctx = {
+    ops: [],
+    strokeStyle: '', fillStyle: '', lineWidth: 1, font: '', globalAlpha: 1,
+    _dash: [], _path: null,
+    // draw() clears before every render; forget prior ops with it, or a
+    // second draw (a layer toggle, say) would be read against stale strokes.
+    clearRect() { ctx.ops.length = 0; },
+    setLineDash(d) { ctx._dash = d; },
+    beginPath() { ctx._path = []; },
+    moveTo(x, y) { ctx._path.push(['moveTo', x, y]); },
+    lineTo(x, y) { ctx._path.push(['lineTo', x, y]); },
+    arc(x, y, r) { ctx._path.push(['arc', x, y, r]); },
+    stroke() {
+      ctx.ops.push({ op: 'stroke', path: ctx._path || [],
+                     strokeStyle: ctx.strokeStyle, dashed: ctx._dash.length > 0,
+                     alpha: ctx.globalAlpha });
+    },
+    measureText(text) { return { width: text.length * 7 }; },
+    fillText(text, x, y) {
+      ctx.ops.push({ op: 'fillText', text, x, y, fillStyle: ctx.fillStyle });
+    },
+  };
+  return ctx;
+}
+
 export function makeEl() {
   const el = {
     children: [], parent: null, className: '', textContent: '', title: '',
     href: '', src: '', alt: '', loading: '', hidden: false, checked: true,
     value: '4.5', onerror: null, onload: null, style: {},
+    naturalWidth: 1000, naturalHeight: 800, width: 0, height: 0,
     append(...c) {
       for (const child of c) {
         if (child && typeof child === 'object') child.parent = el;
@@ -31,7 +62,7 @@ export function makeEl() {
       el.parent = null;
     },
     addEventListener() {},
-    getContext() { return null; },
+    getContext() { return (el.ctx ??= makeCtx()); },
   };
   return el;
 }

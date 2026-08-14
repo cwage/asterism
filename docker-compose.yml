@@ -18,7 +18,8 @@ services:
       - DATA_DIR=/data
 
   worker:
-    # LLM narration (#12) needs ANTHROPIC_API_KEY; unset just disables it.
+    # LLM narration (#12) needs ANTHROPIC_API_KEY and satellite crossings
+    # (#11) need SPACETRACK_USER/PASS; unset just disables those layers.
     build:
       context: .
       target: app
@@ -31,3 +32,5 @@ services:
     environment:
       - DATA_DIR=/data
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - SPACETRACK_USER=${SPACETRACK_USER:-}
+      - SPACETRACK_PASS=${SPACETRACK_PASS:-}

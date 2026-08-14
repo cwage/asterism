@@ -15,6 +15,7 @@ EXIF_IFD = 0x8769
 GPS_IFD = 0x8825
 TAG_FOCAL_35MM = 41989
 TAG_DATETIME_ORIGINAL = 36867
+TAG_EXPOSURE_TIME = 33434
 
 
 def load_stars(max_mag):
@@ -45,7 +46,8 @@ def make_wcs(ra, dec, fov_deg, width, height):
     return w
 
 
-def build_exif(f35mm=None, datetime_original=None, gps=None, heading=None):
+def build_exif(f35mm=None, datetime_original=None, gps=None, heading=None,
+               exposure_seconds=None):
     """PIL Exif with the fields app.exif reads. gps = (lat, lon) in degrees;
     heading = (degrees, ref) with ref 'M' (magnetic) or 'T' (true)."""
     ex = Image.Exif()
@@ -54,6 +56,8 @@ def build_exif(f35mm=None, datetime_original=None, gps=None, heading=None):
         ifd[TAG_FOCAL_35MM] = int(f35mm)
     if datetime_original is not None:
         ifd[TAG_DATETIME_ORIGINAL] = datetime_original
+    if exposure_seconds is not None:
+        ifd[TAG_EXPOSURE_TIME] = exposure_seconds
     if gps is not None or heading is not None:
         g = ex.get_ifd(GPS_IFD)
     if gps is not None:

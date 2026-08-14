@@ -21,6 +21,10 @@ RESULT = {
     "constellations": [{"name": "Orion", "abbr": "Ori", "segments": []}],
     "ephemeris": {"time_utc": "2026-08-13T04:16:00Z"},
     "verification": {"verified": True},
+    "satellites": {"crossings": [
+        {"name": "Iss (Zarya)", "norad_id": "25544",
+         "points": [[1.0, 2.0], [3.0, 4.0]], "t_enter_s": 0.0,
+         "t_exit_s": 16.0}]},
 }
 
 REPLY = {"caption": "Jupiter and the Moon over Orion",
@@ -61,6 +65,8 @@ def test_payload_is_trimmed_to_public_fields():
     moon = next(l for l in payload["labels"] if l["name"] == "Moon")
     assert moon["moon_phase"] == 0.42
     assert payload["constellations"] == ["Orion"]
+    # satellite crossings (#11) ride along as names only
+    assert payload["satellites_crossing"] == ["Iss (Zarya)"]
     # pixel geometry never leaves the app
     content = client.calls[0]["messages"][0]["content"]
     assert '"x"' not in content and '"radius_px"' not in content
