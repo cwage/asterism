@@ -61,9 +61,12 @@ def test_bracket_reaches_below_a_2x_sensor_crop(tmp_path):
     path = tmp_path / "cropped.jpg"
     Image.new("RGB", (64, 64)).save(path, exif=synth.build_exif(f35mm=24))
     lo, hi = exif.read_exif(path)["fov_bounds"]
+    # 38.4 is measured, not derived: it comes from the solved WCS of the
+    # real photos, so it stays a literal even if the estimator changes.
     assert lo <= 38.4 <= hi, f"true field 38.4 deg outside bracket {lo:.1f}-{hi:.1f}"
-    # and the estimate itself stays inside, for uncropped shots
-    assert lo <= 73.7 <= hi
+    # The estimate itself must stay inside too, for uncropped shots.
+    estimate = math.degrees(2 * math.atan(36.0 / (2 * 24)))
+    assert lo <= estimate <= hi
 
 
 def test_exposure_time_read_for_the_satellite_window(tmp_path):
