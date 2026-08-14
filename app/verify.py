@@ -65,14 +65,18 @@ def count_stars(image_path, grid=24, thr_sigma=5.0, min_amp=12.0,
     rejected as "not a sky photo" despite plate-solving in under 6
     seconds. Downscaling also makes the gate cheaper on big uploads."""
     try:
-        img = Image.open(image_path).convert("L")
+        # Context-managed: this runs for every non-deep upload, so the file
+        # handle has to close on the spot rather than whenever GC notices.
+        with Image.open(image_path) as src:
+            img = src.convert("L")
+            if img.width > GATE_WIDTH:
+                img = img.resize(
+                    (GATE_WIDTH,
+                     max(1, round(img.height * GATE_WIDTH / img.width))),
+                    Image.LANCZOS)
+            img = np.asarray(img, dtype=np.float32)
     except Exception:
         return None
-    if img.width > GATE_WIDTH:
-        img = img.resize(
-            (GATE_WIDTH, max(1, round(img.height * GATE_WIDTH / img.width))),
-            Image.LANCZOS)
-    img = np.asarray(img, dtype=np.float32)
     h, w = img.shape
     bh, bw = max(8, h // grid), max(8, w // grid)
     H, W = (h // bh) * bh, (w // bw) * bw
@@ -276,7 +280,8 @@ def apply(image_path, labels, figures):
     (labels, figures, meta). Never raises on a bad image: the originals
     come back with meta["verified"] = False."""
     try:
-        img = np.asarray(Image.open(image_path).convert("L"), dtype=np.float32)
+        with Image.open(image_path) as src:
+            img = np.asarray(src.convert("L"), dtype=np.float32)
     except Exception:
         return labels, figures, {"verified": False, "error": "image unreadable"}
 
