@@ -256,12 +256,70 @@ class _DeleteMidCall:
         return cur
 
 
-@pytest.mark.parametrize("endpoint", ["feature_job", "hide_job"])
+class _HideMidFeature:
+    """Commits a /hide immediately after the endpoint's first SELECT. Against
+    check-then-set that lands between the guard and the write; against the
+    conditional UPDATE there is no pre-write SELECT to land after, which is
+    the fix."""
+
+    def __init__(self, conn, job_id):
+        self._conn, self._job_id, self._fired = conn, job_id, False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self._conn.commit()
+        return False
+
+    def execute(self, sql, *args):
+        cur = self._conn.execute(sql, *args)
+        if not self._fired and sql.lstrip().upper().startswith("SELECT"):
+            self._fired = True
+            with db.get_conn() as web:
+                web.execute(
+                    "UPDATE jobs SET hidden = 1, featured = 0 WHERE id = ?",
+                    (self._job_id,))
+        return cur
+
+
+def test_hide_during_feature_cannot_strand_the_job(fresh_db, admin, monkeypatch):
+    """hidden and featured must never both end up set. That job would be
+    invisible *and* exempt from the sweep, so its bytes would never leave the
+    disk — the opposite of what hiding is for."""
+    with db.get_conn() as conn:
+        _insert(conn, "job")
+
+    real_get_conn = db.get_conn
+    raw = real_get_conn()
+    monkeypatch.setattr(db, "get_conn", lambda: _HideMidFeature(raw, "job"))
+    try:
+        try:
+            main.feature_job("job", _auth())
+        except HTTPException as e:
+            assert e.status_code == 409  # lost the race cleanly
+    finally:
+        monkeypatch.setattr(db, "get_conn", real_get_conn)
+        raw.close()
+
+    with db.get_conn() as conn:
+        row = conn.execute(
+            "SELECT hidden, featured FROM jobs WHERE id='job'").fetchone()
+    assert not (row["hidden"] and row["featured"]), \
+        "job ended up hidden and featured: invisible and immortal"
+
+
+@pytest.mark.parametrize("endpoint", ["hide_job"])
 def test_admin_endpoints_404_when_the_row_vanishes(fresh_db, admin, monkeypatch,
                                                    endpoint):
     """The sweep can delete a row between an endpoint's SELECT and its UPDATE.
     Reporting success for a job that no longer exists is worse than saying
-    it's gone."""
+    it's gone.
+
+    feature_job is deliberately absent: its preconditions all ride in the
+    UPDATE now, so it has no pre-write SELECT for a delete to land after. The
+    equivalent cases reach it through the post-failure diagnostic instead —
+    see the unknown-job, hidden-job, and not-solved tests."""
     with db.get_conn() as conn:
         _insert(conn, "gone")
 

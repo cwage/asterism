@@ -220,22 +220,25 @@ def feature_job(job_id: str, request: Request):
     collect something we have already decided shouldn't be visible."""
     _require_admin(request)
     with db.get_conn() as conn:
-        row = conn.execute(
-            "SELECT status, hidden FROM jobs WHERE id = ?", (job_id,)
-        ).fetchone()
-        if not row:
-            raise HTTPException(404, _GONE)
-        if row["hidden"]:
-            raise HTTPException(409, "unhide the job before featuring it")
-        if row["status"] != "done":
-            raise HTTPException(409, "only a solved job can be featured")
-        # rowcount: the retention sweep can delete the row between the SELECT
-        # above and this UPDATE, and reporting success for a job that no
-        # longer exists is worse than saying it's gone.
+        # Every precondition rides in the UPDATE rather than a SELECT before
+        # it. Check-then-set loses to anything that commits in the gap: a
+        # concurrent /hide would leave the job hidden *and* featured, which is
+        # invisible *and* exempt from the sweep, so its bytes would never
+        # leave the disk — the one state these two flags must never reach.
+        # Work out which error to report only after losing.
         if not conn.execute(
-            "UPDATE jobs SET featured = 1 WHERE id = ?", (job_id,)
+            "UPDATE jobs SET featured = 1 "
+            "WHERE id = ? AND hidden = 0 AND status = 'done'",
+            (job_id,),
         ).rowcount:
-            raise HTTPException(404, _GONE)
+            row = conn.execute(
+                "SELECT status, hidden FROM jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+            if not row:  # swept, or never existed
+                raise HTTPException(404, _GONE)
+            if row["hidden"]:
+                raise HTTPException(409, "unhide the job before featuring it")
+            raise HTTPException(409, "only a solved job can be featured")
     return {"id": job_id, "featured": True}
 
 
