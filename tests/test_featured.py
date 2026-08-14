@@ -165,6 +165,120 @@ def test_admin_endpoints_404_unknown_jobs(fresh_db, admin):
         assert e.value.status_code == 404
 
 
+class _FeatureMidSweep:
+    """Connection wrapper that commits a /feature the instant the sweep's
+    SELECT runs — the interleaving the conditional DELETE defends against."""
+
+    def __init__(self, conn, job_id):
+        self._conn, self._job_id, self._fired = conn, job_id, False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self._conn.commit()
+        return False
+
+    def execute(self, sql, *args):
+        cur = self._conn.execute(sql, *args)
+        if not self._fired and sql.lstrip().upper().startswith("SELECT"):
+            self._fired = True
+            with db.get_conn() as web:  # the web process handling /feature
+                web.execute("UPDATE jobs SET featured = 1 WHERE id = ?",
+                            (self._job_id,))
+        return cur
+
+
+def test_feature_between_select_and_delete_is_honoured(fresh_db, monkeypatch,
+                                                       tmp_path):
+    """Featuring a job while the sweep is mid-pass must save it. sqlite3 opens
+    no transaction for the SELECT, and unlink() has nothing to roll back, so
+    deleting bytes before re-checking the flag would destroy a job that had
+    just been marked permanent."""
+    img = tmp_path / "keep.jpg"
+    img.write_bytes(b"x")
+    with db.get_conn() as conn:
+        _old(conn, "keep", image_path=str(img))
+
+    real_get_conn = db.get_conn
+    wrapped = {"done": False}
+
+    def fake_get_conn():
+        conn = real_get_conn()
+        if wrapped["done"]:
+            return conn
+        wrapped["done"] = True
+        return _FeatureMidSweep(conn, "keep")
+
+    monkeypatch.setattr(db, "get_conn", fake_get_conn)
+    try:
+        assert worker.sweep_expired() == 0
+    finally:
+        monkeypatch.setattr(db, "get_conn", real_get_conn)
+
+    assert img.exists(), "the bytes of a job featured mid-sweep were deleted"
+    with db.get_conn() as conn:
+        row = conn.execute("SELECT featured FROM jobs WHERE id='keep'").fetchone()
+    assert row is not None and row["featured"] == 1
+
+
+def test_sweep_reports_what_it_actually_deleted(fresh_db, admin, tmp_path):
+    """The count is the number of rows taken, not the number selected — a job
+    rescued mid-pass must not be counted as swept."""
+    with db.get_conn() as conn:
+        _old(conn, "a")
+        _old(conn, "b")
+    main.feature_job("a", _auth())
+    assert worker.sweep_expired() == 1
+
+
+class _DeleteMidCall:
+    """Stands in for a connection, deleting the row the moment the endpoint's
+    SELECT runs — i.e. the retention sweep landing mid-request. Doubles as its
+    own context manager so it drops into `with db.get_conn() as conn`."""
+
+    def __init__(self, conn, job_id):
+        self._conn, self._job_id, self._fired = conn, job_id, False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self._conn.commit()
+        return False
+
+    def execute(self, sql, *args):
+        cur = self._conn.execute(sql, *args)
+        if not self._fired and sql.lstrip().upper().startswith("SELECT"):
+            self._fired = True
+            with db.get_conn() as sweeper:
+                sweeper.execute("DELETE FROM jobs WHERE id = ?", (self._job_id,))
+        return cur
+
+
+@pytest.mark.parametrize("endpoint", ["feature_job", "hide_job"])
+def test_admin_endpoints_404_when_the_row_vanishes(fresh_db, admin, monkeypatch,
+                                                   endpoint):
+    """The sweep can delete a row between an endpoint's SELECT and its UPDATE.
+    Reporting success for a job that no longer exists is worse than saying
+    it's gone."""
+    with db.get_conn() as conn:
+        _insert(conn, "gone")
+
+    real_get_conn = db.get_conn
+    raw = real_get_conn()
+    monkeypatch.setattr(db, "get_conn",
+                        lambda: _DeleteMidCall(raw, "gone")
+                        if not raw.in_transaction else real_get_conn())
+    try:
+        with pytest.raises(HTTPException) as e:
+            getattr(main, endpoint)("gone", _auth())
+        assert e.value.status_code == 404
+    finally:
+        monkeypatch.setattr(db, "get_conn", real_get_conn)
+        raw.close()
+
+
 def test_featured_job_still_appears_in_the_feed(fresh_db, admin):
     """Featuring changes retention, not visibility: it stays an ordinary feed
     entry, just one that outlives the sweep."""

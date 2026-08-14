@@ -183,9 +183,10 @@ def hide_job(job_id: str, request: Request):
         # featured = 0 as well: the kill switch outranks the showcase (#67).
         # Leaving both set would strand a job that is invisible *and* exempt
         # from the sweep, so its bytes would never leave the disk.
-        conn.execute(
+        if not conn.execute(
             "UPDATE jobs SET hidden = 1, featured = 0 WHERE id = ?", (job_id,)
-        )
+        ).rowcount:
+            raise HTTPException(404, _GONE)  # swept between the two statements
     # The cached card is the amplification path — share links unfurl it (#13)
     # — so drop it now instead of waiting on the sweep.
     if row["image_path"]:
@@ -204,10 +205,9 @@ def unhide_job(job_id: str, request: Request):
     _require_admin(request)
     with db.get_conn() as conn:
         if not conn.execute(
-            "SELECT 1 FROM jobs WHERE id = ?", (job_id,)
-        ).fetchone():
+            "UPDATE jobs SET hidden = 0 WHERE id = ?", (job_id,)
+        ).rowcount:
             raise HTTPException(404, _GONE)
-        conn.execute("UPDATE jobs SET hidden = 0 WHERE id = ?", (job_id,))
     return {"id": job_id, "hidden": False}
 
 
@@ -229,7 +229,13 @@ def feature_job(job_id: str, request: Request):
             raise HTTPException(409, "unhide the job before featuring it")
         if row["status"] != "done":
             raise HTTPException(409, "only a solved job can be featured")
-        conn.execute("UPDATE jobs SET featured = 1 WHERE id = ?", (job_id,))
+        # rowcount: the retention sweep can delete the row between the SELECT
+        # above and this UPDATE, and reporting success for a job that no
+        # longer exists is worse than saying it's gone.
+        if not conn.execute(
+            "UPDATE jobs SET featured = 1 WHERE id = ?", (job_id,)
+        ).rowcount:
+            raise HTTPException(404, _GONE)
     return {"id": job_id, "featured": True}
 
 
@@ -241,10 +247,9 @@ def unfeature_job(job_id: str, request: Request):
     _require_admin(request)
     with db.get_conn() as conn:
         if not conn.execute(
-            "SELECT 1 FROM jobs WHERE id = ?", (job_id,)
-        ).fetchone():
+            "UPDATE jobs SET featured = 0 WHERE id = ?", (job_id,)
+        ).rowcount:
             raise HTTPException(404, _GONE)
-        conn.execute("UPDATE jobs SET featured = 0 WHERE id = ?", (job_id,))
     return {"id": job_id, "featured": False}
 
 
