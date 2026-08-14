@@ -62,24 +62,71 @@ below that, for genuine telescope fields, which stay out of scope (#19).
 
 ## Moderation
 
-Uploads are anonymous and every successful solve is republished on the homepage
-feed, so there is a kill switch (#60). With `ADMIN_TOKEN` set (a Fly secret in
-prod), one request pulls a job out of every public read path:
+Uploads are anonymous, solving is not a content filter, and every successful
+solve is republished on the homepage feed. So there is a kill switch (#60):
+with `ADMIN_TOKEN` set (a Fly secret in prod), one request pulls a job out of
+every public read path.
+
+### Runbook: taking a photo down
+
+**1. Get the job id.** Tap the thumbnail on the homepage — the URL becomes
+`https://asterism.quietlife.net/?job=<32 hex chars>`. To avoid opening a photo
+you are trying to get rid of, list the feed instead (newest first, same order
+as the strip; the captions usually identify it):
+
+```
+curl -s https://asterism.quietlife.net/feed | jq -r '.jobs[] | "\(.id)  \(.caption // "-")"'
+```
+
+**2. Hide it.**
 
 ```
 curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" https://asterism.quietlife.net/jobs/JOB_ID/hide
 ```
 
-The job then 404s from `/feed`, `GET /jobs/{id}`, `/image`, and `/card` exactly
-like an expired one, and the cached card PNG is unlinked immediately — that last
-part matters, because `?job=` emits OpenGraph tags pointing at the card, so
-share links keep unfurling the image until it's gone. If the job hadn't solved
-yet, the worker stops seeing it too.
+Expect `{"id":"...","hidden":true}`.
 
-The row and the upload stay on disk until the normal retention sweep collects
-them (within `RETENTION_HOURS`). That keeps a mistyped id one
-`UPDATE jobs SET hidden = 0` away from undone, and keeps the bytes around in
-case an upload needs reporting rather than just removing.
+**3. Confirm.** `404` means gone, and the homepage strip drops it on reload:
+
+```
+curl -s -o /dev/null -w "%{http_code}\n" https://asterism.quietlife.net/jobs/JOB_ID
+```
+
+Keep `ADMIN_TOKEN` somewhere you can reach from a phone. It is a Fly secret,
+which is write-only — `fly secrets list` shows digests, never values — so if
+the only copy is lost the fix is to set a new one, not to recover it.
+
+### If you hide the wrong one
+
+Recoverable inside the retention window; after that the sweep has deleted the
+row and the bytes and nothing brings it back. There is no `sqlite3` CLI in the
+image, so it is Python. `fly ssh console -a asterism`, then:
+
+```
+python -c "import sqlite3; c=sqlite3.connect('/data/asterism.db'); print(c.execute(\"UPDATE jobs SET hidden=0 WHERE id='JOB_ID'\").rowcount); c.commit()"
+```
+
+### What hiding does, and what it doesn't
+
+The job 404s from `/feed`, `GET /jobs/{id}`, `/image`, and `/card` with the same
+copy an expired job gets — a hidden job is indistinguishable from one that never
+existed, so an abuser learns nothing from the response. The cached card PNG is
+unlinked immediately: `?job=` points OpenGraph at the card, so already-posted
+share links stop unfurling the image at the same moment. A job that hasn't
+solved yet also stops being claimable, so it can't burn a solve on its way out.
+
+The row and the upload stay on disk until the retention sweep collects them,
+which is what makes a mistyped id recoverable and keeps the bytes available if
+an upload needs reporting rather than just removing.
+
+What it does **not** do is stop the person. There is no ban and no IP block, and
+the per-IP cap is `UPLOADS_PER_HOUR` (12), so someone actively poking can
+re-upload faster than you can hide. Against a sustained attack the levers are
+blunt and hit everyone. `fly secrets set UPLOADS_PER_HOUR=0 -a asterism` stops
+new uploads while leaving existing results readable;
+`fly scale count 0 -a asterism` takes the site down. Closing that gap properly
+is #61 (gate the feed on the photo looking like a night sky) and #62 (cap feed
+slots per uploader).
 
 With no `ADMIN_TOKEN` configured the endpoint 404s for everyone — unset means
 absent, not open, so local dev and CI have nothing to poke at.
