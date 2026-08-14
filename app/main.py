@@ -145,6 +145,34 @@ def deepen_job(job_id: str):
     return {"id": job_id, "status": "queued", "mode": "deep"}
 
 
+FEED_LIMIT = 24
+
+
+@app.get("/feed")
+def feed():
+    """The homepage's public "recently solved" strip: successful solves
+    across everyone, newest first, for as long as retention keeps them.
+    Uploads are public by design (the disclosure says so); this only lists
+    what unlisted links could already reach. The narration caption (#12)
+    rides along as alt text when the worker produced one."""
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, created_at, result_json FROM jobs "
+            "WHERE status = 'done' "
+            "ORDER BY created_at DESC, id DESC LIMIT ?",
+            (FEED_LIMIT,),
+        ).fetchall()
+    jobs = []
+    for row in rows:
+        result = json.loads(row["result_json"]) if row["result_json"] else {}
+        entry = {"id": row["id"], "created_at": row["created_at"]}
+        caption = (result.get("narration") or {}).get("caption")
+        if caption:
+            entry["caption"] = caption
+        jobs.append(entry)
+    return {"jobs": jobs}
+
+
 def _public_exif(exif_info):
     """Round GPS for the public payload: results are shareable by link, and
     precise coordinates are usually someone's backyard (#22). One decimal
