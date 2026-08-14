@@ -149,11 +149,79 @@ def test_hidden_job_is_never_claimed_by_the_worker(fresh_db, admin):
     main.hide_job("bad", _auth())
 
     with db.get_conn() as conn:
-        job = conn.execute(
-            "SELECT * FROM jobs WHERE status = 'queued' AND hidden = 0 "
-            "ORDER BY created_at, id LIMIT 1"
-        ).fetchone()
+        job = worker.claim_next_job(conn)
     assert job["id"] == "fine"  # 'bad' is older but skipped
+
+
+class _HideMidClaim:
+    """Connection wrapper that commits a hide the instant the claim's SELECT
+    runs — reproducing the one interleaving the conditional UPDATE exists to
+    defend against."""
+
+    def __init__(self, conn, job_id):
+        self._conn, self._job_id, self._fired = conn, job_id, False
+
+    def execute(self, sql, *args):
+        cur = self._conn.execute(sql, *args)
+        if not self._fired and sql.lstrip().upper().startswith("SELECT"):
+            self._fired = True
+            with db.get_conn() as web:  # the web process handling POST /hide
+                web.execute("UPDATE jobs SET hidden = 1 WHERE id = ?",
+                            (self._job_id,))
+        return cur
+
+
+def test_hide_between_select_and_claim_loses_the_race(fresh_db):
+    """sqlite3 opens no transaction for a SELECT and WAL readers don't block
+    writers, so a hide can land mid-claim. The worker must notice and drop
+    the job rather than solve something already pulled from the site."""
+    with db.get_conn() as conn:
+        _insert(conn, "bad", status="queued")
+
+    conn = db.get_conn()
+    assert worker.claim_next_job(_HideMidClaim(conn, "bad")) is None
+    conn.commit()
+
+    with db.get_conn() as check:
+        row = check.execute("SELECT status, hidden FROM jobs WHERE id='bad'").fetchone()
+    # never claimed: still queued (for the sweep to collect), still hidden
+    assert (row["status"], row["hidden"]) == ("queued", 1)
+
+
+def test_claim_is_atomic_against_a_lost_row(fresh_db):
+    """The same re-check covers a row that stops being claimable for any
+    reason between the SELECT and the UPDATE, not just a hide."""
+    with db.get_conn() as conn:
+        _insert(conn, "job", status="queued")
+
+    class _StealMidClaim(_HideMidClaim):
+        def execute(self, sql, *args):
+            cur = self._conn.execute(sql, *args)
+            if not self._fired and sql.lstrip().upper().startswith("SELECT"):
+                self._fired = True
+                with db.get_conn() as other:
+                    other.execute("UPDATE jobs SET status = 'solving' "
+                                  "WHERE id = ?", (self._job_id,))
+            return cur
+
+    conn = db.get_conn()
+    assert worker.claim_next_job(_StealMidClaim(conn, "job")) is None
+    conn.commit()
+
+
+def test_claim_returns_the_job_when_nothing_interferes(fresh_db):
+    with db.get_conn() as conn:
+        _insert(conn, "job", status="queued")
+        job = worker.claim_next_job(conn)
+    assert job["id"] == "job"
+    with db.get_conn() as conn:
+        assert conn.execute(
+            "SELECT status FROM jobs WHERE id='job'").fetchone()["status"] == "solving"
+
+
+def test_claim_returns_none_on_an_empty_queue(fresh_db):
+    with db.get_conn() as conn:
+        assert worker.claim_next_job(conn) is None
 
 
 def test_hidden_jobs_do_not_occupy_queue_slots(fresh_db, admin):
