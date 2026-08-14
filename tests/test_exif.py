@@ -37,7 +37,7 @@ def test_no_exif_falls_back_to_default_bounds(tmp_path):
 
 def test_focal35_derives_fov_bounds(tmp_path):
     # A Pixel 4a writes FocalLengthIn35mmFilm=27; horizontal FOV for a 36mm
-    # frame is 2*atan(36/54) = 67.38 deg, bracketed by 0.7x / 1.4x.
+    # frame is 2*atan(36/54) = 67.38 deg, bracketed by 0.35x / 1.2x.
     path = tmp_path / "pixel.jpg"
     ex = synth.build_exif(f35mm=27, datetime_original="2021:07:30 23:52:43",
                           gps=(49.1415, 6.1170))
@@ -46,11 +46,27 @@ def test_focal35_derives_fov_bounds(tmp_path):
     info = exif.read_exif(path)
     fov = math.degrees(2 * math.atan(36.0 / 54.0))
     assert info["focal_35mm"] == 27.0
-    assert info["fov_bounds"][0] == pytest.approx(fov * 0.7, rel=1e-6)
-    assert info["fov_bounds"][1] == pytest.approx(fov * 1.4, rel=1e-6)
+    assert info["fov_bounds"][0] == pytest.approx(fov * 0.35, rel=1e-6)
+    assert info["fov_bounds"][1] == pytest.approx(fov * 1.2, rel=1e-6)
     assert info["datetime_original"] == "2021:07:30 23:52:43"
     assert info["lat"] == pytest.approx(49.1415, abs=1e-3)
     assert info["lon"] == pytest.approx(6.1170, abs=1e-3)
+
+
+def test_bracket_reaches_below_a_2x_sensor_crop(tmp_path):
+    """The Pixel 9 case (measured 2026-08-14): EXIF says 24mm-equivalent,
+    implying ~74 deg, but the saved frame is a 2x crop of the 50MP sensor
+    and truly spans 38.4 deg. The bracket has to reach that far down or the
+    quick pass cannot solve the photo at all."""
+    path = tmp_path / "cropped.jpg"
+    Image.new("RGB", (64, 64)).save(path, exif=synth.build_exif(f35mm=24))
+    lo, hi = exif.read_exif(path)["fov_bounds"]
+    # 38.4 is measured, not derived: it comes from the solved WCS of the
+    # real photos, so it stays a literal even if the estimator changes.
+    assert lo <= 38.4 <= hi, f"true field 38.4 deg outside bracket {lo:.1f}-{hi:.1f}"
+    # The estimate itself must stay inside too, for uncropped shots.
+    estimate = math.degrees(2 * math.atan(36.0 / (2 * 24)))
+    assert lo <= estimate <= hi
 
 
 def test_exposure_time_read_for_the_satellite_window(tmp_path):

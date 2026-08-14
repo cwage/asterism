@@ -54,9 +54,20 @@ def read_exif(path):
         f35 = float(f35)
         info["focal_35mm"] = f35
         # Horizontal FOV for a 36mm-wide full frame at this equivalent focal
-        # length; bracket it to absorb crop/pano/EXIF weirdness.
+        # length. The bracket is deliberately lopsided: sensor crops and
+        # digital zoom only ever make the real field NARROWER than the lens
+        # implies, and nothing makes it wider, so this estimate is an upper
+        # bound with a long tail below it.
+        #
+        # Measured 2026-08-14 on Pixel 9 astro shots: EXIF reports 24mm
+        # equivalent (~74 deg) while the saved 4000x3000 frame is a 2x crop
+        # of the 50MP sensor and truly spans 38.4 deg — a ratio of 0.52,
+        # identical across every shot. The old symmetric 0.7-1.4 bracket
+        # started at 52 deg, so the quick pass could not solve those photos
+        # at all: it burned a full cpulimit before the fallback tier picked
+        # them up on a "try harder" click. 0.35 covers a ~3x crop.
         fov = math.degrees(2 * math.atan(36.0 / (2 * f35)))
-        info["fov_bounds"] = (max(1.0, fov * 0.7), min(180.0, fov * 1.4))
+        info["fov_bounds"] = (max(1.0, fov * 0.35), min(180.0, fov * 1.2))
 
     dto = exif_ifd.get(TAG_DATETIME_ORIGINAL)
     if dto:
