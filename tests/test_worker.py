@@ -6,7 +6,8 @@ import json
 
 import pytest
 
-from app import constellations, db, ephemeris, narrate, solver, verify, worker
+from app import (constellations, db, ephemeris, narrate, satellites, solver,
+                 verify, worker)
 
 JOB = {"id": "abc123", "image_path": "/photos/x.jpg", "mode": "quick",
        "exif_json": json.dumps({"width": 100, "height": 100})}
@@ -29,6 +30,9 @@ def stub_solve(tmp_path, monkeypatch):
     monkeypatch.setattr(verify, "count_stars", lambda *a: 50)
     # No narration by default: tests never depend on an API key in the env.
     monkeypatch.setattr(narrate, "annotate", lambda *a, **k: None)
+    # Likewise no Space-Track credentials, and never a network call.
+    monkeypatch.setattr(satellites, "annotate",
+                        lambda *a, **k: {"skipped": "no_credentials"})
 
 
 def test_bodies_merge_ahead_of_stars(monkeypatch):
@@ -83,6 +87,31 @@ def test_narration_attaches_when_available(monkeypatch):
     status, result, error = worker.process(JOB)
     assert status == "done" and error is None
     assert result["narration"] == narration
+
+
+def test_satellite_crossings_attach_to_the_result(monkeypatch):
+    monkeypatch.setattr(ephemeris, "annotate_bodies",
+                        lambda *a: ([], {"time_source": None}))
+    sats = {"crossings": [{"name": "Iss (Zarya)", "norad_id": "25544",
+                           "points": [[1.0, 2.0], [3.0, 4.0]],
+                           "t_enter_s": 0.0, "t_exit_s": 16.0}],
+            "objects_checked": 4200, "exposure_seconds": 16.0, "source": "gp"}
+    monkeypatch.setattr(satellites, "annotate", lambda *a, **k: sats)
+    status, result, error = worker.process(JOB)
+    assert status == "done" and error is None
+    assert result["satellites"] == sats
+
+
+def test_satellite_crash_does_not_fail_the_job(monkeypatch):
+    monkeypatch.setattr(ephemeris, "annotate_bodies",
+                        lambda *a: ([], {"time_source": None}))
+    def boom(*a, **k):
+        raise RuntimeError("space-track exploded")
+    monkeypatch.setattr(satellites, "annotate", boom)
+    status, result, error = worker.process(JOB)
+    assert status == "done" and error is None
+    assert result["satellites"] == {"skipped": "satellite lookup failed"}
+    assert result["labels"] == STARS
 
 
 def test_narration_crash_does_not_fail_the_job(monkeypatch):

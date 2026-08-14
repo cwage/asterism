@@ -33,6 +33,14 @@ Final home: `asterism.quietlife.net`.
   get an extended-source check instead of point snapping (#50): core
   brightness against a surrounding annulus (or resolved member stars for
   clusters), so a label never circles "Andromeda Galaxy" over bare sky-glow.
+- Satellite crossings (#11): when the photo carries both a timestamp and
+  GPS, Space-Track element sets (`SPACETRACK_USER`/`SPACETRACK_PASS`) are
+  propagated with sgp4 across the EXIF exposure window and projected
+  through the same WCS, listing what passed through the frame while the
+  shutter was open. Tracks are drawn dashed because they are computed,
+  not detected — streak detection in the pixels is deliberately out of
+  scope. TLE sets are cached per UTC date under `data/tle/`, so a night of
+  uploads costs one query.
 - With an `ANTHROPIC_API_KEY` configured (Fly secret in prod), each solved
   photo also gets a short LLM-written "what you captured" narration (#12,
   Claude Haiku over the label list — never the photo): a writeup on the

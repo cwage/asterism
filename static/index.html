@@ -138,6 +138,7 @@ is deleted after 24 hours.</p>
   <label><input type="checkbox" id="lay-solar" checked> moon &amp; planets</label>
   <label><input type="checkbox" id="lay-dso" checked> deep-sky</label>
   <label><input type="checkbox" id="lay-con" checked> constellations</label>
+  <label><input type="checkbox" id="lay-sat" checked> satellites</label>
   <label class="mag">faintest star: mag
     <input type="range" id="mag-limit" min="1" max="4.5" step="0.25" value="4.5">
     <span id="mag-val">4.5</span></label>
@@ -383,6 +384,7 @@ function controlState() {
     solar: document.getElementById('lay-solar').checked,
     dso: document.getElementById('lay-dso').checked,
     constellations: document.getElementById('lay-con').checked,
+    satellites: document.getElementById('lay-sat').checked,
     magLimit: parseFloat(document.getElementById('mag-limit').value),
   };
 }
@@ -420,6 +422,25 @@ function draw() {
                         y: pts.reduce((s, p) => s + p[1], 0) / pts.length });
       }
     }
+  }
+
+  // Satellite crossings (#11): computed tracks, never pixel-detected, so
+  // they're drawn dashed — the same "unverified" language as hidden labels.
+  const satNames = [];
+  if (state.satellites) {
+    const crossings = (shownJob.result.satellites || {}).crossings || [];
+    ctx.strokeStyle = 'rgba(140, 230, 190, 0.75)';
+    ctx.lineWidth = Math.max(1, 1.5 * scale);
+    ctx.setLineDash([7 * scale, 5 * scale]);
+    for (const c of crossings) {
+      if (!c.points || c.points.length < 2) continue;
+      ctx.beginPath();
+      c.points.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+      ctx.stroke();
+      const mid = c.points[Math.floor(c.points.length / 2)];
+      satNames.push({ name: c.name, x: mid[0], y: mid[1] });
+    }
+    ctx.setLineDash([]);
   }
 
   // Markers first; their footprints seed the keep-clear zones.
@@ -483,6 +504,21 @@ function draw() {
     ], w, h, W, H);
     if (spot) ctx.fillText(c.name, spot.x, spot.y + conPx * 0.85);
   }
+
+  // Satellite names go last: the track is the point, the name is a bonus.
+  const satPx = Math.max(12, 14 * scale);
+  ctx.font = `${satPx}px system-ui`;
+  ctx.fillStyle = 'rgba(140, 230, 190, 0.85)';
+  for (const s of satNames) {
+    const w = ctx.measureText(s.name).width;
+    const h = satPx * 1.2;
+    const spot = placeText(placed, [
+      { x: s.x + 8 * scale, y: s.y - h / 2 },
+      { x: s.x - w - 8 * scale, y: s.y - h / 2 },
+      { x: s.x - w / 2, y: s.y + h },
+    ], w, h, W, H);
+    if (spot) ctx.fillText(s.name, spot.x, spot.y + satPx * 0.85);
+  }
   ctx.globalAlpha = 1;
 }
 
@@ -512,6 +548,8 @@ function render(id, job) {
     if (bodies) parts.push(`${bodies} solar-system ${bodies === 1 ? 'body' : 'bodies'}`);
     if (dsos) parts.push(`${dsos} deep-sky object${dsos === 1 ? '' : 's'}`);
     if (figures.length) parts.push(`${figures.length} constellation${figures.length === 1 ? '' : 's'}`);
+    const crossings = ((job.result.satellites || {}).crossings || []).length;
+    if (crossings) parts.push(`${crossings} satellite crossing${crossings === 1 ? '' : 's'}`);
     const notes = [];
     if (hidden) notes.push(`${hidden} hidden by cloud`);
     const v = job.result.verification;

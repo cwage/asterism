@@ -53,6 +53,19 @@ def test_focal35_derives_fov_bounds(tmp_path):
     assert info["lon"] == pytest.approx(6.1170, abs=1e-3)
 
 
+def test_exposure_time_read_for_the_satellite_window(tmp_path):
+    # Astro-mode shots record long per-frame exposures; that window is what
+    # satellite crossings (#11) are computed over.
+    path = tmp_path / "astro.jpg"
+    Image.new("RGB", (64, 64)).save(
+        path, exif=synth.build_exif(exposure_seconds=16))
+    assert exif.read_exif(path)["exposure_seconds"] == 16.0
+
+    plain = tmp_path / "plain.jpg"
+    Image.new("RGB", (64, 64)).save(plain)
+    assert exif.read_exif(plain)["exposure_seconds"] is None
+
+
 def test_southern_western_gps_signs(tmp_path):
     path = tmp_path / "south.jpg"
     ex = synth.build_exif(gps=(-33.87, -151.21))

@@ -7,7 +7,8 @@ import shutil
 import time
 import traceback
 
-from . import constellations, db, dso, ephemeris, narrate, solver, verify
+from . import (constellations, db, dso, ephemeris, narrate, satellites,
+               solver, verify)
 
 # Below this many detected star-like sources, a quick job fails fast
 # instead of burning cpulimit tiers on daylight/food/pitch-black uploads.
@@ -153,10 +154,23 @@ def process(job):
         print(f"worker: verification failed for {job['id']}\n{traceback.format_exc()}")
         verification = {"verified": False, "error": "verification failed"}
 
+    # Satellite crossings during the exposure (#11), best-effort: needs a
+    # timestamp, GPS, and Space-Track credentials, and reports why not
+    # when it can't run.
+    try:
+        sats = satellites.annotate(
+            result["wcs_path"], exif_info["width"], exif_info["height"],
+            exif_info
+        )
+    except Exception:
+        print(f"worker: satellites failed for {job['id']}\n{traceback.format_exc()}")
+        sats = {"skipped": "satellite lookup failed"}
+
     result["labels"] = labels
     result["ephemeris"] = eph_meta
     result["constellations"] = figures
     result["verification"] = verification
+    result["satellites"] = sats
 
     # LLM narration (#12), best-effort: no API key or a failed call just
     # leaves the deterministic card caption in place.

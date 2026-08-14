@@ -45,6 +45,10 @@ Rules:
   Gxy = galaxy, Neb/OC+Neb = nebula, GC = globular cluster.
 - Lower magnitude = brighter. Lead with the most notable catch: the Moon,
   planets, bright deep-sky objects, then bright stars and constellations.
+- satellites_crossing lists satellites computed to have passed through the
+  frame during the exposure. They were not detected in the pixels, so say
+  they passed through, never that a streak is visible. Mention at most one,
+  and only when the list is short enough for that to be interesting.
 - Warm, plain tone. No emoji, no exclamation marks, no hype.
 
 Return JSON:
@@ -70,6 +74,10 @@ def _payload(result):
         "labels": labels,
         "constellations": [c["name"] for c in result.get("constellations") or []],
         "time_utc": (result.get("ephemeris") or {}).get("time_utc"),
+        "satellites_crossing": [
+            c["name"] for c in
+            (result.get("satellites") or {}).get("crossings") or []
+        ],
     }
 
 
