@@ -211,6 +211,33 @@ def recover_orphans():
     return requeued, abandoned
 
 
+def claim_next_job(conn):
+    """Take the next queued job and mark it 'solving'. Returns the row, or
+    None if there was nothing to take.
+
+    The id tiebreak keeps FIFO deterministic when created_at (second
+    resolution) collides, and matches the API's queue-position math.
+    hidden = 0 keeps a job pulled by the kill switch (#60) from burning a
+    solve on its way to the retention sweep.
+
+    The UPDATE re-checks both preconditions rather than trusting the SELECT:
+    sqlite3 opens no transaction for a SELECT and WAL readers don't block
+    writers, so a /hide can commit between the two statements. An
+    unconditional claim would go on to solve a job that is already hidden."""
+    job = conn.execute(
+        "SELECT * FROM jobs WHERE status = 'queued' AND hidden = 0 "
+        "ORDER BY created_at, id LIMIT 1"
+    ).fetchone()
+    if not job:
+        return None
+    claimed = conn.execute(
+        "UPDATE jobs SET status = 'solving' "
+        "WHERE id = ? AND status = 'queued' AND hidden = 0",
+        (job["id"],),
+    ).rowcount
+    return job if claimed else None
+
+
 def main():
     db.init_db()
     requeued, abandoned = recover_orphans()
@@ -231,16 +258,7 @@ def main():
                 print(f"worker: retention sweep failed\n{traceback.format_exc()}")
 
         with db.get_conn() as conn:
-            # id tiebreak keeps FIFO deterministic when created_at (second
-            # resolution) collides — and matches the API's queue-position math.
-            job = conn.execute(
-                "SELECT * FROM jobs WHERE status = 'queued' "
-                "ORDER BY created_at, id LIMIT 1"
-            ).fetchone()
-            if job:
-                conn.execute(
-                    "UPDATE jobs SET status = 'solving' WHERE id = ?", (job["id"],)
-                )
+            job = claim_next_job(conn)
         if not job:
             time.sleep(1)
             continue

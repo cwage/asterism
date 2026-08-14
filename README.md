@@ -60,6 +60,30 @@ work too, without any extra data: the shipped set reaches down to ~2.5°,
 and a 10x periscope is only ~8.6° wide. The multi-GB index sets are needed
 below that, for genuine telescope fields, which stay out of scope (#19).
 
+## Moderation
+
+Uploads are anonymous and every successful solve is republished on the homepage
+feed, so there is a kill switch (#60). With `ADMIN_TOKEN` set (a Fly secret in
+prod), one request pulls a job out of every public read path:
+
+```
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" https://asterism.quietlife.net/jobs/JOB_ID/hide
+```
+
+The job then 404s from `/feed`, `GET /jobs/{id}`, `/image`, and `/card` exactly
+like an expired one, and the cached card PNG is unlinked immediately — that last
+part matters, because `?job=` emits OpenGraph tags pointing at the card, so
+share links keep unfurling the image until it's gone. If the job hadn't solved
+yet, the worker stops seeing it too.
+
+The row and the upload stay on disk until the normal retention sweep collects
+them (within `RETENTION_HOURS`). That keeps a mistyped id one
+`UPDATE jobs SET hidden = 0` away from undone, and keeps the bytes around in
+case an upload needs reporting rather than just removing.
+
+With no `ADMIN_TOKEN` configured the endpoint 404s for everyone — unset means
+absent, not open, so local dev and CI have nothing to poke at.
+
 ## Quickstart
 
 ```

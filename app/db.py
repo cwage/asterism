@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     error TEXT,
     solve_seconds REAL,
     mode TEXT NOT NULL DEFAULT 'quick',
-    orphan_recoveries INTEGER NOT NULL DEFAULT 0
+    orphan_recoveries INTEGER NOT NULL DEFAULT 0,
+    hidden INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -38,6 +39,7 @@ def init_db():
         for name, decl in (
             ("mode", "TEXT NOT NULL DEFAULT 'quick'"),
             ("orphan_recoveries", "INTEGER NOT NULL DEFAULT 0"),
+            ("hidden", "INTEGER NOT NULL DEFAULT 0"),
         ):
             if name not in cols:
                 try:
