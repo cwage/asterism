@@ -98,6 +98,17 @@ def _prune_cache(cache_dir):
             pass
 
 
+def _load_cached(cache_path):
+    """Cached TLE rows, or None when the file is missing or unusable — a
+    truncated or malformed cache should be refetched, not trusted."""
+    try:
+        with open(cache_path) as f:
+            rows = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return rows if isinstance(rows, list) else None
+
+
 def _tle_records(when_utc, fetch=_fetch):
     """(records, cache_path, source): one TLE row per object, the element
     set whose epoch sits nearest the exposure. records is None when the
@@ -110,11 +121,15 @@ def _tle_records(when_utc, fetch=_fetch):
     cache_dir = os.path.join(db.DATA_DIR, "tle")
     cache_path = os.path.join(
         cache_dir, f"{source}-{when_utc.date().isoformat()}.json")
-    if os.path.exists(cache_path):
-        with open(cache_path) as f:
-            rows = json.load(f)
-    else:
+    rows = _load_cached(cache_path)
+    if rows is None:
         rows = fetch(url, *creds)
+        # Space-Track reports errors as a JSON object, not a row list.
+        # Caching one would silently zero out every solve for this date,
+        # so refuse it and let the worker log a failed layer instead.
+        if not isinstance(rows, list):
+            raise ValueError(
+                f"unexpected Space-Track response: {type(rows).__name__}")
         os.makedirs(cache_dir, exist_ok=True)
         # Atomic publish: a second worker must never read a half-written set.
         tmp_path = f"{cache_path}.tmp{os.getpid()}"

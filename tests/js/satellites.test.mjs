@@ -62,6 +62,17 @@ test('degenerate and absent crossings draw nothing', () => {
   assert.equal(ctx.ops.filter(o => o.op === 'stroke').length, 0);
 });
 
+test('redrawing after a toggle does not leave the old track behind', () => {
+  const { sandbox, els } = loadPage();
+  const ctx = show(sandbox, els, job({ crossings: [CROSSING] }));
+  assert.equal(ctx.ops.filter(o => o.op === 'stroke').length, 1);
+
+  sandbox.document.getElementById('lay-sat').checked = false;
+  sandbox.draw();
+  assert.equal(ctx.ops.filter(o => o.op === 'stroke').length, 0,
+    'the cleared canvas must not still show the previous render');
+});
+
 test('status line counts crossings', () => {
   const { sandbox, els } = loadPage();
   show(sandbox, els, job({ crossings: [CROSSING] }));

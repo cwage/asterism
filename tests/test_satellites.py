@@ -161,6 +161,28 @@ def test_tle_records_keeps_the_elset_nearest_the_exposure():
     assert by_id["25544"]["EPOCH"] == "2026-08-12T03:00:00"
 
 
+def test_error_payload_is_refused_rather_than_cached(tmp_path):
+    # Space-Track reports errors as a JSON object; caching one would zero
+    # out every solve for this date until the file aged out.
+    with pytest.raises(ValueError, match="unexpected Space-Track response"):
+        satellites._tle_records(WHEN, fetch=lambda *a: {"error": "throttled"})
+    assert not list((tmp_path / "tle").glob("*.json"))
+
+
+def test_corrupt_cache_file_is_refetched(tmp_path):
+    calls = []
+    def fake_fetch(url, user, password):
+        calls.append(url)
+        return [_row()]
+
+    _, path, _ = satellites._tle_records(WHEN, fetch=fake_fetch)
+    with open(path, "w") as f:
+        f.write("{ truncated")
+    records, _, _ = satellites._tle_records(WHEN, fetch=fake_fetch)
+    assert len(calls) == 2, "a corrupt cache must be refetched, not trusted"
+    assert [r["NORAD_CAT_ID"] for r in records] == ["25544"]
+
+
 def test_cache_is_pruned_to_a_bounded_number_of_dates(tmp_path, monkeypatch):
     monkeypatch.setattr(satellites, "TLE_CACHE_KEEP", 3)
     for day in range(6):

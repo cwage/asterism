@@ -14,7 +14,9 @@ export function makeCtx() {
     ops: [],
     strokeStyle: '', fillStyle: '', lineWidth: 1, font: '', globalAlpha: 1,
     _dash: [], _path: null,
-    clearRect() {},
+    // draw() clears before every render; forget prior ops with it, or a
+    // second draw (a layer toggle, say) would be read against stale strokes.
+    clearRect() { ctx.ops.length = 0; },
     setLineDash(d) { ctx._dash = d; },
     beginPath() { ctx._path = []; },
     moveTo(x, y) { ctx._path.push(['moveTo', x, y]); },
