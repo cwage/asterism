@@ -40,6 +40,10 @@ DSO_DEFAULT_RADIUS_FRAC = 0.008  # aperture when the catalog has no size
 DSO_CLUSTER_TYPES = {"OC", "OC+Neb", "Ast", "MWSC"}
 DSO_CLUSTER_MIN_PEAKS = 3
 
+# Width the pre-solve star gate works at. Its isolation test is in fixed
+# pixels, so bigger uploads are scaled down to meet it (see count_stars).
+GATE_WIDTH = 1600
+
 
 def count_stars(image_path, grid=24, thr_sigma=5.0, min_amp=12.0,
                 max_count=500):
@@ -50,9 +54,27 @@ def count_stars(image_path, grid=24, thr_sigma=5.0, min_amp=12.0,
     are rejected by requiring the annulus 4-10 px out to sit well below
     the peak. Coarse block-median background handles sky gradients. The
     gate stays permissive — its job is rejecting zero-star images, not
-    predicting solve success. Returns None if the image can't be read."""
+    predicting solve success. Returns None if the image can't be read.
+
+    That annulus is measured in pixels, so the whole detector is only
+    valid at one scale, and the image is normalized to it first. Measured
+    2026-08-14 on real Pixel 9 astro shots: the same photo counts 0 stars
+    at its native 4000px width and 67 at 1600px, because night-mode
+    stacking leaves a star's glow still bright 10px out on a 12MP frame,
+    failing the isolation test for every real star. Those photos were
+    rejected as "not a sky photo" despite plate-solving in under 6
+    seconds. Downscaling also makes the gate cheaper on big uploads."""
     try:
-        img = np.asarray(Image.open(image_path).convert("L"), dtype=np.float32)
+        # Context-managed: this runs for every non-deep upload, so the file
+        # handle has to close on the spot rather than whenever GC notices.
+        with Image.open(image_path) as src:
+            img = src.convert("L")
+            if img.width > GATE_WIDTH:
+                img = img.resize(
+                    (GATE_WIDTH,
+                     max(1, round(img.height * GATE_WIDTH / img.width))),
+                    Image.LANCZOS)
+            img = np.asarray(img, dtype=np.float32)
     except Exception:
         return None
     h, w = img.shape
@@ -258,7 +280,8 @@ def apply(image_path, labels, figures):
     (labels, figures, meta). Never raises on a bad image: the originals
     come back with meta["verified"] = False."""
     try:
-        img = np.asarray(Image.open(image_path).convert("L"), dtype=np.float32)
+        with Image.open(image_path) as src:
+            img = np.asarray(src.convert("L"), dtype=np.float32)
     except Exception:
         return labels, figures, {"verified": False, "error": "image unreadable"}
 

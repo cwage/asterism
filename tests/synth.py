@@ -80,12 +80,13 @@ def _deg_to_dms(deg):
     return (d, m, s)
 
 
-def stamp_stars(arr, stars):
+def stamp_stars(arr, stars, sigma=1.3):
     """Add Gaussian star stamps to a float image array in place.
-    stars = [(x, y, amp), ...] in pixel coordinates."""
+    stars = [(x, y, amp), ...] in pixel coordinates. `sigma` widens the
+    PSF — phone night modes stack into fat stars, which is what makes
+    scale matter for the pre-solve gate."""
     height, width = arr.shape
-    sigma = 1.3
-    r = 5
+    r = max(5, int(round(3 * sigma)))
     yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
     stamp = np.exp(-(xx ** 2 + yy ** 2) / (2 * sigma ** 2))
     for x, y, amp in stars:
@@ -108,7 +109,7 @@ def stamp_blobs(arr, blobs):
 
 
 def render_points(path, points, width=1200, height=900, amp=180.0, seed=11,
-                  amps=None, blobs=None):
+                  amps=None, blobs=None, sigma=1.3):
     """Render Gaussian stars at explicit pixel positions over a flat noisy
     background — ground truth for verification tests, no WCS involved.
     `amps` overrides the uniform amplitude per point; `blobs` adds diffuse
@@ -120,7 +121,7 @@ def render_points(path, points, width=1200, height=900, amp=180.0, seed=11,
         amps = [amp] * len(points)
     if len(amps) != len(points):
         raise ValueError(f"amps has {len(amps)} entries for {len(points)} points")
-    stamp_stars(arr, [(x, y, a) for (x, y), a in zip(points, amps)])
+    stamp_stars(arr, [(x, y, a) for (x, y), a in zip(points, amps)], sigma=sigma)
     if blobs:
         stamp_blobs(arr, blobs)
     img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8)).convert("RGB")

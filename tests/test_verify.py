@@ -248,6 +248,26 @@ def test_count_stars_on_starfield_and_starless_images(tmp_path):
     assert verify.count_stars(str(tmp_path / "missing.jpg")) is None
 
 
+def test_gate_normalizes_scale_before_counting(tmp_path, monkeypatch):
+    """Real phone uploads are ~12MP with night-mode-fattened stars, and the
+    isolation test is written in fixed pixels — 10px out is nothing on a
+    4000px frame, so every real star failed it. Measured 2026-08-14 on
+    Pixel 9 shots: the same photo counted 0 stars natively and 67 at
+    1600px, and was rejected as "not a sky photo" despite solving in under
+    6 seconds."""
+    path = tmp_path / "stacked.jpg"
+    points = [(x, y) for x in range(400, 3800, 420)
+              for y in range(400, 2800, 420)]
+    synth.render_points(str(path), points, width=4000, height=3000, sigma=5.0)
+
+    assert verify.count_stars(str(path)) >= 10, "12MP frame must pass the gate"
+
+    # ...and that is entirely down to the normalization: skip it and the
+    # same image reads as starless, which is the bug this guards.
+    monkeypatch.setattr(verify, "GATE_WIDTH", 99999)
+    assert verify.count_stars(str(path)) < 10
+
+
 def test_unreadable_image_returns_originals(tmp_path):
     labels = star_labels(PREDICTED)
     figures = [{"name": "F", "abbr": "F", "segments": [[0.0, 0.0, 1.0, 1.0]]}]
