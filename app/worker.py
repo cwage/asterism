@@ -233,8 +233,10 @@ def main():
         with db.get_conn() as conn:
             # id tiebreak keeps FIFO deterministic when created_at (second
             # resolution) collides — and matches the API's queue-position math.
+            # hidden = 0: a job pulled by the kill switch (#60) must not burn
+            # a solve on its way to the retention sweep.
             job = conn.execute(
-                "SELECT * FROM jobs WHERE status = 'queued' "
+                "SELECT * FROM jobs WHERE status = 'queued' AND hidden = 0 "
                 "ORDER BY created_at, id LIMIT 1"
             ).fetchone()
             if job:

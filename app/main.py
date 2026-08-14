@@ -1,3 +1,4 @@
+import hmac
 import json
 import os
 import re
@@ -26,7 +27,25 @@ MAX_QUEUE_DEPTH = int(os.environ.get("MAX_QUEUE_DEPTH", "20"))
 RETENTION_HOURS = int(os.environ.get("RETENTION_HOURS", "24"))
 _GONE = f"no such job (results expire after {RETENTION_HOURS} hours)"
 
+# Moderation kill switch (#60). Uploads are anonymous and successful solves
+# are republished on the homepage, so there has to be a way to pull one down
+# that isn't "ssh in and edit SQLite by hand". Unset means the endpoint does
+# not exist at all — local dev and CI have nothing to poke.
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
+
 _upload_log = defaultdict(deque)  # client ip -> recent upload monotonic times
+
+
+def _require_admin(request):
+    """404 rather than 401/403: an unauthenticated caller learns nothing about
+    whether the endpoint (or the job) is there."""
+    if not ADMIN_TOKEN:
+        raise HTTPException(404, "Not Found")
+    # Compare as bytes: compare_digest raises TypeError on non-ASCII str, and
+    # headers arrive latin-1-decoded, so a junk header would 500 the endpoint.
+    sent = request.headers.get("authorization", "").encode("utf-8", "replace")
+    if not hmac.compare_digest(sent, f"Bearer {ADMIN_TOKEN}".encode()):
+        raise HTTPException(404, "Not Found")
 
 
 def _client_ip(request):
@@ -55,7 +74,8 @@ def _rate_limited(ip, now=None):
 def _queue_depth():
     with db.get_conn() as conn:
         row = conn.execute(
-            "SELECT COUNT(*) AS n FROM jobs WHERE status IN ('queued', 'solving')"
+            "SELECT COUNT(*) AS n FROM jobs "
+            "WHERE status IN ('queued', 'solving') AND hidden = 0"
         ).fetchone()
     return row["n"]
 
@@ -131,9 +151,9 @@ def deepen_job(job_id: str):
     """Re-queue a failed quick job to run the remaining solve tiers."""
     with db.get_conn() as conn:
         row = conn.execute(
-            "SELECT status, mode FROM jobs WHERE id = ?", (job_id,)
+            "SELECT status, mode, hidden FROM jobs WHERE id = ?", (job_id,)
         ).fetchone()
-        if not row:
+        if not row or row["hidden"]:
             raise HTTPException(404, "no such job")
         if row["status"] != "failed" or row["mode"] == "deep":
             raise HTTPException(409, "job is not eligible for a deeper solve")
@@ -143,6 +163,32 @@ def deepen_job(job_id: str):
             "WHERE id = ?", (job_id,),
         )
     return {"id": job_id, "status": "queued", "mode": "deep"}
+
+
+@app.post("/jobs/{job_id}/hide")
+def hide_job(job_id: str, request: Request):
+    """Pull a job out of every public read path (#60).
+
+    The row and the upload stay on disk for the retention sweep to collect:
+    hiding is instant, reversible with one UPDATE if the wrong id gets typed,
+    and keeps the bytes around in case the upload needs reporting rather than
+    just removing."""
+    _require_admin(request)
+    with db.get_conn() as conn:
+        row = conn.execute(
+            "SELECT image_path FROM jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, _GONE)
+        conn.execute("UPDATE jobs SET hidden = 1 WHERE id = ?", (job_id,))
+    # The cached card is the amplification path — share links unfurl it (#13)
+    # — so drop it now instead of waiting on the sweep.
+    if row["image_path"]:
+        try:
+            os.unlink(row["image_path"] + ".card.png")
+        except FileNotFoundError:
+            pass
+    return {"id": job_id, "hidden": True}
 
 
 FEED_LIMIT = 24
@@ -155,11 +201,11 @@ def feed():
     This deliberately makes recent solves discoverable — job links used
     to be unlisted — and the upload-page disclosure says so before anyone
     uploads. The narration caption (#12) rides along as alt text when the
-    worker produced one."""
+    worker produced one. Hidden jobs (#60) never appear."""
     with db.get_conn() as conn:
         rows = conn.execute(
             "SELECT id, created_at, result_json FROM jobs "
-            "WHERE status = 'done' "
+            "WHERE status = 'done' AND hidden = 0 "
             "ORDER BY created_at DESC, id DESC LIMIT ?",
             (FEED_LIMIT,),
         ).fetchall()
@@ -193,9 +239,9 @@ def _queue_position(conn, row):
     queued jobs ahead in FIFO order (created_at, then id — the same order
     the worker consumes)."""
     ahead = conn.execute(
-        "SELECT COUNT(*) AS n FROM jobs WHERE status = 'solving' "
+        "SELECT COUNT(*) AS n FROM jobs WHERE hidden = 0 AND (status = 'solving' "
         "OR (status = 'queued' AND (created_at < :c "
-        "    OR (created_at = :c AND id < :i)))",
+        "    OR (created_at = :c AND id < :i))))",
         {"c": row["created_at"], "i": row["id"]},
     ).fetchone()
     return ahead["n"]
@@ -206,7 +252,7 @@ def get_job(job_id: str):
     with db.get_conn() as conn:
         row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
         position = _queue_position(conn, row) if row and row["status"] == "queued" else None
-    if not row:
+    if not row or row["hidden"]:
         raise HTTPException(404, _GONE)
     out = {
         "id": row["id"],
@@ -225,9 +271,9 @@ def get_job(job_id: str):
 def get_job_image(job_id: str):
     with db.get_conn() as conn:
         row = conn.execute(
-            "SELECT image_path FROM jobs WHERE id = ?", (job_id,)
+            "SELECT image_path, hidden FROM jobs WHERE id = ?", (job_id,)
         ).fetchone()
-    if not row or not os.path.exists(row["image_path"]):
+    if not row or row["hidden"] or not os.path.exists(row["image_path"]):
         raise HTTPException(404, _GONE)
     return FileResponse(row["image_path"])
 
@@ -238,10 +284,10 @@ def get_job_card(job_id: str, request: Request):
     job and cached beside the upload (same retention sweep collects it)."""
     with db.get_conn() as conn:
         row = conn.execute(
-            "SELECT image_path, status, result_json FROM jobs WHERE id = ?",
+            "SELECT image_path, status, result_json, hidden FROM jobs WHERE id = ?",
             (job_id,),
         ).fetchone()
-    if not row or not os.path.exists(row["image_path"]):
+    if not row or row["hidden"] or not os.path.exists(row["image_path"]):
         raise HTTPException(404, _GONE)
     if row["status"] != "done" or not row["result_json"]:
         raise HTTPException(409, "no card until the solve finishes")
