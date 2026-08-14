@@ -15,6 +15,9 @@
          max-width: 960px; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
   header { margin: 1rem 0 1.5rem; }
   h1 { font-weight: 400; letter-spacing: 0.3em; font-size: 1.6rem; margin: 0; }
+  /* The wordmark is the way back to a clean upload page from a ?job= link. */
+  h1 a { color: inherit; text-decoration: none; }
+  h1 a:hover { color: var(--accent); }
   .tag { color: var(--dim); margin: 0.25rem 0 0; }
 
   .upload { position: relative; display: flex; align-items: center;
@@ -30,13 +33,27 @@
                   opacity: 0; cursor: pointer; }
   .upload:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-  details.about { margin: 1rem 0 0; border: 1px solid #1c2634;
-                  border-radius: 10px; background: var(--panel); }
-  details.about summary { cursor: pointer; padding: 0.7rem 1rem;
-                          color: var(--dim); user-select: none; }
-  details.about p { margin: 0.25rem 0 0.9rem; padding: 0 1rem; color: var(--dim);
-                    font-size: 0.95rem; }
-  details.about a { color: var(--accent); }
+  /* "What is this?" lives as a corner affordance in the header rather than
+     a block competing with the result. Native <details>, no JS. */
+  header { position: relative; }
+  details.about { position: absolute; top: 0; right: 0; }
+  details.about summary { list-style: none; cursor: pointer; user-select: none;
+                          width: 1.9rem; height: 1.9rem; display: grid;
+                          place-items: center; border-radius: 50%;
+                          border: 1px solid var(--line); color: var(--dim);
+                          font-size: 0.95rem; line-height: 1; }
+  details.about summary::-webkit-details-marker { display: none; }
+  details.about summary:hover,
+  details.about[open] summary { color: var(--accent); border-color: var(--accent); }
+  details.about summary:focus-visible { outline: 2px solid var(--accent);
+                                        outline-offset: 2px; }
+  .about-panel { position: absolute; top: 2.4rem; right: 0; z-index: 10;
+                 width: min(340px, calc(100vw - 2rem));
+                 border: 1px solid #1c2634; border-radius: 10px;
+                 background: var(--panel); padding: 0.2rem 1rem 0.4rem;
+                 box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55); }
+  .about-panel p { margin: 0.8rem 0; color: var(--dim); font-size: 0.9rem; }
+  .about-panel a { color: var(--accent); }
 
   .disclosure { font-size: 0.8rem; color: var(--faint); margin: 0.75rem 0 0; }
 
@@ -48,10 +65,16 @@
   #feed img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
   #status { margin: 1rem 0 0.5rem; color: var(--dim); min-height: 1.5em; }
+  /* Before the first solve the whole result block sits above the feed, so
+     it has to take up no room at all. */
+  #status:empty { margin: 0; min-height: 0; }
   #controls { display: flex; flex-wrap: wrap; gap: 0.4rem 1.1rem; align-items: center;
               border: 1px solid #1c2634; border-radius: 10px; background: var(--panel);
               padding: 0.55rem 0.9rem; margin: 0 0 0.5rem; font-size: 0.9rem;
               color: var(--dim); }
+  /* display:flex outranks the UA's [hidden]{display:none}, so the layer
+     toggles were showing on the landing page with nothing to toggle. */
+  #controls[hidden] { display: none; }
   #controls label { display: inline-flex; align-items: center; gap: 0.35rem;
                     cursor: pointer; user-select: none; }
   #controls input[type="range"] { width: 110px; accent-color: var(--accent); }
@@ -78,7 +101,9 @@
                margin: 0.75rem 0 0; font-size: 0.95rem; color: var(--ink); }
   #narration:empty { display: none; }
 
-  #wrap { position: relative; display: inline-block; max-width: 100%;
+  /* Hidden until render() has a photo: an empty inline-block still claims a
+     line box, which would gap the feed away from the upload control. */
+  #wrap { position: relative; display: none; max-width: 100%;
           margin-top: 0.75rem; border-radius: 6px; overflow: hidden; }
   #wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
   #wrap img { display: block; max-width: 100%; }
@@ -96,30 +121,31 @@
 </head>
 <body>
 <header>
-  <h1>asterism</h1>
+  <h1><a href="/">asterism</a></h1>
   <p class="tag">Point your phone at the night sky. Find out what you saw.</p>
+  <details class="about">
+    <summary aria-label="What is this?" title="What is this?">?</summary>
+    <div class="about-panel">
+      <p>Upload a photo of the night sky — even a hazy, handheld phone shot —
+      and asterism <em>plate-solves</em> it: the star pattern in your pixels is
+      matched against a map of the entire sky
+      (<a href="https://astrometry.net/">astrometry.net</a>) to work out exactly
+      where the camera was pointing, with no location or orientation data
+      needed.</p>
+      <p>It then names the stars it can see, draws the constellation figures,
+      circles the naked-eye deep-sky objects in frame (the Pleiades, the Orion
+      Nebula, Andromeda), and — when the photo carries a timestamp — marks the
+      Moon and planets computed for that instant. Labels it can't verify
+      against an actual dot in your photo (clouds, usually) are drawn dashed.</p>
+      <p>No account, no app: your phone camera is the instrument.
+      <a href="https://github.com/cwage/asterism">Source on GitHub.</a></p>
+    </div>
+  </details>
 </header>
 
 <label class="upload" for="file">✦ Choose a night-sky photo
   <input type="file" id="file" accept="image/*" aria-label="Choose a night-sky photo">
 </label>
-
-<details class="about">
-  <summary>What is this?</summary>
-  <p>Upload a photo of the night sky — even a hazy, handheld phone shot —
-  and asterism <em>plate-solves</em> it: the star pattern in your pixels is
-  matched against a map of the entire sky
-  (<a href="https://astrometry.net/">astrometry.net</a>) to work out exactly
-  where the camera was pointing, with no location or orientation data
-  needed.</p>
-  <p>It then names the stars it can see, draws the constellation figures,
-  circles the naked-eye deep-sky objects in frame (the Pleiades, the Orion
-  Nebula, Andromeda), and — when the photo carries a timestamp — marks the
-  Moon and planets computed for that instant. Labels it can't verify against an actual dot
-  in your photo (clouds, usually) are drawn dashed.</p>
-  <p>No account, no app: your phone camera is the instrument.
-  <a href="https://github.com/cwage/asterism">Source on GitHub.</a></p>
-</details>
 
 <p class="disclosure">Uploads are public: anyone with the result link can view
 your photo and its labels, and successful solves appear in the
@@ -128,8 +154,9 @@ stored photo (uploads with location data we can't remove are rejected),
 coordinates shown in results are rounded to city scale, and everything
 is deleted after 24 hours.</p>
 
-<div id="feed"></div>
-
+<!-- The result is the point of the page: it sits directly under the upload
+     control, above the feed and the explainer. Everything here collapses to
+     nothing before the first solve. -->
 <div id="status"></div>
 <div id="guess"></div>
 <div id="actions"></div>
@@ -145,6 +172,8 @@ is deleted after 24 hours.</p>
 </div>
 <div id="wrap"><img id="photo" hidden><canvas id="overlay"></canvas></div>
 <div id="narration"></div>
+
+<div id="feed"></div>
 
 <footer><a href="https://github.com/cwage/asterism">asterism</a> — phone-first
 plate solving.</footer>
@@ -569,6 +598,7 @@ function render(id, job) {
       (narration && narration.text) || '';
   };
   img.hidden = false;
+  document.getElementById('wrap').style.display = 'inline-block';
   img.src = '/jobs/' + encodeURIComponent(id) + '/image';
 }
 

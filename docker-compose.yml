@@ -14,6 +14,10 @@ services:
       - ./data:/data
       - ./indexes:/indexes:ro
       - ./catalogs:/catalogs:ro
+      # Frontend work: static/ is baked into the image, so without this a
+      # one-line CSS tweak needs a rebuild. main.py reads index.html per
+      # request, so with the mount a browser refresh is enough.
+      - ./static:/srv/static:ro
     environment:
       - DATA_DIR=/data
 
