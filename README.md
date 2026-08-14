@@ -124,9 +124,18 @@ the per-IP cap is `UPLOADS_PER_HOUR` (12), so someone actively poking can
 re-upload faster than you can hide. Against a sustained attack the levers are
 blunt and hit everyone. `fly secrets set UPLOADS_PER_HOUR=0 -a asterism` stops
 new uploads while leaving existing results readable;
-`fly scale count 0 -a asterism` takes the site down. Closing that gap properly
-is #61 (gate the feed on the photo looking like a night sky) and #62 (cap feed
-slots per uploader).
+`fly scale count 0 -a asterism` takes the site down.
+
+That gap is accepted on purpose, not pending. Automatic filtering (#61),
+per-uploader feed caps (#62), and an opt-in feed (#63) were all considered and
+closed: with effectively one uploader and little traffic, a fast takedown is
+proportionate, and the alternatives cost more than they'd save. Worth knowing
+before reaching for the obvious fix — #61 has the measurements showing that a
+brightness-based "does this look like a night sky" filter rejects real
+light-polluted skies, so it fails as a filter rather than merely needing
+tuning. Those issues carry the reasoning and their implementation sketches; the
+assumption holding them closed is that the uploader is the operator, so reopen
+them if that changes.
 
 With no `ADMIN_TOKEN` configured the endpoint 404s for everyone — unset means
 absent, not open, so local dev and CI have nothing to poke at.
