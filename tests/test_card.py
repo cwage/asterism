@@ -77,6 +77,57 @@ def test_llm_caption_wins_when_present():
     assert "Moon" in card._caption(result)
 
 
+def test_satellite_tracks_are_drawn_dashed(tmp_path, photo):
+    # The card mirrors the canvas: computed tracks appear, dashed.
+    result = dict(RESULT, satellites={"crossings": [
+        {"name": "Starlink-4634", "norad_id": "53967",
+         "points": [[100, 100], [600, 400], [1100, 700]],
+         "t_enter_s": 0.0, "t_exit_s": 16.0}]})
+    out = tmp_path / "sat.png"
+    card.render(str(photo), result, "host", str(out))
+    img = Image.open(out).convert("RGB")
+
+    # Dashes mean gaps: sample along the track and require both painted
+    # and unpainted pixels, which a solid line could not produce.
+    scale = card.CARD_WIDTH / 1200
+    hits = 0
+    for i in range(1, 60):
+        t = i / 60
+        x = round((100 + 500 * t) * scale)
+        y = round((100 + 300 * t) * scale)
+        patch = [img.getpixel((x + dx, y + dy))
+                 for dx in (-2, -1, 0, 1, 2) for dy in (-2, -1, 0, 1, 2)]
+        if any(g > 150 and b > 120 and r < 200 for r, g, b in patch):
+            hits += 1
+    assert hits > 5, "track should be visible along its path"
+    assert hits < 55, "a dashed track must leave gaps"
+
+
+def test_satellite_track_needs_two_points(tmp_path, photo):
+    result = dict(RESULT, satellites={"crossings": [
+        {"name": "Blip", "norad_id": "1", "points": [[10, 10]],
+         "t_enter_s": 0.0, "t_exit_s": 0.0}]})
+    out = tmp_path / "blip.png"
+    card.render(str(photo), result, "host", str(out))  # must not raise
+    assert Image.open(out).height == 1200 + card.FOOTER_H
+
+
+def test_dashed_path_alternates_and_skips_zero_length():
+    drawn = []
+    class FakeDraw:
+        def line(self, xy, fill, width):
+            drawn.append(xy)
+    # A 200px run at dash 18 / gap 12 gives 7 dashes (200 = 6*30 + 20).
+    card._dashed_path(FakeDraw(), [(0, 0), (200, 0)], (1, 2, 3, 4), 2)
+    assert len(drawn) == 7
+    assert drawn[0] == [0.0, 0.0, 18.0, 0.0]
+    assert drawn[1] == [30.0, 0.0, 48.0, 0.0]
+    # repeated points have no direction and must not divide by zero
+    drawn.clear()
+    card._dashed_path(FakeDraw(), [(5, 5), (5, 5)], (1, 2, 3, 4), 2)
+    assert drawn == []
+
+
 def test_placement_matches_frontend_semantics():
     placed = []
     assert card._place_text(placed, [(10, 10), (50, 50)], 20, 10, 200, 200) \

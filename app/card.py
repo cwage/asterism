@@ -5,6 +5,7 @@ Layout mirrors static/index.html's draw(): same colors, same priority
 order (Moon, planets, DSOs, stars brightest-first), same greedy
 right/left/above/below text placement with collision avoidance."""
 
+import math
 import os
 
 CARD_WIDTH = 1600
@@ -20,6 +21,8 @@ COLORS = {
 }
 FIGURE_COLOR = (150, 170, 210, 90)
 FIGURE_TEXT = (150, 170, 210, 153)
+SATELLITE_COLOR = (140, 230, 190, 190)   # frontend track stroke
+SATELLITE_TEXT = (140, 230, 190, 217)
 BG = (11, 14, 20, 255)          # --bg
 ACCENT = (120, 200, 255, 255)   # --accent
 INK = (205, 214, 224, 255)      # --ink
@@ -78,6 +81,31 @@ def _caption(result):
     return " · ".join(bits)
 
 
+def _dashed_path(draw, points, color, width, dash=18.0, gap=12.0):
+    """Dashed polyline: PIL has no dash support, so walk the path by arc
+    length and stroke alternating runs. Satellite tracks (#11) are
+    computed, never pixel-detected — dashes carry that the same way the
+    frontend canvas does."""
+    on, used = True, 0.0  # used: distance into the current dash/gap run
+    for (x1, y1), (x2, y2) in zip(points, points[1:]):
+        length = math.hypot(x2 - x1, y2 - y1)
+        if length <= 0:
+            continue
+        pos = 0.0
+        while pos < length:
+            run = (dash if on else gap) - used
+            end = min(length, pos + run)
+            if on:
+                t0, t1 = pos / length, end / length
+                draw.line([x1 + (x2 - x1) * t0, y1 + (y2 - y1) * t0,
+                           x1 + (x2 - x1) * t1, y1 + (y2 - y1) * t1],
+                          fill=color, width=width)
+            used += end - pos
+            if used >= (dash if on else gap) - 1e-9:
+                on, used = not on, 0.0
+            pos = end
+
+
 def _dashed_ellipse(draw, box, color, width, dashes=14):
     # PIL has no dashed outline: alternate short arcs around the circle.
     step = 360 / dashes
@@ -123,6 +151,17 @@ def render(image_path, result, share_host, out_path):
             con_names.append((c["name"],
                               sum(p[0] for p in pts) / len(pts),
                               sum(p[1] for p in pts) / len(pts)))
+
+    # Satellite crossings (#11) ride under the labels, like the figures.
+    sat_names = []
+    for crossing in (result.get("satellites") or {}).get("crossings") or []:
+        pts = [(x * scale, y * scale) for x, y in crossing.get("points") or []]
+        if len(pts) < 2:
+            continue
+        _dashed_path(draw, pts, SATELLITE_COLOR, 2)
+        mid = pts[len(pts) // 2]
+        if 0 <= mid[0] < CARD_WIDTH and 0 <= mid[1] < ph:
+            sat_names.append((crossing["name"], mid[0], mid[1]))
 
     labels = sorted(result.get("labels") or [], key=_priority)
     markers = []
@@ -172,6 +211,20 @@ def render(image_path, result, share_host, out_path):
         if spot:
             draw.text((spot[0], spot[1]), name, font=font_it,
                       fill=FIGURE_TEXT, stroke_width=2,
+                      stroke_fill=(0, 0, 0, 140))
+
+    # Satellite names last: the track is the point, the name is a bonus.
+    for name, sx, sy in sat_names:
+        tw = draw.textlength(name, font=font_it)
+        th = 22
+        spot = _place_text(placed, [
+            (sx + 8, sy - th / 2),
+            (sx - tw - 8, sy - th / 2),
+            (sx - tw / 2, sy + th),
+        ], tw, th, CARD_WIDTH, ph)
+        if spot:
+            draw.text((spot[0], spot[1]), name, font=font_it,
+                      fill=SATELLITE_TEXT, stroke_width=2,
                       stroke_fill=(0, 0, 0, 140))
 
     # Footer: brand, caption, provenance.
