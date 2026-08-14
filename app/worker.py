@@ -7,7 +7,7 @@ import shutil
 import time
 import traceback
 
-from . import constellations, db, dso, ephemeris, solver, verify
+from . import constellations, db, dso, ephemeris, narrate, solver, verify
 
 # Below this many detected star-like sources, a quick job fails fast
 # instead of burning cpulimit tiers on daylight/food/pitch-black uploads.
@@ -157,6 +157,16 @@ def process(job):
     result["ephemeris"] = eph_meta
     result["constellations"] = figures
     result["verification"] = verification
+
+    # LLM narration (#12), best-effort: no API key or a failed call just
+    # leaves the deterministic card caption in place.
+    try:
+        narration = narrate.annotate(result)
+        if narration:
+            result["narration"] = narration
+    except Exception:
+        print(f"worker: narration failed for {job['id']}\n{traceback.format_exc()}")
+
     return "done", result, None
 
 

@@ -52,7 +52,11 @@ def _priority(label):
 
 
 def _caption(result):
-    """Deterministic one-line narration; #12's LLM version can replace it."""
+    """One-line caption: the LLM one (#12) when the worker produced it,
+    else assembled deterministically from the label list."""
+    llm = (result.get("narration") or {}).get("caption")
+    if llm:
+        return llm
     labels = result.get("labels") or []
     stars = [l for l in labels if l.get("kind", "star") == "star"]
     bodies = [l for l in labels if l.get("kind") in ("moon", "planet")]

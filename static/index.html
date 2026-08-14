@@ -74,6 +74,11 @@
                         text-decoration: none; font-size: 0.95rem; }
   #actions a.cardlink:hover { background: #1a2230; }
 
+  #narration { border: 1px solid #1c2634; border-radius: 10px;
+               background: var(--panel); padding: 0.75rem 1rem;
+               margin: 0.75rem 0 0; font-size: 0.95rem; color: var(--ink); }
+  #narration:empty { display: none; }
+
   #wrap { position: relative; display: inline-block; max-width: 100%;
           margin-top: 0.75rem; border-radius: 6px; overflow: hidden; }
   #wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
@@ -138,6 +143,7 @@ after 24 hours.</p>
     <span id="mag-val">4.5</span></label>
 </div>
 <div id="wrap"><img id="photo" hidden><canvas id="overlay"></canvas></div>
+<div id="narration"></div>
 
 <footer><a href="https://github.com/cwage/asterism">asterism</a> — phone-first
 plate solving.</footer>
@@ -245,6 +251,7 @@ async function poll(id) {
   status('solving…');
   document.getElementById('actions').replaceChildren();
   document.getElementById('guess').replaceChildren();
+  document.getElementById('narration').textContent = '';
   document.getElementById('controls').hidden = true;
   const t0 = Date.now();
   while (true) {
@@ -546,6 +553,10 @@ function render(id, job) {
     }
     status(`solved in ${job.solve_seconds}s — labeled ${parts.join(', ')}`
            + (notes.length ? ` (${notes.join('; ')})` : ''));
+    // LLM narration (#12): the worker's "what you captured" writeup.
+    const narration = job.result.narration;
+    document.getElementById('narration').textContent =
+      (narration && narration.text) || '';
   };
   img.hidden = false;
   img.src = '/jobs/' + encodeURIComponent(id) + '/image';

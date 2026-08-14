@@ -33,6 +33,11 @@ Final home: `asterism.quietlife.net`.
   get an extended-source check instead of point snapping (#50): core
   brightness against a surrounding annulus (or resolved member stars for
   clusters), so a label never circles "Andromeda Galaxy" over bare sky-glow.
+- With an `ANTHROPIC_API_KEY` configured (Fly secret in prod), each solved
+  photo also gets a short LLM-written "what you captured" narration (#12,
+  Claude Haiku over the label list — never the photo): a writeup on the
+  results page and a one-line caption that replaces the deterministic one
+  on the share card. Best-effort: no key or a failed call just skips it.
 - Jobs/results live in `data/` (SQLite + uploaded images), bind-mounted into
   both containers.
 - The queue is deliberately single-worker: solve-field is CPU-bound and the
