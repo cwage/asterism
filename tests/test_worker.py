@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from app import constellations, db, ephemeris, solver, verify, worker
+from app import constellations, db, ephemeris, narrate, solver, verify, worker
 
 JOB = {"id": "abc123", "image_path": "/photos/x.jpg", "mode": "quick",
        "exif_json": json.dumps({"width": 100, "height": 100})}
@@ -27,6 +27,8 @@ def stub_solve(tmp_path, monkeypatch):
     monkeypatch.setattr(constellations, "annotate", lambda *a: list(FIGURES))
     # Enough stars that the pre-solve gate stays open unless a test says so.
     monkeypatch.setattr(verify, "count_stars", lambda *a: 50)
+    # No narration by default: tests never depend on an API key in the env.
+    monkeypatch.setattr(narrate, "annotate", lambda *a, **k: None)
 
 
 def test_bodies_merge_ahead_of_stars(monkeypatch):
@@ -70,6 +72,28 @@ def test_constellations_crash_does_not_fail_the_job(monkeypatch):
     assert status == "done" and error is None
     assert result["labels"] == STARS  # no timestamp in JOB -> no bodies
     assert result["constellations"] == []
+
+
+def test_narration_attaches_when_available(monkeypatch):
+    monkeypatch.setattr(ephemeris, "annotate_bodies",
+                        lambda *a: ([], {"time_source": None}))
+    narration = {"caption": "Sirius blazing in Orion's wake",
+                 "text": "Your photo caught Sirius.", "model": "test"}
+    monkeypatch.setattr(narrate, "annotate", lambda *a, **k: narration)
+    status, result, error = worker.process(JOB)
+    assert status == "done" and error is None
+    assert result["narration"] == narration
+
+
+def test_narration_crash_does_not_fail_the_job(monkeypatch):
+    monkeypatch.setattr(ephemeris, "annotate_bodies",
+                        lambda *a: ([], {"time_source": None}))
+    def boom(*a, **k):
+        raise RuntimeError("narration exploded")
+    monkeypatch.setattr(narrate, "annotate", boom)
+    status, result, error = worker.process(JOB)
+    assert status == "done" and error is None
+    assert "narration" not in result
 
 
 def test_no_stars_gate_fails_fast_without_solving(monkeypatch):

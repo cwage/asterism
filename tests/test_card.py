@@ -68,6 +68,15 @@ def test_caption_empty_result():
     assert card._caption({}) == ""
 
 
+def test_llm_caption_wins_when_present():
+    result = dict(RESULT, narration={"caption": "Saturn beside a waxing Moon",
+                                     "text": "…", "model": "test"})
+    assert card._caption(result) == "Saturn beside a waxing Moon"
+    # an empty LLM caption falls back to the deterministic one
+    result["narration"] = {"caption": "", "text": "…", "model": "test"}
+    assert "Moon" in card._caption(result)
+
+
 def test_placement_matches_frontend_semantics():
     placed = []
     assert card._place_text(placed, [(10, 10), (50, 50)], 20, 10, 200, 200) \

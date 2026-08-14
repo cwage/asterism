@@ -9,4 +9,5 @@ skyfield
 pygeomag
 timezonefinder
 tzdata
+anthropic
 pytest

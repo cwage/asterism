@@ -18,6 +18,7 @@ services:
       - DATA_DIR=/data
 
   worker:
+    # LLM narration (#12) needs ANTHROPIC_API_KEY; unset just disables it.
     build:
       context: .
       target: app
@@ -29,3 +30,4 @@ services:
       - ./photos:/photos:ro
     environment:
       - DATA_DIR=/data
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
