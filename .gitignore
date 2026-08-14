@@ -6,3 +6,4 @@ catalogs/*.fab
 photos/
 __pycache__/
 *.pyc
+.env

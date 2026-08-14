@@ -5,3 +5,8 @@ indexes/
 catalogs/
 data/
 photos/
+
+# ADMIN_TOKEN (#60) lives here in local dev. The Dockerfile COPYs explicit
+# paths rather than the tree, so this is belt-and-braces — but it means a
+# future COPY . . can't quietly bake a secret into a pushed image.
+.env
