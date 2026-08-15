@@ -359,6 +359,7 @@ function renderFailure(id, job) {
   const f = job.result && job.result.failure;
   status('solve failed — ' + (job.error || 'unknown'));
   if (f && f.guess) renderGuess(job, f.guess);
+  else if (f && f.guess_unavailable) renderNoGuess(f.guess_unavailable);
   if (!f || !f.can_deepen) return;
   // Failed fast on purpose; deeper attempts are the user's call (~2 min).
   const btn = document.createElement('button');
@@ -372,6 +373,24 @@ function renderFailure(id, job) {
     poll(id);
   };
   document.getElementById('actions').replaceChildren(btn);
+}
+
+// Not even a guess. Say which missing piece of EXIF is responsible rather
+// than leaving the page blank, which reads as a failure of the site (#82).
+const NO_GUESS_COPY = {
+  no_timestamp: "This photo has no timestamp, so there's no way to work out what was in the sky when it was taken. Photos straight from a camera usually carry one; screenshots and re-saved copies usually don't.",
+  no_location: "This photo has neither GPS nor a timezone, so its clock can't be tied to a moment in the sky. Nothing can be said about what was up.",
+  unavailable: "There wasn't enough information in this photo to work out what was in the sky.",
+};
+
+function renderNoGuess(reason) {
+  const box = document.getElementById('guess');
+  box.replaceChildren();
+  const p = document.createElement('p');
+  p.className = 'hedge';
+  p.style.margin = '0';
+  p.textContent = NO_GUESS_COPY[reason] || NO_GUESS_COPY.unavailable;
+  box.append(p);
 }
 
 // No solve, but the EXIF instant + ephemeris still answer "what was that?"
@@ -424,7 +443,12 @@ function renderGuess(job, g) {
 function appendGuessHedges(box, g) {
   const hedges = [];
   if (g.location_source === 'timezone_guess') {
-    hedges.push('No GPS in this photo: location was estimated from its clock, so take directions loosely.');
+    // The clock pins you to a timezone, not a place, and a zone is wide
+    // enough to move something low in the sky above or below the horizon —
+    // which is why heights are quoted as ranges (#79).
+    hedges.push('No GPS in this photo: location was estimated from its clock, which narrows it to a timezone at best. Heights are given as ranges for that reason, and directions are rough.');
+  } else if (g.location_source === 'gps') {
+    hedges.push("Location came from this photo's own GPS.");
   }
   if (g.time_source === 'assumed_utc') {
     hedges.push('No timezone in this photo: its clock was assumed to be UTC, which can shift these positions by hours.');

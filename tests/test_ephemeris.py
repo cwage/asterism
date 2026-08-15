@@ -311,3 +311,37 @@ def test_gps_path_is_unchanged_by_the_band_logic():
     for cand in guess["candidates"]:
         assert "alt_range_deg" not in cand
         assert cand["alt_deg"] >= ephemeris.FALLBACK_MIN_ALT_DEG
+
+
+# ---- explaining a guess that can't be made (#82) ----
+
+def test_no_reason_when_a_guess_is_possible():
+    assert ephemeris.guess_unavailable_reason(dict(DUSK_WALK)) is None
+    assert ephemeris.guess_unavailable_reason(
+        {"datetime_original": "2026:08:14 20:28:00", **NASHVILLE}) is None
+
+
+def test_missing_timestamp_is_reported_as_such():
+    assert ephemeris.guess_unavailable_reason(
+        {"lat": 36.16, "lon": -86.78}) == "no_timestamp"
+
+
+def test_timestamp_without_any_location_hint():
+    assert ephemeris.guess_unavailable_reason(
+        {"datetime_original": "2026:08:14 20:28:00"}) == "no_location"
+
+
+def test_reason_agrees_with_what_fallback_guess_actually_does():
+    # The reason is only useful if it never disagrees with the function it
+    # explains.
+    cases = [
+        dict(DUSK_WALK),
+        {"datetime_original": "2026:08:14 20:28:00", **NASHVILLE},
+        {"lat": 36.16, "lon": -86.78},
+        {"datetime_original": "2026:08:14 20:28:00"},
+        {},
+    ]
+    for exif_info in cases:
+        reason = ephemeris.guess_unavailable_reason(exif_info)
+        guess = ephemeris.fallback_guess(exif_info)
+        assert (reason is None) == (guess is not None), exif_info
