@@ -237,3 +237,33 @@ def test_unknown_resolution_unit_is_ignored(tmp_path):
     path = _write(tmp_path, "unit1.jpg", (6000, 4000), focal_length=24.0,
                   focal_plane_x_res=2413.333344, focal_plane_unit=1)
     assert exif.read_exif(path)["focal_35mm"] is None
+
+
+def test_resize_detected_by_stored_dimensions_is_refused(tmp_path):
+    # Resized to 6000px wide, but PixelXDimension still says 8688 and the
+    # density still describes the original capture. The derived sensor would
+    # be 24.9mm — inside the plausible range, so only the disagreement
+    # between stored and actual width catches it. Left unguarded, this hints
+    # ~35mm equivalent for a 24mm lens, a bracket that excludes the truth.
+    path = _write(tmp_path, "resized-tagged.jpg", (6000, 3917),
+                  pixel_x_dimension=8688, **CANON_5DS)
+    info = exif.read_exif(path)
+    assert info["focal_35mm"] is None
+    assert info["fov_bounds"] == exif.DEFAULT_FOV_BOUNDS
+
+
+def test_untouched_file_with_matching_dimensions_still_derives(tmp_path):
+    path = _write(tmp_path, "tagged.jpg", (8688, 5672),
+                  pixel_x_dimension=8688, **CANON_5DS)
+    assert exif.read_exif(path)["focal_35mm"] == pytest.approx(24.0, abs=0.01)
+
+
+def test_a_crop_narrows_the_hint_rather_than_breaking_it(tmp_path):
+    # Cropping leaves pixel density untouched, so the arithmetic reports the
+    # sensor extent actually kept: half the width of a full frame reads as
+    # 18mm, i.e. 24mm behaving like 48mm — which is what the crop really did.
+    path = _write(tmp_path, "cropped.jpg", (4344, 2836),
+                  pixel_x_dimension=4344, **CANON_5DS)
+    info = exif.read_exif(path)
+    assert info["focal_35mm"] == pytest.approx(48.0, abs=0.1)
+    assert info["focal_35mm_source"] == "sensor_width"

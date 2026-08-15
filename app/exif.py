@@ -11,6 +11,7 @@ TAG_FOCAL_LENGTH = 37386
 TAG_FOCAL_35MM = 41989
 TAG_FOCAL_PLANE_X_RESOLUTION = 41486
 TAG_FOCAL_PLANE_RESOLUTION_UNIT = 41488
+TAG_PIXEL_X_DIMENSION = 40962
 TAG_DATETIME_ORIGINAL = 36867
 TAG_OFFSET_TIME_ORIGINAL = 36881
 TAG_EXPOSURE_TIME = 33434
@@ -70,11 +71,24 @@ def _derive_focal_35mm(exif_ifd, px_width):
 
     FocalPlaneXResolution is the recorded image's pixel density across the
     sensor, so width_px / density gives the width actually captured, and
-    36mm / that width is the crop factor."""
+    36mm / that width is the crop factor.
+
+    Cropping is handled correctly for free: cutting pixels away leaves the
+    density untouched, so the arithmetic returns the smaller sensor extent
+    that was actually kept. Resizing is the opposite — it rewrites the pixel
+    count while the density still describes the original capture — so a file
+    whose stored dimensions disagree with its actual ones is refused."""
     focal = exif_ifd.get(TAG_FOCAL_LENGTH)
     density = exif_ifd.get(TAG_FOCAL_PLANE_X_RESOLUTION)
     unit_mm = _RESOLUTION_UNIT_MM.get(exif_ifd.get(TAG_FOCAL_PLANE_RESOLUTION_UNIT))
     if not focal or not density or not unit_mm or not px_width:
+        return None
+
+    # PixelXDimension is what the camera recorded. A resizer that updates it
+    # and leaves the density stale is caught here; one that updates neither
+    # falls to the sensor-width sanity check below.
+    stored_width = exif_ifd.get(TAG_PIXEL_X_DIMENSION)
+    if stored_width and int(stored_width) != int(px_width):
         return None
     try:
         sensor_mm = px_width / float(density) * unit_mm
