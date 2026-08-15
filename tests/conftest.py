@@ -24,6 +24,18 @@ MINI_HYG = """id,proper,ra,dec,mag,bayer,con,comp
 """
 
 
+@pytest.fixture(autouse=True)
+def calibrated_confidence_floors(monkeypatch):
+    """Pin the #71 confidence floors to their calibrated defaults.
+
+    MIN_LOGODDS/MIN_MATCHES are read from the environment at import time so
+    they can be tuned per deployment. Without this, a developer or CI runner
+    with SOLVE_MIN_LOGODDS set would see solver tests fail for reasons that
+    have nothing to do with the solver."""
+    monkeypatch.setattr(solver, "MIN_LOGODDS", solver.DEFAULT_MIN_LOGODDS)
+    monkeypatch.setattr(solver, "MIN_MATCHES", solver.DEFAULT_MIN_MATCHES)
+
+
 @pytest.fixture()
 def mini_catalog(tmp_path, monkeypatch):
     """Self-contained star catalog so fast tests don't need catalogs/hyg.csv."""

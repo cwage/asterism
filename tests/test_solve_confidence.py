@@ -4,7 +4,11 @@ solve-field exiting 0 with a WCS on disk is not proof of a solve: a search cut
 short by the CPU limit can still write out its best hypothesis, and that can be
 a three-star triangle with two matching stars pointing somewhere confidently
 wrong. These tests stub the binary out; the real-solve side of the floor lives
-in test_solve_integration.py."""
+in test_solve_integration.py.
+
+The floors are pinned to their calibrated defaults by the autouse fixture in
+conftest, so the values below mean what they meant at calibration time no
+matter how the environment is configured."""
 
 import os
 

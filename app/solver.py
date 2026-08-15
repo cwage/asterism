@@ -32,8 +32,10 @@ CPU_LIMIT = int(os.environ.get("SOLVE_CPULIMIT", "60"))
 # Nothing observed lands between the two groups. The floors sit in that gap
 # with room on both sides: 25 is well under the weakest real solve (93) and
 # well over the false one, and 8 matched stars likewise (weakest real: 17).
-MIN_LOGODDS = float(os.environ.get("SOLVE_MIN_LOGODDS", "25"))
-MIN_MATCHES = int(os.environ.get("SOLVE_MIN_MATCHES", "8"))
+DEFAULT_MIN_LOGODDS = 25.0
+DEFAULT_MIN_MATCHES = 8
+MIN_LOGODDS = float(os.environ.get("SOLVE_MIN_LOGODDS", DEFAULT_MIN_LOGODDS))
+MIN_MATCHES = int(os.environ.get("SOLVE_MIN_MATCHES", DEFAULT_MIN_MATCHES))
 
 _catalog_cache = None
 
