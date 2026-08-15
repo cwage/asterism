@@ -202,16 +202,12 @@ def test_fallback_guess_identifies_venus_at_dusk():
     guess = ephemeris.fallback_guess(VENUS_EXIF)
     assert guess["location_source"] == "gps"
     assert -15 <= guess["sun_alt_deg"] <= 0  # dusk, not night
-    # magnetic 170 corrected by ~-4.2 declination
-    assert guess["heading_true"] == pytest.approx(165.8, abs=1.0)
 
     venus = next(c for c in guess["candidates"] if c["name"] == "Venus")
     assert venus["az_deg"] == pytest.approx(254, abs=4)
     assert venus["alt_deg"] == pytest.approx(16, abs=4)
     assert venus["mag"] < -3.5
     assert venus["direction"] == "WSW"
-    # Venus sat well to the right of where the phone pointed
-    assert venus["offset_deg"] == pytest.approx(88, abs=6)
 
     # brightest first
     mags = [c["mag"] if c["mag"] is not None else -99 for c in guess["candidates"]]
@@ -225,9 +221,6 @@ def test_fallback_guess_without_gps_uses_timezone_and_hedges():
         "offset_time_original": "-05:00",
     })
     assert guess["location_source"] == "timezone_guess"
-    assert "heading_true" not in guess  # no heading recorded
-    for c in guess["candidates"]:
-        assert "offset_deg" not in c
 
 
 def test_fallback_guess_needs_time_and_some_location_hint():
@@ -345,3 +338,26 @@ def test_reason_agrees_with_what_fallback_guess_actually_does():
         reason = ephemeris.guess_unavailable_reason(exif_info)
         guess = ephemeris.fallback_guess(exif_info)
         assert (reason is None) == (guess is not None), exif_info
+
+
+# ---- the compass heading is not used for anything user-facing (#81) ----
+
+def test_recorded_heading_never_reaches_the_guess():
+    """Measured against solved frames the EXIF heading was wrong by +60, -83
+    and +157 degrees, and two frames twelve seconds apart reported the same
+    heading while pointing east and northwest. Nothing phrased relative to
+    where the camera was aimed can be trusted, so none of it is emitted."""
+    guess = ephemeris.fallback_guess(VENUS_EXIF)   # carries heading 170 M
+    assert "heading_true" not in guess
+    assert "declination_deg" not in guess
+    for cand in guess["candidates"]:
+        assert "offset_deg" not in cand
+
+
+def test_each_body_still_carries_its_own_compass_direction():
+    # Absolute directions come from the ephemeris, not the phone, so they
+    # survive: "Venus was WSW" is something the reader can act on.
+    guess = ephemeris.fallback_guess(VENUS_EXIF)
+    venus = next(c for c in guess["candidates"] if c["name"] == "Venus")
+    assert venus["direction"] == "WSW"
+    assert 0 <= venus["az_deg"] <= 360

@@ -419,9 +419,7 @@ function renderGuess(job, g) {
     appendGuessHedges(box, g);
     return;
   }
-  intro.textContent = (g.heading_true != null
-    ? `Even without a star match: when this was taken you were facing ${compassName(g.heading_true)}, and these were up:`
-    : 'Even without a star match, these were up when this was taken:') + context;
+  intro.textContent = 'Even without a star match, these were up when this was taken:' + context;
   const list = document.createElement('ul');
   for (const c of g.candidates) {
     const li = document.createElement('li');
@@ -431,7 +429,7 @@ function renderGuess(job, g) {
     const bits = [`${c.direction}, ${altPhrase(c)}`];
     if (c.phase != null) bits.push(`${Math.round(c.phase * 100)}% lit`);
     else if (c.mag != null) bits.push(`magnitude ${c.mag}`);
-    li.append(name, ` — ${bits.join(', ')}${offsetPhrase(job, c)}`);
+    li.append(name, ` — ${bits.join(', ')}`);
     list.append(li);
   }
   box.append(intro, list);
@@ -462,19 +460,6 @@ function appendGuessHedges(box, g) {
     box.append(hedge);
   }
 }
-
-function offsetPhrase(job, c) {
-  if (c.offset_deg == null) return '';
-  const fb = job.exif && job.exif.fov_bounds;
-  const fovHalf = fb ? (fb[0] + fb[1]) / 4 : 35;  // half of the mid FOV guess
-  const abs = Math.abs(c.offset_deg);
-  if (abs <= fovHalf) return ' — likely in this shot';
-  if (abs > 120) return ' — behind you';
-  return ` — ~${abs}° to the ${c.offset_deg > 0 ? 'right' : 'left'} of where you pointed`;
-}
-
-const WINDS = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
-const compassName = (az) => WINDS[Math.round(az / 22.5) % 16];
 
 // ---- label layout (#18): pure helpers, exercised by the node harness ----
 

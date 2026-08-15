@@ -267,10 +267,10 @@ def guess_unavailable_reason(exif_info):
 
 def fallback_guess(exif_info):
     """When the solve fails, answer the question anyway: what was above the
-    horizon at the EXIF instant, and where relative to the compass heading
-    the phone recorded (#7). Returns None without a usable timestamp or any
-    location hint; may raise (missing ephemeris file) — the worker treats
-    the whole thing as best-effort."""
+    horizon at the EXIF instant, and where on the compass to find it (#7).
+    Returns None without a usable timestamp or any location hint; may raise
+    (missing ephemeris file) — the worker treats the whole thing as
+    best-effort."""
     when_utc, time_source = resolve_utc(exif_info)
     if when_utc is None:
         return None
@@ -290,21 +290,17 @@ def fallback_guess(exif_info):
     guess = {"time_utc": when_utc.isoformat(), "time_source": time_source,
              "location_source": location_source}
 
-    heading_true = None
-    heading = exif_info.get("heading")
-    if heading is not None:
-        ref = (exif_info.get("heading_ref") or "M").upper()
-        if ref.startswith("T"):
-            heading_true = heading % 360.0
-        else:
-            try:
-                decl = _declination(lat, lon, when_utc)
-            except Exception:
-                decl = None  # uncorrected magnetic beats no heading at all
-            heading_true = (heading + (decl or 0.0)) % 360.0
-            if decl is not None:
-                guess["declination_deg"] = round(decl, 1)
-        guess["heading_true"] = round(heading_true, 1)
+    # The EXIF compass heading is deliberately not used (#81). Measured against
+    # frames whose true pointing came from a solve, it was wrong by +60, -83
+    # and +157 degrees — and two frames taken twelve seconds apart recorded an
+    # identical heading while pointing east and northwest, one of them with
+    # Polaris in it. Anything phrased relative to where the camera was aimed
+    # ("88 degrees to your right", "likely in this shot") is therefore a
+    # coin-flip dressed up as a measurement, so the guess reports where each
+    # body was on the compass and lets the reader turn to face it.
+    #
+    # exif_json still records the raw heading, so a future calibration can
+    # revisit this without losing the data.
 
     from skyfield import almanac
     from skyfield.api import wgs84
@@ -348,9 +344,6 @@ def fallback_guess(exif_info):
         if key == "moon":
             cand["phase"] = round(
                 float(almanac.fraction_illuminated(eph, "moon", t)), 3)
-        if heading_true is not None:
-            cand["offset_deg"] = round(((az - heading_true + 180.0) % 360.0)
-                                       - 180.0)
         candidates.append(cand)
 
     # Brightest first; the Moon (no magnitude) outshines everything.
