@@ -64,6 +64,26 @@ export function makeEl() {
     addEventListener() {},
     getContext() { return (el.ctx ??= makeCtx()); },
   };
+  // Minimal classList, kept in sync with className so tests can assert on
+  // either one.
+  el.classList = {
+    add(name) {
+      const names = new Set(el.className.split(/\s+/).filter(Boolean));
+      names.add(name);
+      el.className = [...names].join(' ');
+    },
+    remove(name) {
+      el.className = el.className.split(/\s+/)
+        .filter((n) => n && n !== name).join(' ');
+    },
+    contains: (name) => el.className.split(/\s+/).includes(name),
+    toggle(name, force) {
+      const has = el.classList.contains(name);
+      const want = force === undefined ? !has : force;
+      if (want) el.classList.add(name); else el.classList.remove(name);
+      return want;
+    },
+  };
   return el;
 }
 
