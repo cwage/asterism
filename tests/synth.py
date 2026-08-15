@@ -13,7 +13,11 @@ CATALOG_DIR = os.environ.get("CATALOG_DIR", "./catalogs")
 
 EXIF_IFD = 0x8769
 GPS_IFD = 0x8825
+TAG_FOCAL_LENGTH = 37386
 TAG_FOCAL_35MM = 41989
+TAG_FOCAL_PLANE_X_RESOLUTION = 41486
+TAG_FOCAL_PLANE_RESOLUTION_UNIT = 41488
+TAG_PIXEL_X_DIMENSION = 40962
 TAG_DATETIME_ORIGINAL = 36867
 TAG_EXPOSURE_TIME = 33434
 
@@ -47,13 +51,26 @@ def make_wcs(ra, dec, fov_deg, width, height):
 
 
 def build_exif(f35mm=None, datetime_original=None, gps=None, heading=None,
-               exposure_seconds=None):
+               exposure_seconds=None, focal_length=None,
+               focal_plane_x_res=None, focal_plane_unit=None,
+               pixel_x_dimension=None):
     """PIL Exif with the fields app.exif reads. gps = (lat, lon) in degrees;
-    heading = (degrees, ref) with ref 'M' (magnetic) or 'T' (true)."""
+    heading = (degrees, ref) with ref 'M' (magnetic) or 'T' (true).
+
+    focal_length + focal_plane_x_res/unit stand in for a dedicated camera that
+    records no 35mm equivalent (#70)."""
     ex = Image.Exif()
     ifd = ex.get_ifd(EXIF_IFD)
     if f35mm is not None:
         ifd[TAG_FOCAL_35MM] = int(f35mm)
+    if focal_length is not None:
+        ifd[TAG_FOCAL_LENGTH] = focal_length
+    if focal_plane_x_res is not None:
+        ifd[TAG_FOCAL_PLANE_X_RESOLUTION] = focal_plane_x_res
+    if focal_plane_unit is not None:
+        ifd[TAG_FOCAL_PLANE_RESOLUTION_UNIT] = focal_plane_unit
+    if pixel_x_dimension is not None:
+        ifd[TAG_PIXEL_X_DIMENSION] = pixel_x_dimension
     if datetime_original is not None:
         ifd[TAG_DATETIME_ORIGINAL] = datetime_original
     if exposure_seconds is not None:
