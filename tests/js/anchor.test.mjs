@@ -12,8 +12,7 @@ const GUESS = {
 
 test('asks for the Moon first, then the brightest other body', () => {
   const { sandbox } = loadPage();
-  // The Moon leads because it is the one a person can identify at a glance,
-  // and its size is what pins the plate scale.
+  // The Moon leads because it is the one a person can identify at a glance.
   // Spread first: the sandbox builds arrays with its own realm's Array, which
   // strict deepEqual counts as a different type.
   assert.deepEqual([...sandbox.anchorTargets(GUESS)], ['Moon', 'Venus']);
@@ -28,6 +27,37 @@ test('no offer when there is nothing identifiable to point at', () => {
     { candidates: [{ name: 'Moon', kind: 'moon' }] }), null);
   assert.equal(sandbox.anchorTargets(
     { candidates: [{ name: 'Venus', kind: 'planet' }] }), null);
+});
+
+test('two planets are offered when no Moon is up', () => {
+  const { sandbox } = loadPage();
+  // A person pointing at their own photo does not need the Moon to know what
+  // they are looking at — that requirement belongs to automatic
+  // identification, where the Moon is the only recognisable blob (#91).
+  const noMoon = { candidates: [
+    { name: 'Venus', kind: 'planet' },
+    { name: 'Saturn', kind: 'planet' },
+  ] };
+  assert.deepEqual([...sandbox.anchorTargets(noMoon)], ['Venus', 'Saturn']);
+});
+
+test('the Moon leads when it is up, whatever order it arrives in', () => {
+  const { sandbox } = loadPage();
+  const moonSecond = { candidates: [
+    { name: 'Venus', kind: 'planet' },
+    { name: 'Moon', kind: 'moon' },
+    { name: 'Saturn', kind: 'planet' },
+  ] };
+  assert.deepEqual([...sandbox.anchorTargets(moonSecond)], ['Moon', 'Venus']);
+});
+
+test('only the Moon takes an article in the prompts', () => {
+  const { sandbox } = loadPage();
+  // "Point out the Venus and Saturn instead" is how you tell a person the
+  // button was written for a different sky than the one they photographed.
+  assert.equal(sandbox.bodyLabel('Moon'), 'the Moon');
+  assert.equal(sandbox.bodyLabel('Venus'), 'Venus');
+  assert.equal(sandbox.bodyLabel('Saturn'), 'Saturn');
 });
 
 test('a tap maps to the photo pixels whatever size it is on screen', () => {
