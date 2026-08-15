@@ -7,7 +7,7 @@ import shutil
 import time
 import traceback
 
-from . import (constellations, db, dso, ephemeris, narrate, register,
+from . import (constellations, db, dso, ephemeris, narrate, notify, register,
                satellites, solver, verify)
 
 # Below this many detected star-like sources, a quick job fails fast
@@ -380,6 +380,7 @@ def main():
         print(f"worker: abandoned {abandoned} repeatedly-orphaned job(s)")
     print("worker: polling for jobs")
     last_sweep = 0.0
+    last_notify = 0.0
     while True:
         if time.monotonic() - last_sweep > SWEEP_INTERVAL_SECONDS:
             last_sweep = time.monotonic()
@@ -389,6 +390,19 @@ def main():
                     print(f"worker: retention sweep removed {n} expired job(s)")
             except Exception:
                 print(f"worker: retention sweep failed\n{traceback.format_exc()}")
+
+        if (notify.enabled()
+                and time.monotonic() - last_notify > notify.TICK_INTERVAL_SECONDS):
+            last_notify = time.monotonic()
+            try:
+                with db.get_conn() as conn:
+                    for message in notify.tick(conn):
+                        print(f"worker: notified — {message}")
+            except Exception:
+                # notify.tick already swallows per-check failures; this
+                # catches the connection itself. A dead ntfy, or a dead
+                # anything here, must not stop solves (#69).
+                print(f"worker: notify tick failed\n{traceback.format_exc()}")
 
         with db.get_conn() as conn:
             job = claim_next_job(conn)

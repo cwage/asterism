@@ -20,6 +20,14 @@ CREATE TABLE IF NOT EXISTS jobs (
     hidden INTEGER NOT NULL DEFAULT 0,
     featured INTEGER NOT NULL DEFAULT 0
 );
+
+-- Small key/value scratch for things that must survive the machine
+-- stopping (auto_stop_machines): currently the notification watermarks
+-- (#69), which are needed exactly when the process didn't stay up.
+CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
 """
 
 
@@ -33,7 +41,8 @@ def get_conn():
 def init_db():
     os.makedirs(DATA_DIR, exist_ok=True)
     with get_conn() as conn:
-        conn.execute(SCHEMA)
+        # executescript, not execute: SCHEMA is more than one statement now.
+        conn.executescript(SCHEMA)
         # Older databases: bolt missing columns on (SQLite has no
         # ADD COLUMN IF NOT EXISTS). web and worker init concurrently,
         # so losing the ALTER race is fine.
