@@ -12,6 +12,29 @@ INDEX_DIR = os.environ.get("ASTROMETRY_INDEX_DIR", "./indexes")
 CATALOG_DIR = os.environ.get("CATALOG_DIR", "./catalogs")
 CPU_LIMIT = int(os.environ.get("SOLVE_CPULIMIT", "60"))
 
+# Confidence floor for accepting a solve (#71). solve-field's exit code is not
+# enough: when the CPU limit cuts a search short it can still write out the best
+# hypothesis it had, and "best" can be a three-star triangle with two matching
+# stars. That WCS points somewhere confidently wrong.
+#
+# Both numbers come from solve.match. LOGODDS is astrometry's natural-log odds
+# that the match is real; astrometry's own --odds-to-solve default of 1e9 is
+# log-odds 20.7, so 25 keeps our floor just above the library's while staying
+# far below anything real.
+#
+# Measured 2026-08-15 on six featured production solves (five distinct fields;
+# two of the files are re-encodes of one photo and solve identically) plus the
+# two synthetic fixtures:
+#
+#     genuine solves    log-odds 93 - 825    17 - 192 matched stars
+#     the #71 false WCS log-odds 9.5         2 matched stars
+#
+# Nothing observed lands between the two groups. The floors sit in that gap
+# with room on both sides: 25 is well under the weakest real solve (93) and
+# well over the false one, and 8 matched stars likewise (weakest real: 17).
+MIN_LOGODDS = float(os.environ.get("SOLVE_MIN_LOGODDS", "25"))
+MIN_MATCHES = int(os.environ.get("SOLVE_MIN_MATCHES", "8"))
+
 _catalog_cache = None
 
 
@@ -34,9 +57,50 @@ def _write_cfg(out_dir):
     return cfg
 
 
+def match_stats(out_dir):
+    """Match quality from solve-field's solve.match, or None if unreadable.
+
+    Kept best-effort on purpose: a solve that wrote a WCS but no readable
+    match table is accepted rather than thrown away, since the alternative is
+    losing real solves to an astrometry output change."""
+    path = os.path.join(out_dir, "solve.match")
+    if not os.path.exists(path):
+        return None
+    try:
+        from astropy.io import fits
+
+        with fits.open(path) as hdul:
+            row = hdul[1].data[0]
+            return {"logodds": float(row["LOGODDS"]),
+                    "nmatch": int(row["NMATCH"]),
+                    "ndistract": int(row["NDISTRACT"])}
+    except Exception:
+        return None
+
+
+def _clear_artifacts(out_dir):
+    """Drop a previous attempt's outputs so this one can't inherit them.
+
+    solve_tiered reuses one directory for every tier, and solve-field only
+    writes solve.wcs when it solves. Before #71 that was harmless (the first
+    success ended the loop), but a rejected low-confidence match now leaves a
+    WCS on disk while the loop keeps going — and the next tier would be
+    credited with it."""
+    for name in ("solve.wcs", "solve.match", "solve.corr", "solve.rdls",
+                 "solve.new", "solve-indx.xyls"):
+        try:
+            os.unlink(os.path.join(out_dir, name))
+        except FileNotFoundError:
+            pass
+
+
 def solve(image_path, out_dir, fov_bounds):
-    """Run solve-field. Returns dict with success, seconds, wcs_path, log tail."""
+    """Run solve-field. Returns dict with success, seconds, wcs_path, log tail.
+
+    A solve-field exit code of 0 is necessary but not sufficient: the match has
+    to clear MIN_LOGODDS/MIN_MATCHES as well (#71)."""
     os.makedirs(out_dir, exist_ok=True)
+    _clear_artifacts(out_dir)
     cfg = _write_cfg(out_dir)
     low, high = fov_bounds
     cmd = [
@@ -59,12 +123,21 @@ def solve(image_path, out_dir, fov_bounds):
     wcs_path = os.path.join(out_dir, "solve.wcs")
     solved = proc.returncode == 0 and os.path.exists(wcs_path)
     log_tail = "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-15:])
+
+    stats = match_stats(out_dir) if solved else None
+    low_confidence = bool(stats) and (stats["logodds"] < MIN_LOGODDS
+                                      or stats["nmatch"] < MIN_MATCHES)
+    if low_confidence:
+        solved = False
+
     return {
         "success": solved,
         "seconds": round(seconds, 2),
         "wcs_path": wcs_path if solved else None,
         "fov_bounds": [round(low, 1), round(high, 1)],
         "log_tail": log_tail,
+        "match": stats,
+        "low_confidence": low_confidence,
     }
 
 
@@ -121,11 +194,17 @@ def solve_tiered(image_path, out_dir, exif_info, tiers=None):
     result = None
     for bounds in tiers:
         result = solve(image_path, out_dir, bounds)
-        attempts.append({
+        attempt = {
             "fov_bounds": result["fov_bounds"],
             "seconds": result["seconds"],
             "success": result["success"],
-        })
+        }
+        # Only recorded when there was a match to judge, so the common failure
+        # (nothing matched at all) keeps its existing shape.
+        if result.get("match"):
+            attempt["match"] = result["match"]
+            attempt["low_confidence"] = result["low_confidence"]
+        attempts.append(attempt)
         if result["success"]:
             break
     result["attempts"] = attempts
