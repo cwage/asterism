@@ -18,6 +18,31 @@ RETENTION_HOURS = int(os.environ.get("RETENTION_HOURS", "24"))
 SWEEP_INTERVAL_SECONDS = 900
 
 
+def due(last, interval, now=None):
+    """Whether a periodic task should run. `last is None` means never run,
+    which is always due.
+
+    The subtlety is the clock. time.monotonic() is measured from boot, and
+    a Fly machine with auto_stop_machines is a fresh boot every time it
+    wakes — measured at 85.9s on a machine that had been serving for
+    minutes. So comparing against an initial 0.0 asks for a full interval
+    of *continuous uptime* before the first run: 15 minutes for the sweep,
+    10 for notifications, on a machine that stops whenever nobody is
+    looking. On a quiet site neither would ever run.
+
+    Starting from None instead runs both once per wake, which is the
+    intended cadence anyway — the sweep is idempotent, and the
+    notification watermarks live in the database precisely so they survive
+    the stop.
+
+    (Local docker hides this completely: containers share the host's
+    monotonic clock, which is days large, so the first tick always fires.)
+    """
+    if last is None:
+        return True
+    return (time.monotonic() if now is None else now) - last > interval
+
+
 def sweep_expired():
     """Delete jobs (rows, uploads, solve artifacts) older than the retention
     window. Returns how many were removed.
@@ -379,10 +404,12 @@ def main():
     if abandoned:
         print(f"worker: abandoned {abandoned} repeatedly-orphaned job(s)")
     print("worker: polling for jobs")
-    last_sweep = 0.0
-    last_notify = 0.0
+    # None, not 0.0: see due() — on a machine that stops when idle, 0.0
+    # means "wait for a full interval of uptime before the first run".
+    last_sweep = None
+    last_notify = None
     while True:
-        if time.monotonic() - last_sweep > SWEEP_INTERVAL_SECONDS:
+        if due(last_sweep, SWEEP_INTERVAL_SECONDS):
             last_sweep = time.monotonic()
             try:
                 n = sweep_expired()
@@ -391,8 +418,7 @@ def main():
             except Exception:
                 print(f"worker: retention sweep failed\n{traceback.format_exc()}")
 
-        if (notify.enabled()
-                and time.monotonic() - last_notify > notify.TICK_INTERVAL_SECONDS):
+        if notify.enabled() and due(last_notify, notify.TICK_INTERVAL_SECONDS):
             last_notify = time.monotonic()
             try:
                 with db.get_conn() as conn:
