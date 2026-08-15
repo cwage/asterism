@@ -17,7 +17,11 @@ Final home: `asterism.quietlife.net`.
   pixel coordinates. Failures are gated (#4): a ~1s star-count pre-check
   rejects zero-star uploads instantly, and a quick solve tries only the
   likeliest scale tier — the client can then POST `/jobs/{id}/deepen` to
-  opt into the slower fallback tiers. When the photo has an EXIF timestamp, the Moon and
+  opt into the slower fallback tiers. A solve is only accepted if its match
+  clears a confidence floor (#71): solve-field exits 0 and writes a WCS even
+  for matches built from a handful of stars, which point somewhere confidently
+  wrong, so `SOLVE_MIN_LOGODDS`/`SOLVE_MIN_MATCHES` are checked against
+  `solve.match` before anything is projected. When the photo has an EXIF timestamp, the Moon and
   naked-eye planets are computed with skyfield (JPL DE421, topocentric when
   GPS is present) and projected through the same WCS. Constellation stick
   figures (Stellarium's modern line set, resolved via HYG) are drawn the

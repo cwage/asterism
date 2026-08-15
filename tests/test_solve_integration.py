@@ -49,6 +49,17 @@ def test_synthetic_field_solves_with_exif_hint(starfield, tmp_path):
     assert labels, "solved field should contain named bright stars"
     assert any(l["name"] == "Sirius" for l in labels)
 
+    # A real solve should clear the #71 confidence floor with room to spare,
+    # not scrape past it. Calibration put genuine solves at log-odds 93+ with
+    # 17+ matched stars against floors of 25 and 8. Compared against the
+    # calibrated defaults rather than the live (env-overridable) floors, so a
+    # deployment-specific setting cannot make this assertion mean something
+    # else.
+    stats = result["attempts"][0].get("match")
+    assert stats, "a successful solve records its match statistics"
+    assert stats["logodds"] > 3 * solver.DEFAULT_MIN_LOGODDS, stats
+    assert stats["nmatch"] > 2 * solver.DEFAULT_MIN_MATCHES, stats
+
 
 # Phone telephoto: a 10x periscope (~240mm equivalent) is ~8.6 deg wide, a
 # 5x (~120mm) ~17. Nothing was built for these — they solve because the
