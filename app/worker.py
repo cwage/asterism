@@ -285,6 +285,15 @@ def process(job):
         tried = {tuple(a["fov_bounds"]) for a in prior.get("attempts", [])}
         tiers = [t for t in plan
                  if (round(t[0], 1), round(t[1], 1)) not in tried]
+        if (prior.get("failure") or {}).get("reason") == "no_stars":
+            # The gate returns before the solver runs, so `attempts` is empty
+            # and nothing looks tried — the whole plan would run. But scale
+            # tiers answer "how wide is this field", not "are there stars in
+            # it": if the detector found four sources, no tier is going to
+            # find a quad among them. Honour the override, at one tier rather
+            # than four (#90). Measured cost of getting this wrong: a job that
+            # could not succeed held the single-worker queue for 20 minutes.
+            tiers = tiers[:1]
 
     result = solver.solve_tiered(job["image_path"], out_dir, exif_info,
                                  tiers=tiers)

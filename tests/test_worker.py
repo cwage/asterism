@@ -196,3 +196,43 @@ def test_deep_mode_skips_tiers_the_quick_pass_tried(monkeypatch):
     assert result["total_seconds"] == 62.0
     assert result["failure"] == {"reason": "no_match", "can_deepen": False,
                                  "guess_unavailable": "no_timestamp"}
+
+
+def test_deep_mode_after_the_star_gate_runs_one_tier_not_four(monkeypatch):
+    """The gate returns before the solver, so `attempts` is empty and the
+    whole plan looks untried. Running it costs four cpulimits — measured at
+    20 minutes of wall clock on the deploy — to reach the conclusion the
+    gate already reached. One tier honours the override (#90)."""
+    seen = {}
+    def record(image_path, out_dir, exif_info, tiers=None):
+        seen["tiers"] = tiers
+        return {"success": False, "total_seconds": 60.0, "log_tail": "",
+                "attempts": [{"fov_bounds": [30.0, 90.0], "seconds": 60.0,
+                              "success": False}]}
+    monkeypatch.setattr(solver, "solve_tiered", record)
+    prior = {"attempts": [], "total_seconds": 0.0,
+             "failure": {"reason": "no_stars", "stars_detected": 4,
+                         "can_deepen": True}}
+    job = dict(JOB, mode="deep", result_json=json.dumps(prior))
+    status, result, error = worker.process(job)
+    assert seen["tiers"] == [solver.FALLBACK_TIERS[0]]
+    assert status == "failed"
+    assert result["failure"]["can_deepen"] is False
+
+
+def test_deep_mode_after_a_real_solve_attempt_is_not_capped(monkeypatch):
+    """Only the gate path is capped. A quick pass that actually ran the
+    solver and found no match still gets every remaining scale tier — there
+    were stars, so the field size is the open question."""
+    seen = {}
+    def record(image_path, out_dir, exif_info, tiers=None):
+        seen["tiers"] = tiers
+        return {"success": False, "total_seconds": 2.0, "log_tail": "",
+                "attempts": [], "fov_bounds": [8.0, 35.0]}
+    monkeypatch.setattr(solver, "solve_tiered", record)
+    prior = {"attempts": [{"fov_bounds": [30.0, 90.0], "seconds": 60.0,
+                           "success": False}], "total_seconds": 60.0,
+             "failure": {"reason": "no_match", "can_deepen": True}}
+    job = dict(JOB, mode="deep", result_json=json.dumps(prior))
+    worker.process(job)
+    assert seen["tiers"] == solver.FALLBACK_TIERS[1:]
