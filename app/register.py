@@ -11,7 +11,7 @@ STATUS: the geometry works and is tested; identification does not. Nothing
 here is wired into the worker, and it should not be until that changes.
 
 `wcs_from_pair` recovers a known WCS to under a pixel across the frame, and on
-a real dusk photo it turned Moon + Venus into a 39.3 degree field whose centre
+a real dusk photo it turned Moon + Venus into a 38.2 degree field whose centre
 landed at azimuth 263 — a westward frame holding both, which nothing in the fit
 knew about.
 
@@ -195,6 +195,21 @@ def _refine(params, pix1, sky1, pix2, sky2, width, height, iterations=12):
     except Exception:
         return None
     return wcs if np.max(np.abs(r)) < 0.5 else None
+
+
+def field_width_deg(wcs, width, height):
+    """True angular width of a frame, measured through the projection.
+
+    Not `scale * width`: over a 38 degree field the tangent nonlinearity makes
+    that read about 3% wide, which is the same size as the effects it gets
+    compared against. Two functions here once reported "field_deg" computed the
+    two different ways, and the discrepancy was briefly mistaken for a
+    parallax error.
+    """
+    left = wcs.all_pix2world(0, height / 2, 0)
+    right = wcs.all_pix2world(width - 1, height / 2, 0)
+    return angular_separation(float(left[0]), float(left[1]),
+                              float(right[0]), float(right[1]))
 
 
 def pair_residuals(wcs, matches):
@@ -412,7 +427,10 @@ def match_sources_to_bodies(sources, bodies, width, height, fov_bounds=None):
                 if wcs is None:
                     continue
                 out.append({"wcs": wcs, "bodies": [b1["name"], b2["name"]],
-                            "sources": [s1, s2], "field_deg": scale * width,
+                            "sources": [s1, s2],
+                            # Estimate only: this gate runs before there is a
+                            # WCS to measure. field_width_deg is the real one.
+                            "field_estimate_deg": round(scale * width, 2),
                             "moon_score": moon_score,
                             "peak_sum": s1["peak"] + s2["peak"]})
     # A Moon whose size matches the derived scale is the strongest signal
@@ -605,7 +623,9 @@ def register_frame(image_path, exif_info, bodies, sun_radec, sources=None):
                                    match["sources"][moon_index], sun_radec)
         if offset is None or offset > MAX_LIMB_DISAGREEMENT_DEG:
             continue
-        scored.append(dict(match, limb_offset_deg=round(offset, 1)))
+        scored.append(dict(match, limb_offset_deg=round(offset, 1),
+                           field_deg=round(field_width_deg(match["wcs"],
+                                                           width, height), 2)))
 
     if not scored:
         return None
@@ -659,7 +679,6 @@ def register_from_anchors(image_path, exif_info, anchors, bodies, snap_px=120):
                         width, height)
     if wcs is None:
         return None
-    field = angular_separation(*wcs.all_pix2world(0, height / 2, 0),
-                               *wcs.all_pix2world(width - 1, height / 2, 0))
+    field = field_width_deg(wcs, width, height)
     return {"wcs": wcs, "anchors": placed, "field_deg": round(field, 2),
             "bodies": [a["name"], b["name"]]}

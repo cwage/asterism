@@ -174,7 +174,9 @@ def test_identifies_the_moon_by_the_direction_its_limb_faces(tmp_path):
     got = dict(zip(best["bodies"], best["sources"]))
     assert abs(got["Moon"]["x"] - moon_px[0]) < 25
     assert abs(got["Venus"]["x"] - venus_px[0]) < 25
-    assert best["field_deg"] == pytest.approx(39.3, rel=0.15)
+    # The measured angular width, not scale * width — those differ by about 3%
+    # at this field, which is large enough to be mistaken for a real effect.
+    assert best["field_deg"] == pytest.approx(38.2, rel=0.1)
     assert best["limb_offset_deg"] < register.MAX_LIMB_DISAGREEMENT_DEG
 
 
@@ -214,3 +216,17 @@ def test_a_pair_without_the_moon_is_refused(tmp_path):
 def test_registration_needs_two_bodies():
     exif_info = {"width": W, "height": H, "fov_bounds": (25.8, 88.5)}
     assert register.register_frame("unused.jpg", exif_info, [MOON], (168.0, 8.0)) is None
+
+
+def test_field_width_is_measured_not_extrapolated():
+    """`scale * width` overstates a wide field, because TAN is not linear.
+
+    The two once appeared side by side as "field_deg" from different functions,
+    and the 3% gap between them was briefly read as a parallax error.
+    """
+    truth = synth.make_wcs(200.0, -5.0, 39.3, W, H)
+    measured = register.field_width_deg(truth, W, H)
+    linear = abs(truth.wcs.cd[0][0]) * W
+    assert measured < linear, "the naive product should read wider"
+    assert 0.02 < (linear - measured) / measured < 0.05, \
+        f"expected a few percent apart, got {measured:.2f} vs {linear:.2f}"
