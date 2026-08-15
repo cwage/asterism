@@ -32,7 +32,12 @@ Final home: `asterism.quietlife.net`.
   same way. When a solve fails outright, the same ephemeris still answers
   the question from EXIF alone (#7): timestamp + GPS + compass heading
   (declination-corrected via the World Magnetic Model) → "you were facing S;
-  the bright object was Venus, WSW, to your right".
+  the bright object was Venus, WSW, to your right". Without GPS the location
+  comes from the clock's UTC offset, which is ambiguous by a whole zone —
+  the offset fits both a standard-time and a daylight-saving meridian (#79)
+  — so both are checked, a body counts as visible if it clears the horizon
+  under either, and the altitude is quoted as the range rather than a
+  precision the data doesn't have.
 - After projection, labels are verified against the pixels: each star label
   is matched to a detected source near its predicted position, a smooth
   residual field fitted from the matches corrects for computational-stack

@@ -375,6 +375,17 @@ function renderFailure(id, job) {
 }
 
 // No solve, but the EXIF instant + ephemeris still answer "what was that?"
+// Height above the horizon. Without GPS the location is only known to a
+// timezone, which near the horizon is worth several degrees either way (#79),
+// so quote the span rather than a single figure precision doesn't support —
+// and never print a negative altitude for something we just called visible.
+function altPhrase(c) {
+  const range = c.alt_range_deg;
+  if (!range || range[0] === range[1]) return `${c.alt_deg}° up`;
+  if (range[0] < 0) return 'right around the horizon';
+  return `${range[0]}–${range[1]}° up`;
+}
+
 function renderGuess(job, g) {
   const box = document.getElementById('guess');
   box.replaceChildren();
@@ -398,7 +409,7 @@ function renderGuess(job, g) {
     const name = document.createElement('span');
     name.className = 'name';
     name.textContent = c.name;
-    const bits = [`${c.direction}, ${c.alt_deg}° up`];
+    const bits = [`${c.direction}, ${altPhrase(c)}`];
     if (c.phase != null) bits.push(`${Math.round(c.phase * 100)}% lit`);
     else if (c.mag != null) bits.push(`magnitude ${c.mag}`);
     li.append(name, ` — ${bits.join(', ')}${offsetPhrase(job, c)}`);
