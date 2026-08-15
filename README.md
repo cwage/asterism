@@ -40,6 +40,11 @@ Final home: `asterism.quietlife.net`.
   — so both are checked, a body counts as visible if it clears the horizon
   under either, and the altitude is quoted as the range rather than a
   precision the data doesn't have.
+- When the star pattern can't be matched but bright bodies were up, the
+  uploader can point them out instead (#85): two taps — the Moon and a planet —
+  give an exact registration, since a person can tell the Moon from a porch
+  light and software measurably cannot. Taps snap to the nearest detected
+  source, and the result is marked as registered rather than solved.
 - After projection, labels are verified against the pixels: each star label
   is matched to a detected source near its predicted position, a smooth
   residual field fitted from the matches corrects for computational-stack
