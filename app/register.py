@@ -613,3 +613,53 @@ def register_frame(image_path, exif_info, bodies, sun_radec, sources=None):
     best = scored[0]
     best["alternatives"] = len(scored) - 1
     return best
+
+
+def register_from_anchors(image_path, exif_info, anchors, bodies, snap_px=120):
+    """Register from positions a person pointed at (#85).
+
+    `anchors` are [{"name": "Moon", "x": .., "y": ..}, ...] in image pixels.
+    Each is snapped to the nearest detected source so a fingertip on a phone
+    doesn't have to be accurate, then the pair is fitted exactly.
+
+    This is the reliable half of the feature. Automatic identification picks
+    the wrong blob on real frames; a person looking at their own photo does
+    not, and the geometry after that is sub-pixel.
+    """
+    width, height = exif_info.get("width"), exif_info.get("height")
+    if not width or not height or len(anchors) < 2:
+        return None
+    by_name = {b["name"]: b for b in bodies}
+    if not all(a.get("name") in by_name for a in anchors[:2]):
+        return None
+
+    sources = detect_sources(image_path)
+    placed = []
+    for anchor in anchors[:2]:
+        x, y = float(anchor["x"]), float(anchor["y"])
+        near = [s for s in sources
+                if math.hypot(s["x"] - x, s["y"] - y) <= snap_px]
+        if near:
+            best = min(near, key=lambda s: math.hypot(s["x"] - x, s["y"] - y))
+            placed.append({"name": anchor["name"], "x": best["x"],
+                           "y": best["y"], "extent": best["extent"],
+                           "snapped": True})
+        else:
+            # Nothing detected under the finger: trust the tap. Worse
+            # astrometry than a centroid, but the person can see the object
+            # and the detector evidently cannot.
+            placed.append({"name": anchor["name"], "x": x, "y": y,
+                           "extent": 0, "snapped": False})
+
+    a, b = placed
+    wcs = wcs_from_pair((a["x"], a["y"]),
+                        (by_name[a["name"]]["ra"], by_name[a["name"]]["dec"]),
+                        (b["x"], b["y"]),
+                        (by_name[b["name"]]["ra"], by_name[b["name"]]["dec"]),
+                        width, height)
+    if wcs is None:
+        return None
+    field = angular_separation(*wcs.all_pix2world(0, height / 2, 0),
+                               *wcs.all_pix2world(width - 1, height / 2, 0))
+    return {"wcs": wcs, "anchors": placed, "field_deg": round(field, 2),
+            "bodies": [a["name"], b["name"]]}

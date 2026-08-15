@@ -7,8 +7,8 @@ import shutil
 import time
 import traceback
 
-from . import (constellations, db, dso, ephemeris, narrate, satellites,
-               solver, verify)
+from . import (constellations, db, dso, ephemeris, narrate, register,
+               satellites, solver, verify)
 
 # Below this many detected star-like sources, a quick job fails fast
 # instead of burning cpulimit tiers on daylight/food/pitch-black uploads.
@@ -117,10 +117,152 @@ def _attach_guess(result, exif_info):
     result["failure"]["guess_unavailable"] = reason or "unavailable"
 
 
+def _label_everything(result, wcs_path, image_path, exif_info, job_id):
+    """Project every layer through a WCS and verify it against the pixels.
+
+    Shared by a plate solve and a registration from the Moon and planets
+    (#85): once there is a WCS, where it came from stops mattering.
+    """
+    labels = solver.annotate(
+        wcs_path, exif_info["width"], exif_info["height"]
+    )
+
+    # Ephemeris labels are best-effort extras: never fail a good solve on them.
+    try:
+        bodies, eph_meta = ephemeris.annotate_bodies(
+            wcs_path, exif_info["width"], exif_info["height"], exif_info
+        )
+    except Exception:
+        # Full traceback stays in the worker log; clients get a stable schema.
+        print(f"worker: ephemeris failed for {job_id}\n{traceback.format_exc()}")
+        bodies, eph_meta = [], {"time_utc": None, "time_source": None,
+                                "error": "ephemeris computation failed"}
+
+    # Constellation figures ride the same best-effort rule.
+    try:
+        figures = constellations.annotate(
+            wcs_path, exif_info["width"], exif_info["height"]
+        )
+    except Exception:
+        print(f"worker: constellations failed for {job_id}\n{traceback.format_exc()}")
+        figures = []
+
+    # Naked-eye deep-sky objects (#16), best-effort like the layers above.
+    try:
+        dsos = dso.annotate(
+            wcs_path, exif_info["width"], exif_info["height"]
+        )
+    except Exception:
+        print(f"worker: dso annotation failed for {job_id}\n{traceback.format_exc()}")
+        dsos = []
+
+    labels = bodies + labels + dsos
+
+    # Verification closes the loop against the pixels (issue #28): snap
+    # labels to detected sources, flag cloud-hidden stars, correct for
+    # stack warp. Best-effort like the layers above.
+    try:
+        labels, figures, verification = verify.apply(
+            image_path, labels, figures
+        )
+    except Exception:
+        print(f"worker: verification failed for {job_id}\n{traceback.format_exc()}")
+        verification = {"verified": False, "error": "verification failed"}
+
+    # Satellite crossings during the exposure (#11), best-effort: needs a
+    # timestamp, GPS, and Space-Track credentials, and reports why not
+    # when it can't run.
+    try:
+        sats = satellites.annotate(
+            wcs_path, exif_info["width"], exif_info["height"],
+            exif_info
+        )
+    except Exception:
+        print(f"worker: satellites failed for {job_id}\n{traceback.format_exc()}")
+        sats = {"skipped": "satellite lookup failed"}
+
+    result["labels"] = labels
+    result["ephemeris"] = eph_meta
+    result["constellations"] = figures
+    result["verification"] = verification
+    result["satellites"] = sats
+
+    # LLM narration (#12), best-effort: no API key or a failed call just
+    # leaves the deterministic card caption in place.
+    try:
+        narration = narrate.annotate(result)
+        if narration:
+            result["narration"] = narration
+    except Exception:
+        print(f"worker: narration failed for {job_id}\n{traceback.format_exc()}")
+
+    return result
+
+def _process_anchors(job, exif_info, out_dir):
+    """Register from objects the uploader pointed at, then label as usual.
+
+    Automatic identification of the Moon is not reliable — it mislabels ground
+    lights on real frames (#85) — but a person looking at their own photo knows
+    which blob is the Moon, and the geometry from two known anchors is
+    sub-pixel.
+    """
+    anchors = json.loads(_col(job, "anchors_json") or "[]")
+    when_utc, _ = ephemeris.resolve_utc(exif_info)
+    if when_utc is None or len(anchors) < 2:
+        return "failed", {"success": False, "attempts": [], "total_seconds": 0.0,
+                          "failure": {"reason": "no_anchor_time"}}, (
+            "this photo has no timestamp, so the sky can't be placed at all")
+
+    # The Moon shifts by up to a degree of parallax with the observer, and
+    # that lands directly in the fit. Without GPS, the timezone band from #79
+    # still beats treating the observer as the centre of the Earth.
+    lat, lon = exif_info.get("lat"), exif_info.get("lon")
+    if lat is None or lon is None:
+        delta = ephemeris._parse_offset(exif_info.get("offset_time_original"))
+        if delta is not None:
+            lat = ephemeris.FALLBACK_GUESS_LAT
+            lon = ephemeris._band_center(ephemeris.guess_longitudes(delta))
+    bodies = ephemeris.compute_bodies(when_utc, lat, lon)
+    reg = register.register_from_anchors(job["image_path"], exif_info,
+                                         anchors, bodies)
+    if reg is None:
+        return "failed", {"success": False, "attempts": [], "total_seconds": 0.0,
+                          "failure": {"reason": "registration_failed"}}, (
+            "couldn't place the sky from those two points")
+
+    os.makedirs(out_dir, exist_ok=True)
+    wcs_path = os.path.join(out_dir, "register.wcs")
+    from astropy.io import fits
+    fits.PrimaryHDU(header=reg["wcs"].to_header()).writeto(wcs_path,
+                                                           overwrite=True)
+
+    result = {"success": True, "attempts": [], "total_seconds": 0.0,
+              "wcs_path": wcs_path,
+              # Provenance matters: this is not a star match, and the client
+              # says so rather than passing it off as one.
+              "provenance": "anchors",
+              "registration": {
+                  "bodies": reg["bodies"], "field_deg": reg["field_deg"],
+                  "anchors": [{k: a[k] for k in ("name", "x", "y", "snapped")}
+                              for a in reg["anchors"]],
+                  # Without GPS the Moon's own position is uncertain by up to a
+                  # degree of parallax, and that lands straight in the fit.
+                  "location_source": ("gps" if exif_info.get("lat") is not None
+                                      else "timezone_guess"),
+              }}
+    result = _label_everything(result, wcs_path, job["image_path"], exif_info,
+                               job["id"])
+    return "done", result, None
+
+
 def process(job):
     exif_info = json.loads(job["exif_json"])
     out_dir = os.path.join(db.DATA_DIR, "jobs", job["id"])
     mode = _col(job, "mode", "quick")
+
+    if mode == "anchors":
+        return _process_anchors(job, exif_info, out_dir)
+
     plan = solver.tier_plan(exif_info)
 
     if mode != "deep":
@@ -161,79 +303,8 @@ def process(job):
         _attach_guess(result, exif_info)
         return "failed", result, message
 
-    labels = solver.annotate(
-        result["wcs_path"], exif_info["width"], exif_info["height"]
-    )
-
-    # Ephemeris labels are best-effort extras: never fail a good solve on them.
-    try:
-        bodies, eph_meta = ephemeris.annotate_bodies(
-            result["wcs_path"], exif_info["width"], exif_info["height"], exif_info
-        )
-    except Exception:
-        # Full traceback stays in the worker log; clients get a stable schema.
-        print(f"worker: ephemeris failed for {job['id']}\n{traceback.format_exc()}")
-        bodies, eph_meta = [], {"time_utc": None, "time_source": None,
-                                "error": "ephemeris computation failed"}
-
-    # Constellation figures ride the same best-effort rule.
-    try:
-        figures = constellations.annotate(
-            result["wcs_path"], exif_info["width"], exif_info["height"]
-        )
-    except Exception:
-        print(f"worker: constellations failed for {job['id']}\n{traceback.format_exc()}")
-        figures = []
-
-    # Naked-eye deep-sky objects (#16), best-effort like the layers above.
-    try:
-        dsos = dso.annotate(
-            result["wcs_path"], exif_info["width"], exif_info["height"]
-        )
-    except Exception:
-        print(f"worker: dso annotation failed for {job['id']}\n{traceback.format_exc()}")
-        dsos = []
-
-    labels = bodies + labels + dsos
-
-    # Verification closes the loop against the pixels (issue #28): snap
-    # labels to detected sources, flag cloud-hidden stars, correct for
-    # stack warp. Best-effort like the layers above.
-    try:
-        labels, figures, verification = verify.apply(
-            job["image_path"], labels, figures
-        )
-    except Exception:
-        print(f"worker: verification failed for {job['id']}\n{traceback.format_exc()}")
-        verification = {"verified": False, "error": "verification failed"}
-
-    # Satellite crossings during the exposure (#11), best-effort: needs a
-    # timestamp, GPS, and Space-Track credentials, and reports why not
-    # when it can't run.
-    try:
-        sats = satellites.annotate(
-            result["wcs_path"], exif_info["width"], exif_info["height"],
-            exif_info
-        )
-    except Exception:
-        print(f"worker: satellites failed for {job['id']}\n{traceback.format_exc()}")
-        sats = {"skipped": "satellite lookup failed"}
-
-    result["labels"] = labels
-    result["ephemeris"] = eph_meta
-    result["constellations"] = figures
-    result["verification"] = verification
-    result["satellites"] = sats
-
-    # LLM narration (#12), best-effort: no API key or a failed call just
-    # leaves the deterministic card caption in place.
-    try:
-        narration = narrate.annotate(result)
-        if narration:
-            result["narration"] = narration
-    except Exception:
-        print(f"worker: narration failed for {job['id']}\n{traceback.format_exc()}")
-
+    result = _label_everything(result, result["wcs_path"],
+                               job["image_path"], exif_info, job["id"])
     return "done", result, None
 
 

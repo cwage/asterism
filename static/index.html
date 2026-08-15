@@ -355,11 +355,74 @@ async function poll(id) {
   }
 }
 
+// --- placing a failed photo by hand (#85) ---
+// Software cannot reliably tell the Moon from a porch light in a real frame;
+// the person who took the photo can. Two taps give an exact registration.
+
+// Which objects to ask about: the Moon first (it is unmistakable, and its size
+// anchors the scale), then the brightest other body that was up.
+function anchorTargets(guess) {
+  const up = (guess && guess.candidates) || [];
+  const moon = up.find((c) => c.kind === 'moon');
+  const other = up.find((c) => c.kind !== 'moon');
+  return moon && other ? [moon.name, other.name] : null;
+}
+
+// Where a tap landed in the photo's own pixels, whatever size it is on screen.
+function imagePoint(rect, natural, clientX, clientY) {
+  return {
+    x: (clientX - rect.left) / rect.width * natural.width,
+    y: (clientY - rect.top) / rect.height * natural.height,
+  };
+}
+
+function startAnchoring(id, names) {
+  const img = document.getElementById('photo');
+  const wrap = document.getElementById('wrap');
+  const picked = [];
+  img.src = '/jobs/' + encodeURIComponent(id) + '/image';
+  img.hidden = false;
+  wrap.style.display = 'inline-block';
+  wrap.style.cursor = 'crosshair';
+  status(`Tap ${names[0]} in the photo`);
+
+  const onTap = async (event) => {
+    const point = imagePoint(img.getBoundingClientRect(),
+                             { width: img.naturalWidth, height: img.naturalHeight },
+                             event.clientX, event.clientY);
+    picked.push({ name: names[picked.length], x: point.x, y: point.y });
+    if (picked.length < names.length) {
+      status(`Tap ${names[picked.length]} in the photo`);
+      return;
+    }
+    img.removeEventListener('click', onTap);
+    wrap.style.cursor = '';
+    status('placing the sky from those two points…');
+    const res = await fetch('/jobs/' + encodeURIComponent(id) + '/anchor', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ anchors: picked }),
+    });
+    if (!res.ok) { status('could not place it: ' + await res.text()); return; }
+    poll(id);
+  };
+  img.addEventListener('click', onTap);
+}
+
 function renderFailure(id, job) {
   const f = job.result && job.result.failure;
   status('solve failed — ' + (job.error || 'unknown'));
   if (f && f.guess) renderGuess(job, f.guess);
   else if (f && f.guess_unavailable) renderNoGuess(f.guess_unavailable);
+
+  // The star pattern failed, but if bright bodies were up the uploader can
+  // point them out and get a real overlay anyway.
+  const targets = anchorTargets(f && f.guess);
+  if (targets) {
+    const place = document.createElement('button');
+    place.textContent = `Point out the ${targets[0]} and ${targets[1]} instead`;
+    place.onclick = () => { place.remove(); startAnchoring(id, targets); };
+    document.getElementById('actions').append(place);
+  }
   if (!f || !f.can_deepen) return;
   // Failed fast on purpose; deeper attempts are the user's call (~2 min).
   const btn = document.createElement('button');
