@@ -107,6 +107,14 @@ def _attach_guess(result, exif_info):
         guess = None
     if guess:
         result["failure"]["guess"] = guess
+        return
+    # Silence is the worst outcome and the one that reads like a bug, so say
+    # which piece of missing EXIF stopped us (#82).
+    try:
+        reason = ephemeris.guess_unavailable_reason(exif_info)
+    except Exception:
+        reason = None
+    result["failure"]["guess_unavailable"] = reason or "unavailable"
 
 
 def process(job):

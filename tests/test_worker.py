@@ -133,7 +133,8 @@ def test_no_stars_gate_fails_fast_without_solving(monkeypatch):
     status, result, error = worker.process(JOB)
     assert status == "failed"
     assert result["failure"] == {"reason": "no_stars", "stars_detected": 3,
-                                 "can_deepen": True}
+                                 "can_deepen": True,
+                                 "guess_unavailable": "no_timestamp"}
     assert "star-like sources" in error
 
 
@@ -154,7 +155,8 @@ def test_fallback_guess_crash_does_not_mask_the_failure(monkeypatch):
     status, result, error = worker.process(JOB)
     assert status == "failed"
     assert result["failure"] == {"reason": "no_stars", "stars_detected": 3,
-                                 "can_deepen": True}
+                                 "can_deepen": True,
+                                 "guess_unavailable": "no_timestamp"}
 
 
 def test_quick_mode_runs_only_the_first_tier(monkeypatch):
@@ -168,7 +170,8 @@ def test_quick_mode_runs_only_the_first_tier(monkeypatch):
     status, result, error = worker.process(JOB)
     assert seen["tiers"] == [solver.FALLBACK_TIERS[0]]  # no EXIF focal in JOB
     assert status == "failed"
-    assert result["failure"] == {"reason": "no_match", "can_deepen": True}
+    assert result["failure"] == {"reason": "no_match", "can_deepen": True,
+                                 "guess_unavailable": "no_timestamp"}
 
 
 def test_deep_mode_skips_tiers_the_quick_pass_tried(monkeypatch):
@@ -191,4 +194,5 @@ def test_deep_mode_skips_tiers_the_quick_pass_tried(monkeypatch):
     # quick attempts stay visible, times accumulate, and it's the end of the road
     assert [a["fov_bounds"] for a in result["attempts"]] == [[30.0, 90.0], [8.0, 35.0]]
     assert result["total_seconds"] == 62.0
-    assert result["failure"] == {"reason": "no_match", "can_deepen": False}
+    assert result["failure"] == {"reason": "no_match", "can_deepen": False,
+                                 "guess_unavailable": "no_timestamp"}

@@ -251,6 +251,20 @@ def _declination(lat, lon, when_utc):
     return float(GeoMag().calculate(glat=lat, glon=lon, alt=0, time=year).d)
 
 
+def guess_unavailable_reason(exif_info):
+    """Why fallback_guess would decline, or None if it wouldn't (#82).
+
+    Returning nothing at all is the worst of the guess's outcomes and the one
+    that reads like a broken page, so the caller gets something to say."""
+    if not exif_info.get("datetime_original"):
+        return "no_timestamp"
+    has_gps = (exif_info.get("lat") is not None
+               and exif_info.get("lon") is not None)
+    if not has_gps and _parse_offset(exif_info.get("offset_time_original")) is None:
+        return "no_location"
+    return None
+
+
 def fallback_guess(exif_info):
     """When the solve fails, answer the question anyway: what was above the
     horizon at the EXIF instant, and where relative to the compass heading
