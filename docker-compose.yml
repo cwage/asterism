@@ -24,10 +24,15 @@ services:
   worker:
     # LLM narration (#12) needs ANTHROPIC_API_KEY and satellite crossings
     # (#11) need SPACETRACK_USER/PASS; unset just disables those layers.
+    # Same for NTFY_TOPIC_URL and activity notifications (#69) — the knobs
+    # are passed through so a local run can exercise them without a rebuild.
     build:
       context: .
       target: app
-    command: python -m app.worker
+    # -u to match scripts/start-all.sh: without it the worker's prints sit
+    # in a block buffer and `docker compose logs worker` stays empty until
+    # shutdown, which hides exactly the lines you started it to watch.
+    command: python -u -m app.worker
     volumes:
       - ./data:/data
       - ./indexes:/indexes:ro
@@ -38,3 +43,8 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - SPACETRACK_USER=${SPACETRACK_USER:-}
       - SPACETRACK_PASS=${SPACETRACK_PASS:-}
+      - NTFY_TOPIC_URL=${NTFY_TOPIC_URL:-}
+      - NTFY_BURST_SOLVES=${NTFY_BURST_SOLVES:-}
+      - NTFY_BURST_WINDOW_MINUTES=${NTFY_BURST_WINDOW_MINUTES:-}
+      - NTFY_SUMMARY_HOUR_UTC=${NTFY_SUMMARY_HOUR_UTC:-}
+      - NTFY_TICK_SECONDS=${NTFY_TICK_SECONDS:-}

@@ -220,3 +220,17 @@ def test_post_never_raises_on_a_dead_endpoint(monkeypatch):
     monkeypatch.setattr(notify, "TOPIC_URL", "http://127.0.0.1:1/nope")
     monkeypatch.setattr(notify, "TIMEOUT_SECONDS", 0.5)
     assert notify.post("hello") is False
+
+
+def test_a_set_but_empty_knob_falls_back_to_its_default(monkeypatch):
+    """`NTFY_TICK_SECONDS=${NTFY_TICK_SECONDS:-}` in a compose file passes an
+    empty string. int("") at import time would take the worker down over a
+    knob nobody turned."""
+    monkeypatch.setenv("NTFY_BURST_SOLVES", "")
+    assert notify._int_env("NTFY_BURST_SOLVES", 6) == 6
+    monkeypatch.setenv("NTFY_BURST_SOLVES", "  ")
+    assert notify._int_env("NTFY_BURST_SOLVES", 6) == 6
+    monkeypatch.setenv("NTFY_BURST_SOLVES", "banana")
+    assert notify._int_env("NTFY_BURST_SOLVES", 6) == 6
+    monkeypatch.setenv("NTFY_BURST_SOLVES", "3")
+    assert notify._int_env("NTFY_BURST_SOLVES", 6) == 3

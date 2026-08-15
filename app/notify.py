@@ -20,19 +20,31 @@ import traceback
 import urllib.error
 import urllib.request
 
+def _int_env(name, default):
+    """Set-but-empty counts as unset. `${NTFY_TICK_SECONDS:-}` in a compose
+    file passes an empty string, and int("") at import time would take the
+    worker down over a knob nobody turned."""
+    raw = os.environ.get(name, "").strip()
+    try:
+        return int(raw) if raw else default
+    except ValueError:
+        print(f"notify: ignoring unreadable {name}, using {default}")
+        return default
+
+
 TOPIC_URL = os.environ.get("NTFY_TOPIC_URL", "").strip()
 
 # Deliberately low. On a site that normally sees single digits a day, a
 # handful inside an hour is already the thing worth looking at.
-BURST_SOLVES = int(os.environ.get("NTFY_BURST_SOLVES", "6"))
-BURST_WINDOW_MINUTES = int(os.environ.get("NTFY_BURST_WINDOW_MINUTES", "60"))
+BURST_SOLVES = _int_env("NTFY_BURST_SOLVES", 6)
+BURST_WINDOW_MINUTES = _int_env("NTFY_BURST_WINDOW_MINUTES", 60)
 
 # UTC, because the machine has no opinion about local time and the summary
 # is "roughly nightly" regardless (see the wake-gap note in #69).
-SUMMARY_HOUR_UTC = int(os.environ.get("NTFY_SUMMARY_HOUR_UTC", "7"))
+SUMMARY_HOUR_UTC = _int_env("NTFY_SUMMARY_HOUR_UTC", 7)
 SUMMARY_WINDOW_HOURS = 24
 
-TICK_INTERVAL_SECONDS = int(os.environ.get("NTFY_TICK_SECONDS", "600"))
+TICK_INTERVAL_SECONDS = _int_env("NTFY_TICK_SECONDS", 600)
 TIMEOUT_SECONDS = 10.0
 
 # Watermarks live in `meta` rather than in the worker process: the machine
