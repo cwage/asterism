@@ -151,3 +151,89 @@ def test_public_exif_rounds_coordinates():
     assert out["focal_35mm"] == 27.0
     assert _public_exif({"lat": None, "lon": None})["lat"] is None
     assert _public_exif(None) is None
+
+
+# --- 35mm equivalent derived from sensor width (#70) ---
+
+# The Canon 5DS upload that motivated this: 8688px across a 36mm sensor at
+# 2413.333 px/cm, 24mm lens. No FocalLengthIn35mmFilm anywhere in the file.
+CANON_5DS = {"focal_length": 24.0, "focal_plane_x_res": 2413.333344,
+             "focal_plane_unit": 3}
+
+
+def _write(tmp_path, name, size, **exif_kwargs):
+    path = tmp_path / name
+    Image.new("RGB", size).save(path, exif=synth.build_exif(**exif_kwargs))
+    return path
+
+
+def test_full_frame_focal_length_derives_its_own_equivalent(tmp_path):
+    path = _write(tmp_path, "canon.jpg", (8688, 5672), **CANON_5DS)
+    info = exif.read_exif(path)
+    # 8688 / 2413.333 px per cm = 3.6cm = full frame, so 24mm stays 24mm.
+    assert info["focal_35mm"] == pytest.approx(24.0, abs=0.01)
+    assert info["focal_35mm_source"] == "sensor_width"
+    # ~73.7 deg horizontal, bracketed the same way as a phone's tag.
+    assert info["fov_bounds"] == pytest.approx((25.8, 88.5), abs=0.1)
+
+
+def test_crop_sensor_scales_the_equivalent_up(tmp_path):
+    # APS-C: 22.3mm wide, so a 24mm lens frames like ~38.7mm full frame.
+    path = _write(tmp_path, "apsc.jpg", (6000, 4000), focal_length=24.0,
+                  focal_plane_x_res=6000 / 2.23, focal_plane_unit=3)
+    info = exif.read_exif(path)
+    assert info["focal_35mm"] == pytest.approx(38.7, abs=0.2)
+
+
+def test_inch_resolution_unit_is_handled(tmp_path):
+    # Same full-frame geometry expressed in the other common unit.
+    path = _write(tmp_path, "inch.jpg", (8688, 5672), focal_length=24.0,
+                  focal_plane_x_res=8688 / (36.0 / 25.4), focal_plane_unit=2)
+    info = exif.read_exif(path)
+    assert info["focal_35mm"] == pytest.approx(24.0, abs=0.01)
+
+
+def test_the_35mm_tag_still_wins_when_present(tmp_path):
+    # A file carrying both must not be re-derived: the manufacturer's own
+    # equivalent accounts for crops the focal plane tags know nothing about.
+    path = _write(tmp_path, "both.jpg", (4000, 3000), f35mm=24,
+                  focal_length=4.5, focal_plane_x_res=4000 / 0.94,
+                  focal_plane_unit=3)
+    info = exif.read_exif(path)
+    assert info["focal_35mm"] == 24.0
+    assert info["focal_35mm_source"] == "exif_35mm"
+
+
+def test_focal_length_without_focal_plane_tags_is_not_guessed(tmp_path):
+    # A bare focal length says nothing without a sensor size to scale it by.
+    path = _write(tmp_path, "bare.jpg", (4000, 3000), focal_length=24.0)
+    info = exif.read_exif(path)
+    assert info["focal_35mm"] is None
+    assert info["focal_35mm_source"] is None
+    assert info["fov_bounds"] == exif.DEFAULT_FOV_BOUNDS
+
+
+def test_implausible_sensor_width_is_rejected(tmp_path):
+    # The resize trap: focal plane tags describe the original capture, so a
+    # downscaled export computes a sensor a fraction of its real width. Better
+    # to fall back to the generic tiers than to hint a field that is wrong by
+    # the resize factor.
+    path = _write(tmp_path, "resized.jpg", (800, 600), focal_length=24.0,
+                  focal_plane_x_res=2413.333344, focal_plane_unit=3)
+    info = exif.read_exif(path)
+    assert info["focal_35mm"] is None
+    assert info["fov_bounds"] == exif.DEFAULT_FOV_BOUNDS
+
+
+def test_garbage_focal_plane_values_do_not_raise(tmp_path):
+    for bad in (0, -5, "banana"):
+        path = _write(tmp_path, f"bad{str(bad)[:3]}.jpg", (6000, 4000),
+                      focal_length=24.0, focal_plane_x_res=bad,
+                      focal_plane_unit=3)
+        assert exif.read_exif(path)["focal_35mm"] is None
+
+
+def test_unknown_resolution_unit_is_ignored(tmp_path):
+    path = _write(tmp_path, "unit1.jpg", (6000, 4000), focal_length=24.0,
+                  focal_plane_x_res=2413.333344, focal_plane_unit=1)
+    assert exif.read_exif(path)["focal_35mm"] is None
