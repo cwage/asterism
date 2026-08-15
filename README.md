@@ -30,9 +30,11 @@ Final home: `asterism.quietlife.net`.
   GPS is present) and projected through the same WCS. Constellation stick
   figures (Stellarium's modern line set, resolved via HYG) are drawn the
   same way. When a solve fails outright, the same ephemeris still answers
-  the question from EXIF alone (#7): timestamp + GPS + compass heading
-  (declination-corrected via the World Magnetic Model) → "you were facing S;
-  the bright object was Venus, WSW, to your right". Without GPS the location
+  the question from EXIF alone (#7): timestamp + GPS → "the bright object was
+  Venus, WSW, 12° up". Directions are absolute compass bearings, not relative
+  to how the phone was aimed: the EXIF heading turned out to be wrong by 60 to
+  160° on real frames whose true pointing a solve could confirm, so nothing
+  user-facing is built on it (#81). Without GPS the location
   comes from the clock's UTC offset, which is ambiguous by a whole zone —
   the offset fits both a standard-time and a daylight-saving meridian (#79)
   — so both are checked, a body counts as visible if it clears the horizon
