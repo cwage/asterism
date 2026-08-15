@@ -49,9 +49,10 @@ def test_synthetic_field_solves_with_exif_hint(starfield, tmp_path):
     assert labels, "solved field should contain named bright stars"
     assert any(l["name"] == "Sirius" for l in labels)
 
-    # A real solve should clear the #71 confidence floor with room to spare,
-    # not scrape past it. Calibration put genuine solves at log-odds 93+ with
-    # 17+ matched stars against floors of 25 and 8. Compared against the
+    # This synthetic field is dense and noise-free, so it should clear the #71
+    # floor by a wide margin — the assertion guards the fixture, not real-world
+    # solves, which run much closer to the floor (as low as log-odds 43 with 12
+    # matches; see the calibration note in solver.py). Compared against the
     # calibrated defaults rather than the live (env-overridable) floors, so a
     # deployment-specific setting cannot make this assertion mean something
     # else.

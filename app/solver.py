@@ -22,16 +22,24 @@ CPU_LIMIT = int(os.environ.get("SOLVE_CPULIMIT", "60"))
 # log-odds 20.7, so 25 keeps our floor just above the library's while staying
 # far below anything real.
 #
-# Measured 2026-08-15 on six featured production solves (five distinct fields;
-# two of the files are re-encodes of one photo and solve identically) plus the
-# two synthetic fixtures:
+# Measured 2026-08-15 on six featured production solves, the two synthetic
+# fixtures, and two handheld Night Sight frames solved the same evening:
 #
-#     genuine solves    log-odds 93 - 825    17 - 192 matched stars
+#     genuine solves    log-odds 43 - 825    12 - 192 matched stars
 #     the #71 false WCS log-odds 9.5         2 matched stars
 #
-# Nothing observed lands between the two groups. The floors sit in that gap
-# with room on both sides: 25 is well under the weakest real solve (93) and
-# well over the false one, and 8 matched stars likewise (weakest real: 17).
+# The first calibration used only the featured solves and put the genuine
+# range at 93-825 with 17-192 matches. Two ordinary phone shots taken hours
+# later came in at 70.6/19 and 42.7/12, so that range was an artefact of a
+# small, self-selected sample — featured solves are the good ones by
+# definition. Real solves go lower than they suggested, and probably lower
+# than this.
+#
+# The floors still sit in a genuine gap, but with less headroom than first
+# claimed: the weakest real solve clears log-odds 25 by 1.7x and 8 matches by
+# 1.5x, against a false match that misses both by 2.6x and 4x. Worth
+# revisiting if a solve ever lands between them — that is the measurement
+# that would settle whether these numbers are right.
 DEFAULT_MIN_LOGODDS = 25.0
 DEFAULT_MIN_MATCHES = 8
 MIN_LOGODDS = float(os.environ.get("SOLVE_MIN_LOGODDS", DEFAULT_MIN_LOGODDS))
