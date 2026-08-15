@@ -187,6 +187,49 @@ sinks out of the strip once 24 newer solves exist. On a quiet site that never
 happens, which is the case this exists for. Storage grows monotonically by
 design; a few dozen phone JPEGs and their cards is nothing against the volume.
 
+## Activity notifications
+
+Nothing else reports what the site did today: counts exist only as rows the
+retention sweep deletes, and a burst of uploads is visible only to whoever
+happens to look at the homepage. Set `NTFY_TOPIC_URL` to an
+[ntfy.sh](https://ntfy.sh) topic and the worker publishes two things (#69):
+
+- a roughly-nightly summary —
+  `47 uploads · 39 solved · 8 failed (6 no_stars, 2 no_match) · 2 hidden · 10 featured`
+- a burst alert when solves outpace what this site normally sees —
+  `9 solves in the last 60 minutes`
+
+```
+fly secrets set NTFY_TOPIC_URL=https://ntfy.sh/some-unguessable-name
+```
+
+Treat that URL as a credential: anyone holding it can read the notifications
+*and* publish to them, so use a name nobody will guess, or ntfy's own auth. It
+is never logged, including on failure. Unset means the feature is off, the same
+as `ANTHROPIC_API_KEY` and `SPACETRACK_*`.
+
+| variable | default | |
+| --- | --- | --- |
+| `NTFY_TOPIC_URL` | *(unset — off)* | where to publish |
+| `NTFY_BURST_SOLVES` | `6` | solves in the window that trip the alert |
+| `NTFY_BURST_WINDOW_MINUTES` | `60` | how long that window is |
+| `NTFY_SUMMARY_HOUR_UTC` | `7` | earliest hour the daily summary goes out |
+| `NTFY_TICK_SECONDS` | `600` | how often the worker evaluates both |
+
+The tick lives in the worker loop rather than a scheduled job, which means it
+only runs while the machine is up. That failure mode is exactly correlated with
+having nothing to report — `auto_stop_machines` only stops the machine when
+nobody has uploaded — so the summary drifts to the first tick after the next
+wake, on a day when it reads `0 uploads` anyway. The burst alert is unaffected:
+it fires while the traffic is happening, which is the whole point of it. A
+wake gap longer than `RETENTION_HOURS` undercounts the summary, since the swept
+rows were the only record; the retention sweep has had the same property since
+#23.
+
+The purpose is volume awareness, not abuse forensics. "Is that fifteen real
+people finding the site, or one person to reach for the kill switch about" is
+answered by going and looking, not by anything the notification computes.
+
 ## Quickstart
 
 ```
