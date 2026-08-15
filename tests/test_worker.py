@@ -236,3 +236,20 @@ def test_deep_mode_after_a_real_solve_attempt_is_not_capped(monkeypatch):
     job = dict(JOB, mode="deep", result_json=json.dumps(prior))
     worker.process(job)
     assert seen["tiers"] == solver.FALLBACK_TIERS[1:]
+
+
+def test_periodic_tasks_are_due_on_the_first_pass():
+    """time.monotonic() counts from boot, and a Fly machine that auto-stops
+    is a fresh boot on every wake (measured: 85.9s on a machine that had
+    been serving for minutes). Comparing against an initial 0.0 asks for a
+    full interval of *continuous uptime* first — 15 minutes for the sweep,
+    10 for notifications — so on a site quiet enough to let the machine
+    stop, neither would ever run. Local docker hides it: containers share
+    the host's monotonic clock, which is days large."""
+    assert worker.due(None, 900) is True
+    # Once it has run, the interval applies normally.
+    assert worker.due(100.0, 900, now=150.0) is False
+    assert worker.due(100.0, 900, now=1500.0) is True
+    # A freshly-booted machine is exactly the case that used to fail: a
+    # small monotonic reading is not evidence that the task just ran.
+    assert worker.due(None, 900, now=85.9) is True
