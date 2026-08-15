@@ -194,12 +194,44 @@ def annotate_bodies(wcs_path, width, height, exif_info):
 
 # ---- no-solve fallback (#7) ----
 
-# Below this altitude a body is behind trees/haze for practical purposes.
-FALLBACK_MIN_ALT_DEG = 3.0
-# No GPS (phones drop it while still recording heading): longitude from the
-# clock's UTC offset lands within about a zone, and a mid-northern latitude
-# gets above/below-horizon roughly right. Flagged so the UI can hedge.
+# Horizon cut for the guess (#80). This used to sit at 3 degrees on the theory
+# that anything lower is behind trees or haze. It isn't: a 7%-lit crescent Moon
+# photographed over a rooftop on 2026-08-14 computed to +2.7 degrees at the
+# capture location and was dropped, from a frame it is plainly visible in.
+# Refraction is already in the apparent() positions, so 0 means what it says.
+FALLBACK_MIN_ALT_DEG = 0.0
+# No GPS (phones drop it while still recording heading): a mid-northern
+# latitude gets above/below-horizon roughly right. Flagged so the UI can hedge.
 FALLBACK_GUESS_LAT = 38.0
+
+
+def _wrap_lon(lon):
+    return ((lon + 180.0) % 360.0) - 180.0
+
+
+def guess_longitudes(delta):
+    """Longitudes consistent with a UTC offset, westmost first (#79).
+
+    `offset * 15` is the meridian only under *standard* time. Under daylight
+    saving the clock runs an hour ahead of the sun, so the same offset belongs
+    to a zone 15 degrees further west — and EXIF never says which applies.
+    Both hypotheses are returned, and a body counts as visible if it clears
+    the horizon under either.
+
+    Getting this wrong is not subtle: a photo taken at 20:28 CDT put the Moon
+    at -6.6 degrees under the standard-time reading and +5.2 under the daylight
+    one, which is the difference between "below the horizon" and the crescent
+    the photographer was looking at."""
+    hours = delta.total_seconds() / 3600.0
+    return [_wrap_lon((hours - 1.0) * 15.0), _wrap_lon(hours * 15.0)]
+
+
+def _band_center(longitudes):
+    """Point estimate for a set of candidate longitudes: their midpoint, which
+    is also the middle of the timezone band they span."""
+    if len(longitudes) == 1:
+        return longitudes[0]
+    return _wrap_lon(longitudes[0] + _wrap_lon(longitudes[-1] - longitudes[0]) / 2.0)
 
 _COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
             "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
@@ -231,12 +263,14 @@ def fallback_guess(exif_info):
 
     lat, lon = exif_info.get("lat"), exif_info.get("lon")
     location_source = "gps"
+    longitudes = [lon]
     if lat is None or lon is None:
         delta = _parse_offset(exif_info.get("offset_time_original"))
         if delta is None:
             return None  # no location and no zone: alt/az would be fiction
         lat = FALLBACK_GUESS_LAT
-        lon = max(-180.0, min(180.0, delta.total_seconds() / 3600.0 * 15.0))
+        longitudes = guess_longitudes(delta)
+        lon = _band_center(longitudes)
         location_source = "timezone_guess"
 
     guess = {"time_utc": when_utc.isoformat(), "time_source": time_source,
@@ -264,7 +298,10 @@ def fallback_guess(exif_info):
 
     eph = load_ephemeris()
     t = _timescale().from_datetime(when_utc)
+    # The band centre carries the headline numbers; the hypotheses either side
+    # of it decide what counts as visible at all (#79).
     at = (eph["earth"] + wgs84.latlon(lat, lon)).at(t)
+    views = [(eph["earth"] + wgs84.latlon(lat, l)).at(t) for l in longitudes]
 
     # Sun altitude gives the failure its context: daylight shot, twilight
     # washing out the stars, or genuinely dark sky.
@@ -276,11 +313,20 @@ def fallback_guess(exif_info):
         pos = at.observe(eph[key]).apparent()
         alt, az, _ = pos.altaz()
         alt, az = float(alt.degrees), float(az.degrees)
-        if alt < FALLBACK_MIN_ALT_DEG:
+        # A timezone guess spans a whole zone, and near the horizon that is
+        # worth several degrees of altitude either way. Judge visibility on
+        # the best case rather than dropping anything the midpoint happens to
+        # put below the horizon.
+        alts = [float(v.observe(eph[key]).apparent().altaz()[0].degrees)
+                for v in views]
+        if max(alts) < FALLBACK_MIN_ALT_DEG:
             continue
         cand = {"name": name, "alt_deg": round(alt), "az_deg": round(az),
                 "direction": _compass(az),
                 "kind": "moon" if key == "moon" else "planet"}
+        if len(alts) > 1:
+            # How much of the spread is the location guess rather than the sky.
+            cand["alt_range_deg"] = [round(min(alts)), round(max(alts))]
         try:
             cand["mag"] = round(float(planetary_magnitude(pos)), 1)
         except Exception:

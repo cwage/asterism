@@ -6,7 +6,7 @@ than against skyfield itself."""
 
 import math
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from astropy.io import fits
@@ -245,3 +245,69 @@ def test_annotate_bodies_without_timestamp_is_quiet(tmp_path):
     labels, meta = ephemeris.annotate_bodies(str(wcs_path), 100, 100, {})
     assert labels == []
     assert meta == {"time_utc": None, "time_source": None}
+
+
+# ---- location band and horizon cut for the no-solve guess (#79, #80) ----
+
+# The dusk walk that exposed both bugs: a 7%-lit crescent Moon photographed
+# over a rooftop, with no GPS in the upload. The solve failed (twilight, four
+# star-like sources) and the guess named nothing at all.
+DUSK_WALK = {"datetime_original": "2026:08:14 20:28:00",
+             "offset_time_original": "-05:00"}
+NASHVILLE = {"lat": 36.16, "lon": -86.78}
+
+
+def test_guess_longitudes_offers_both_standard_and_daylight():
+    # -05:00 is either EST (meridian -75) or CDT (standard -06:00, so -90).
+    assert ephemeris.guess_longitudes(timedelta(hours=-5)) == [-90.0, -75.0]
+
+
+def test_guess_longitudes_wrap_past_the_date_line():
+    # UTC+14 exists (the Line Islands, around 157W). Both hypotheses land past
+    # 180 degrees east and have to wrap; clamping would put them on the wrong
+    # side of the planet.
+    lons = ephemeris.guess_longitudes(timedelta(hours=14))
+    assert lons == [-165.0, -150.0]
+    assert lons[0] < -157.0 < lons[1], "should bracket Kiritimati"
+
+
+def test_moon_is_named_without_gps():
+    guess = ephemeris.fallback_guess(dict(DUSK_WALK))
+    assert guess["location_source"] == "timezone_guess"
+    names = [c["name"] for c in guess["candidates"]]
+    assert "Moon" in names, guess
+    moon = next(c for c in guess["candidates"] if c["name"] == "Moon")
+    # Thin crescent, and low enough that the old 3-degree floor hid it.
+    assert moon["phase"] == pytest.approx(0.07, abs=0.02)
+    assert moon["direction"] in ("W", "WSW", "WNW")
+    # The timezone spans a zone; the altitude spread says so out loud.
+    low, high = moon["alt_range_deg"]
+    assert low < 0 < high, moon
+
+
+def test_moon_is_named_with_gps_at_the_real_location():
+    # +2.7 degrees at the capture location: visible in the frame, and under
+    # the floor this used to apply.
+    guess = ephemeris.fallback_guess(dict(DUSK_WALK, **NASHVILLE))
+    assert guess["location_source"] == "gps"
+    moon = next((c for c in guess["candidates"] if c["name"] == "Moon"), None)
+    assert moon is not None, guess
+    assert 0 <= moon["alt_deg"] <= 5
+    # A known location carries no band, so no range to report.
+    assert "alt_range_deg" not in moon
+
+
+def test_bodies_below_the_horizon_everywhere_in_the_band_stay_out():
+    # Four hours later the crescent has followed the Sun down, and it is gone
+    # from both ends of the timezone — so widening the search must not start
+    # inventing things that genuinely set.
+    guess = ephemeris.fallback_guess({"datetime_original": "2026:08:15 00:28:00",
+                                      "offset_time_original": "-05:00"})
+    assert all(c["name"] != "Moon" for c in guess["candidates"]), guess
+
+
+def test_gps_path_is_unchanged_by_the_band_logic():
+    guess = ephemeris.fallback_guess(dict(DUSK_WALK, **NASHVILLE))
+    for cand in guess["candidates"]:
+        assert "alt_range_deg" not in cand
+        assert cand["alt_deg"] >= ephemeris.FALLBACK_MIN_ALT_DEG
