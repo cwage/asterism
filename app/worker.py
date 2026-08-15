@@ -68,6 +68,35 @@ def _col(job, name, default=None):
     return default if val is None else val
 
 
+def _widths(attempts):
+    return ", ".join(
+        f"{a['fov_bounds'][0]:.0f}-{a['fov_bounds'][1]:.0f}deg" for a in attempts
+    )
+
+
+def _describe_failure(attempts):
+    """(reason, message) for a solve that produced no usable WCS (#72).
+
+    Running out of CPU and finishing a search empty-handed both used to report
+    "no solution", which reads as "we looked and it isn't there" — misleading
+    when the search never finished. Every failure in the first round of outside
+    uploads was a timeout wearing that copy."""
+    timed_out = [a for a in attempts if a.get("timed_out")]
+    searched = [a for a in attempts if not a.get("timed_out")]
+
+    if timed_out and searched:
+        return "partial_timeout", (
+            f"no solution at {_widths(searched)}; ran out of solve time at "
+            f"{_widths(timed_out)}"
+        )
+    if timed_out:
+        return "timeout", (
+            f"ran out of solve time at {_widths(timed_out)} — the search never "
+            "finished, so this scale hasn't been ruled out"
+        )
+    return "no_match", f"no solution (tried field widths: {_widths(attempts)})"
+
+
 def _attach_guess(result, exif_info):
     """A failed solve still gets a best-effort 'here's what was up' answer
     from the ephemeris (#7). Never lets a guess failure mask the real result."""
@@ -117,15 +146,12 @@ def process(job):
             result["total_seconds"] + (prior.get("total_seconds") or 0), 2)
 
     if not result["success"]:
-        tried = ", ".join(
-            f"{a['fov_bounds'][0]:.0f}-{a['fov_bounds'][1]:.0f}deg"
-            for a in result["attempts"]
-        )
         remaining = len(plan) - len(result["attempts"])
-        result["failure"] = {"reason": "no_match",
+        reason, message = _describe_failure(result["attempts"])
+        result["failure"] = {"reason": reason,
                              "can_deepen": mode != "deep" and remaining > 0}
         _attach_guess(result, exif_info)
-        return "failed", result, f"no solution (tried field widths: {tried})"
+        return "failed", result, message
 
     labels = solver.annotate(
         result["wcs_path"], exif_info["width"], exif_info["height"]

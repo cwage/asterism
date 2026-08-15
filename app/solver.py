@@ -59,6 +59,13 @@ def _write_cfg(out_dir):
     return cfg
 
 
+# What solve-field prints when --cpulimit cuts a search short. "We searched
+# that scale and your photo isn't there" and "we ran out of time" are different
+# outcomes (#72): the first says the scale was wrong, the second says nothing
+# at all.
+CPU_LIMIT_MARKER = "CPU time limit reached"
+
+
 def match_stats(out_dir):
     """Match quality from solve-field's solve.match, or None if unreadable.
 
@@ -124,7 +131,11 @@ def solve(image_path, out_dir, fov_bounds):
     seconds = time.monotonic() - t0
     wcs_path = os.path.join(out_dir, "solve.wcs")
     solved = proc.returncode == 0 and os.path.exists(wcs_path)
-    log_tail = "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-15:])
+    output = proc.stdout + proc.stderr
+    log_tail = "\n".join(output.strip().splitlines()[-15:])
+    # Read from the whole output, not log_tail: the marker is often followed by
+    # more than fifteen lines of teardown chatter.
+    timed_out = CPU_LIMIT_MARKER in output and not solved
 
     stats = match_stats(out_dir) if solved else None
     low_confidence = bool(stats) and (stats["logodds"] < MIN_LOGODDS
@@ -140,6 +151,7 @@ def solve(image_path, out_dir, fov_bounds):
         "log_tail": log_tail,
         "match": stats,
         "low_confidence": low_confidence,
+        "timed_out": timed_out,
     }
 
 
@@ -200,6 +212,7 @@ def solve_tiered(image_path, out_dir, exif_info, tiers=None):
             "fov_bounds": result["fov_bounds"],
             "seconds": result["seconds"],
             "success": result["success"],
+            "timed_out": result.get("timed_out", False),
         }
         # Only recorded when there was a match to judge, so the common failure
         # (nothing matched at all) keeps its existing shape.

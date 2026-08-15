@@ -21,7 +21,10 @@ Final home: `asterism.quietlife.net`.
   clears a confidence floor (#71): solve-field exits 0 and writes a WCS even
   for matches built from a handful of stars, which point somewhere confidently
   wrong, so `SOLVE_MIN_LOGODDS`/`SOLVE_MIN_MATCHES` are checked against
-  `solve.match` before anything is projected. When the photo has an EXIF timestamp, the Moon and
+  `solve.match` before anything is projected. Failures distinguish a finished
+  search that found nothing (`no_match`) from one the CPU limit cut short
+  (`timeout`, or `partial_timeout` when only some tiers ran out) — the second
+  rules nothing out, and saying "no solution" for it is a lie (#72). When the photo has an EXIF timestamp, the Moon and
   naked-eye planets are computed with skyfield (JPL DE421, topocentric when
   GPS is present) and projected through the same WCS. Constellation stick
   figures (Stellarium's modern line set, resolved via HYG) are drawn the
