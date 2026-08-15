@@ -437,18 +437,24 @@ function renderFailure(id, job) {
     document.getElementById('actions').append(place);
   }
   if (!f || !f.can_deepen) return;
-  // Failed fast on purpose; deeper attempts are the user's call (~2 min).
+  // Failed fast on purpose; deeper attempts are the user's call. Slow: the
+  // budget is CPU seconds, and on a shared vCPU the wall clock runs several
+  // times that, so don't quote a number we miss by an order of magnitude.
   const btn = document.createElement('button');
   btn.textContent = f.reason === 'no_stars'
-    ? 'Solve anyway (may take ~2 minutes)'
-    : 'Dig deeper — try other field scales (~2 minutes)';
+    ? 'Search anyway (slow, and probably not a sky photo)'
+    : 'Dig deeper — try other field scales (slow)';
   btn.onclick = async () => {
     btn.remove();
     const res = await fetch('/jobs/' + encodeURIComponent(id) + '/deepen', { method: 'POST' });
     if (!res.ok) { status('could not restart job: ' + await res.text()); return; }
     poll(id);
   };
-  document.getElementById('actions').replaceChildren(btn);
+  // Append, never replace: replaceChildren here used to delete the
+  // tap-to-place button added above, so the one-second answer vanished
+  // from the page whenever the twenty-minute one was on offer (#90). It
+  // also stays second, because it is the worse option of the two.
+  document.getElementById('actions').append(btn);
 }
 
 // Not even a guess. Say which missing piece of EXIF is responsible rather

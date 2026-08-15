@@ -80,3 +80,31 @@ test('a tap maps to the photo pixels whatever size it is on screen', () => {
                                         natural, 220, 200);
   assert.notEqual(Math.round(offsetOnly.x), Math.round(middle.x));
 });
+
+test('the deepen button never removes the tap-to-place one', () => {
+  const { sandbox, els } = loadPage();
+  // Both are offered on the same failure. Before #90 the deepen button was
+  // installed with replaceChildren, which deleted the tap offer — steering
+  // people from a one-second answer into a twenty-minute one by removing
+  // the fast option from the page.
+  sandbox.renderFailure('abc', {
+    error: 'ran out of solve time',
+    result: { failure: { reason: 'timeout', can_deepen: true, guess: GUESS } },
+  });
+  const labels = els.actions.children.map((c) => c.textContent);
+  assert.equal(labels.length, 2);
+  assert.match(labels[0], /^Point out the Moon and Venus/);
+  assert.match(labels[1], /Dig deeper/);
+});
+
+test('the no-stars button does not promise a time it cannot keep', () => {
+  const { sandbox, els } = loadPage();
+  sandbox.renderFailure('abc', {
+    error: 'only 4 star-like sources detected',
+    result: { failure: { reason: 'no_stars', can_deepen: true } },
+  });
+  const [btn] = els.actions.children;
+  // A budget in CPU seconds runs several times longer in wall clock on a
+  // shared vCPU; the old "~2 minutes" was measured at twenty (#90).
+  assert.doesNotMatch(btn.textContent, /minute/);
+});
