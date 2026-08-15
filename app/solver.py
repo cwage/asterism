@@ -214,8 +214,9 @@ def solve_tiered(image_path, out_dir, exif_info, tiers=None):
             "success": result["success"],
             "timed_out": result.get("timed_out", False),
         }
-        # Only recorded when there was a match to judge, so the common failure
-        # (nothing matched at all) keeps its existing shape.
+        # match/low_confidence ride along only when solve-field produced a
+        # match to judge; timed_out above is on every attempt. The common
+        # failure — nothing matched at all — carries neither key.
         if result.get("match"):
             attempt["match"] = result["match"]
             attempt["low_confidence"] = result["low_confidence"]
