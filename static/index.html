@@ -359,13 +359,25 @@ async function poll(id) {
 // Software cannot reliably tell the Moon from a porch light in a real frame;
 // the person who took the photo can. Two taps give an exact registration.
 
-// Which objects to ask about: the Moon first (it is unmistakable, and its size
-// anchors the scale), then the brightest other body that was up.
+// Which objects to ask about. Any two distinct bodies will do — a person
+// pointing at their own photo doesn't need the Moon to know what they are
+// looking at (#91). The Moon leads when it is up because it is the easiest
+// thing in the sky to be sure about, but Venus and Saturn are a fine pair.
+// Candidates arrive brightest first.
 function anchorTargets(guess) {
   const up = (guess && guess.candidates) || [];
-  const moon = up.find((c) => c.kind === 'moon');
-  const other = up.find((c) => c.kind !== 'moon');
-  return moon && other ? [moon.name, other.name] : null;
+  const moonFirst = [...up].sort((a, b) => (b.kind === 'moon') - (a.kind === 'moon'));
+  const names = [];
+  for (const body of moonFirst) {
+    if (!names.includes(body.name)) names.push(body.name);
+    if (names.length === 2) return names;
+  }
+  return null;
+}
+
+// "the Moon", but "Venus" — the planets are proper nouns and take no article.
+function bodyLabel(name) {
+  return name === 'Moon' || name === 'Sun' ? 'the ' + name : name;
 }
 
 // Where a tap landed in the photo's own pixels, whatever size it is on screen.
@@ -384,7 +396,7 @@ function startAnchoring(id, names) {
   img.hidden = false;
   wrap.style.display = 'inline-block';
   wrap.style.cursor = 'crosshair';
-  status(`Tap ${names[0]} in the photo`);
+  status(`Tap ${bodyLabel(names[0])} in the photo`);
 
   const onTap = async (event) => {
     const point = imagePoint(img.getBoundingClientRect(),
@@ -392,7 +404,7 @@ function startAnchoring(id, names) {
                              event.clientX, event.clientY);
     picked.push({ name: names[picked.length], x: point.x, y: point.y });
     if (picked.length < names.length) {
-      status(`Tap ${names[picked.length]} in the photo`);
+      status(`Tap ${bodyLabel(names[picked.length])} in the photo`);
       return;
     }
     img.removeEventListener('click', onTap);
@@ -419,7 +431,8 @@ function renderFailure(id, job) {
   const targets = anchorTargets(f && f.guess);
   if (targets) {
     const place = document.createElement('button');
-    place.textContent = `Point out the ${targets[0]} and ${targets[1]} instead`;
+    place.textContent =
+      `Point out ${bodyLabel(targets[0])} and ${bodyLabel(targets[1])} instead`;
     place.onclick = () => { place.remove(); startAnchoring(id, targets); };
     document.getElementById('actions').append(place);
   }
