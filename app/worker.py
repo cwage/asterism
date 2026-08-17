@@ -7,7 +7,7 @@ import shutil
 import time
 import traceback
 
-from . import (constellations, db, dso, ephemeris, narrate, notify, register,
+from . import (constellations, db, dso, ephemeris, narrate, notify,
                satellites, solver, verify)
 
 # Below this many detected star-like sources, a quick job fails fast
@@ -142,17 +142,8 @@ def _attach_guess(result, exif_info):
     result["failure"]["guess_unavailable"] = reason or "unavailable"
 
 
-def _label_everything(result, wcs_path, image_path, exif_info, job_id,
-                      verify_corrections=True):
-    """Project every layer through a WCS and verify it against the pixels.
-
-    Shared by a plate solve and a registration from the Moon and planets
-    (#85). Where the WCS came from mostly stops mattering — except for the
-    pixel-correction step, which assumes the projection is already close
-    enough that the nearest peak to a star label *is* that star. That holds
-    after a star match and does not hold after an anchor registration, so
-    the anchor path passes verify_corrections=False.
-    """
+def _label_everything(result, wcs_path, image_path, exif_info, job_id):
+    """Project every layer through a WCS and verify it against the pixels."""
     labels = solver.annotate(
         wcs_path, exif_info["width"], exif_info["height"]
     )
@@ -193,7 +184,7 @@ def _label_everything(result, wcs_path, image_path, exif_info, job_id,
     # stack warp. Best-effort like the layers above.
     try:
         labels, figures, verification = verify.apply(
-            image_path, labels, figures, correct=verify_corrections
+            image_path, labels, figures
         )
     except Exception:
         print(f"worker: verification failed for {job_id}\n{traceback.format_exc()}")
@@ -228,68 +219,10 @@ def _label_everything(result, wcs_path, image_path, exif_info, job_id,
 
     return result
 
-def _process_anchors(job, exif_info, out_dir):
-    """Register from objects the uploader pointed at, then label as usual.
-
-    Automatic identification of the Moon is not reliable — it mislabels ground
-    lights on real frames (#85) — but a person looking at their own photo knows
-    which blob is the Moon, and the geometry from two known anchors is
-    sub-pixel.
-    """
-    anchors = json.loads(_col(job, "anchors_json") or "[]")
-    when_utc, _ = ephemeris.resolve_utc(exif_info)
-    if when_utc is None or len(anchors) < 2:
-        return "failed", {"success": False, "attempts": [], "total_seconds": 0.0,
-                          "failure": {"reason": "no_anchor_time"}}, (
-            "this photo has no timestamp, so the sky can't be placed at all")
-
-    # The Moon shifts by up to a degree of parallax with the observer, and
-    # that lands directly in the fit. Without GPS, the timezone band from #79
-    # still beats treating the observer as the centre of the Earth — and the
-    # labels drawn afterwards must stand in the same place, or the Moon is
-    # labelled a parallax away from where the fit just put it.
-    lat, lon = ephemeris.observer_latlon(exif_info)
-    bodies = ephemeris.compute_bodies(when_utc, lat, lon)
-    reg = register.register_from_anchors(job["image_path"], exif_info,
-                                         anchors, bodies)
-    if reg is None:
-        return "failed", {"success": False, "attempts": [], "total_seconds": 0.0,
-                          "failure": {"reason": "registration_failed"}}, (
-            "couldn't place the sky from those two points")
-
-    os.makedirs(out_dir, exist_ok=True)
-    wcs_path = os.path.join(out_dir, "register.wcs")
-    from astropy.io import fits
-    fits.PrimaryHDU(header=reg["wcs"].to_header()).writeto(wcs_path,
-                                                           overwrite=True)
-
-    result = {"success": True, "attempts": [], "total_seconds": 0.0,
-              "wcs_path": wcs_path,
-              # Provenance matters: this is not a star match, and the client
-              # says so rather than passing it off as one.
-              "provenance": "anchors",
-              "registration": {
-                  "bodies": reg["bodies"], "field_deg": reg["field_deg"],
-                  "anchors": [{k: a[k] for k in ("name", "x", "y", "snapped",
-                                                 "moved_px")}
-                              for a in reg["anchors"]],
-                  # Without GPS the Moon's own position is uncertain by up to a
-                  # degree of parallax, and that lands straight in the fit.
-                  "location_source": ("gps" if exif_info.get("lat") is not None
-                                      else "timezone_guess"),
-              }}
-    result = _label_everything(result, wcs_path, job["image_path"], exif_info,
-                               job["id"], verify_corrections=False)
-    return "done", result, None
-
-
 def process(job):
     exif_info = json.loads(job["exif_json"])
     out_dir = os.path.join(db.DATA_DIR, "jobs", job["id"])
     mode = _col(job, "mode", "quick")
-
-    if mode == "anchors":
-        return _process_anchors(job, exif_info, out_dir)
 
     plan = solver.tier_plan(exif_info)
 

@@ -363,7 +363,7 @@ def test_each_body_still_carries_its_own_compass_direction():
     assert 0 <= venus["az_deg"] <= 360
 
 
-# ---- one observer, used by everyone (#85 follow-up) ----
+# ---- one observer, used by everyone ----
 
 
 def test_observer_latlon_prefers_gps():
@@ -383,14 +383,11 @@ def test_observer_latlon_gives_up_without_a_time_offset():
 
 
 @needs_de421
-def test_labels_stand_where_the_anchor_fit_stood(tmp_path):
-    """The anchor fit (#85) and the labels drawn afterwards must compute the
-    Moon from the same place on Earth. They did not: the fit used the
-    timezone-band fallback while annotate_bodies passed exif lat/lon
-    straight through, which is None without GPS — i.e. the centre of the
-    Earth. On a real job the Moon labelled 0.91 degrees, 45px, from where
-    the fit had just put it, and Venus was unaffected: lunar parallax
-    exactly."""
+def test_the_moon_is_labelled_from_the_assumed_observer(tmp_path):
+    """A GPS-less photo still has a timezone band to stand in. Passing exif
+    lat/lon straight through instead puts the observer at the centre of the
+    Earth, which moves the Moon by up to a degree of parallax and nothing
+    else at all — measured at 0.91 degrees, 45px, on a real job."""
     exif_info = {
         "datetime_original": "2024:04:08 12:17:16",
         "offset_time_original": "-06:00",
@@ -398,16 +395,15 @@ def test_labels_stand_where_the_anchor_fit_stood(tmp_path):
     }
     when, _ = ephemeris.resolve_utc(exif_info)
 
-    # What the anchor fit computes, via the shared helper.
     lat, lon = ephemeris.observer_latlon(exif_info)
     assert lat is not None, "a UTC offset alone must still place the observer"
-    fit = {b["name"]: b for b in ephemeris.compute_bodies(when, lat, lon)}
+    seen = {b["name"]: b for b in ephemeris.compute_bodies(when, lat, lon)}
 
-    # Centre the frame on the fit's Moon, then let annotate_bodies project.
-    moon = fit["Moon"]
+    # Centre the frame on that Moon, then let annotate_bodies project.
+    moon = seen["Moon"]
     wcs = synth.make_wcs(ra=moon["ra"], dec=moon["dec"], fov_deg=40.0,
                          width=1200, height=900)
-    wcs_path = tmp_path / "register.wcs"
+    wcs_path = tmp_path / "solve.wcs"
     fits.PrimaryHDU(header=wcs.to_header()).writeto(wcs_path)
     labels, _ = ephemeris.annotate_bodies(str(wcs_path), 1200, 900, exif_info)
 

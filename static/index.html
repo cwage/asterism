@@ -123,11 +123,8 @@
      line box, which would gap the feed away from the upload control. */
   #wrap { position: relative; display: none; max-width: 100%;
           margin-top: 0.75rem; border-radius: 6px; overflow: hidden; }
-  /* pointer-events: none or the overlay eats every tap. It is absolutely
-     positioned over the whole photo, so it is the click target for the
-     entire image — which silently broke tap-to-place (#85): the photo
-     loaded, the crosshair appeared, and nothing ever reached the handler.
-     The canvas is decorative; it should never be a target. */
+  /* pointer-events: none because the overlay is decorative and covers the
+     whole photo: anything interactive underneath would never be reachable. */
   #wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%;
                  pointer-events: none; }
   #wrap img { display: block; max-width: 100%; }
@@ -361,90 +358,12 @@ async function poll(id) {
   }
 }
 
-// --- placing a failed photo by hand (#85) ---
-// Software cannot reliably tell the Moon from a porch light in a real frame;
-// the person who took the photo can. Two taps give an exact registration.
-
-// Which objects to ask about. Any two distinct bodies will do — a person
-// pointing at their own photo doesn't need the Moon to know what they are
-// looking at (#91). The Moon leads when it is up because it is the easiest
-// thing in the sky to be sure about, but Venus and Saturn are a fine pair.
-// Candidates arrive brightest first.
-function anchorTargets(guess) {
-  const up = (guess && guess.candidates) || [];
-  const moonFirst = [...up].sort((a, b) => (b.kind === 'moon') - (a.kind === 'moon'));
-  const names = [];
-  for (const body of moonFirst) {
-    if (!names.includes(body.name)) names.push(body.name);
-    if (names.length === 2) return names;
-  }
-  return null;
-}
-
-// "the Moon", but "Venus" — the planets are proper nouns and take no article.
-function bodyLabel(name) {
-  return name === 'Moon' || name === 'Sun' ? 'the ' + name : name;
-}
-
-// Where a tap landed in the photo's own pixels, whatever size it is on screen.
-function imagePoint(rect, natural, clientX, clientY) {
-  return {
-    x: (clientX - rect.left) / rect.width * natural.width,
-    y: (clientY - rect.top) / rect.height * natural.height,
-  };
-}
-
-function startAnchoring(id, names) {
-  const img = document.getElementById('photo');
-  const wrap = document.getElementById('wrap');
-  const picked = [];
-  img.src = '/jobs/' + encodeURIComponent(id) + '/image';
-  img.hidden = false;
-  wrap.style.display = 'inline-block';
-  wrap.style.cursor = 'crosshair';
-  status(`Tap ${bodyLabel(names[0])} in the photo`);
-
-  const onTap = async (event) => {
-    const point = imagePoint(img.getBoundingClientRect(),
-                             { width: img.naturalWidth, height: img.naturalHeight },
-                             event.clientX, event.clientY);
-    picked.push({ name: names[picked.length], x: point.x, y: point.y });
-    if (picked.length < names.length) {
-      status(`Tap ${bodyLabel(names[picked.length])} in the photo`);
-      return;
-    }
-    wrap.removeEventListener('click', onTap);
-    wrap.style.cursor = '';
-    status('placing the sky from those two points…');
-    const res = await fetch('/jobs/' + encodeURIComponent(id) + '/anchor', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ anchors: picked }),
-    });
-    if (!res.ok) { status('could not place it: ' + await res.text()); return; }
-    poll(id);
-  };
-  // On the wrapper, not the image: the image is only the click target while
-  // nothing is painted over it. Listening on the container means a tap
-  // counts wherever inside the frame it lands, whatever is stacked above.
-  wrap.addEventListener('click', onTap);
-}
-
 function renderFailure(id, job) {
   const f = job.result && job.result.failure;
   status('solve failed — ' + (job.error || 'unknown'));
   if (f && f.guess) renderGuess(job, f.guess);
   else if (f && f.guess_unavailable) renderNoGuess(f.guess_unavailable);
 
-  // The star pattern failed, but if bright bodies were up the uploader can
-  // point them out and get a real overlay anyway.
-  const targets = anchorTargets(f && f.guess);
-  if (targets) {
-    const place = document.createElement('button');
-    place.textContent =
-      `Point out ${bodyLabel(targets[0])} and ${bodyLabel(targets[1])} instead`;
-    place.onclick = () => { place.remove(); startAnchoring(id, targets); };
-    document.getElementById('actions').append(place);
-  }
   if (!f || !f.can_deepen) return;
   // Failed fast on purpose; deeper attempts are the user's call. Slow: the
   // budget is CPU seconds, and on a shared vCPU the wall clock runs several
@@ -459,10 +378,6 @@ function renderFailure(id, job) {
     if (!res.ok) { status('could not restart job: ' + await res.text()); return; }
     poll(id);
   };
-  // Append, never replace: replaceChildren here used to delete the
-  // tap-to-place button added above, so the one-second answer vanished
-  // from the page whenever the twenty-minute one was on offer (#90). It
-  // also stays second, because it is the worse option of the two.
   document.getElementById('actions').append(btn);
 }
 
