@@ -5,6 +5,7 @@ images (noise, black, gradient) for graceful-failure tests."""
 import csv
 import math
 import os
+from fractions import Fraction
 
 import numpy as np
 from PIL import Image
@@ -81,7 +82,14 @@ def build_exif(f35mm=None, datetime_original=None, gps=None, heading=None,
         # pass moves about a degree a second.
         ifd[TAG_OFFSET_TIME_ORIGINAL] = offset_time_original
     if exposure_seconds is not None:
-        ifd[TAG_EXPOSURE_TIME] = exposure_seconds
+        # A rational, as a real camera writes it. A bare float round-trips
+        # through Pillow but is not valid EXIF, and piexif refuses to
+        # re-encode it — which used to reject the upload outright.
+        if isinstance(exposure_seconds, tuple):
+            ifd[TAG_EXPOSURE_TIME] = exposure_seconds
+        else:
+            f = Fraction(exposure_seconds).limit_denominator(100000)
+            ifd[TAG_EXPOSURE_TIME] = (f.numerator, f.denominator)
     if gps is not None or heading is not None:
         g = ex.get_ifd(GPS_IFD)
     if gps is not None:

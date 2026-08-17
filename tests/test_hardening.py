@@ -1,6 +1,9 @@
 """Public-endpoint hardening: per-IP rate limiting (#10) and the retention
 sweep (#23)."""
 
+import json
+import os
+
 import pytest
 
 from app import db, main, worker
@@ -137,3 +140,79 @@ def test_sweep_survives_missing_files(tmp_path, monkeypatch):
     assert worker.sweep_expired() == 1
     with db.get_conn() as conn:
         assert conn.execute("SELECT COUNT(*) AS n FROM jobs").fetchone()["n"] == 0
+
+
+def test_upload_accepts_a_file_piexif_cannot_re_encode(tmp_path, monkeypatch):
+    """The whole point of the strip is that the stored file must not carry
+    coordinates. Rejecting an upload because *one library* could not parse
+    it fails a user over an implementation detail — a real report, on a
+    JPEG whose float-valued ExposureTime makes piexif raise."""
+    import io
+
+    from fastapi.testclient import TestClient
+    from PIL import Image
+
+    from app import exif as exif_mod, main
+    from tests import synth
+
+    monkeypatch.setattr(db, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "asterism.db"))
+    monkeypatch.setattr(main, "UPLOAD_DIR", str(tmp_path / "uploads"))
+    os.makedirs(main.UPLOAD_DIR, exist_ok=True)
+    db.init_db()
+
+    ex = Image.Exif()
+    ifd = ex.get_ifd(synth.EXIF_IFD)
+    ifd[synth.TAG_EXPOSURE_TIME] = 10.0          # the trap
+    ifd[synth.TAG_FOCAL_35MM] = 39
+    gps = ex.get_ifd(synth.GPS_IFD)
+    gps[1], gps[2] = "N", synth._deg_to_dms(36.16)
+    gps[3], gps[4] = "W", synth._deg_to_dms(86.78)
+    buf = io.BytesIO()
+    Image.new("RGB", (64, 64)).save(buf, format="JPEG", exif=ex, quality=92)
+
+    client = TestClient(main.app)
+    resp = client.post("/jobs", files={"image": ("sky.jpg", buf.getvalue(),
+                                                 "image/jpeg")})
+    assert resp.status_code == 200, resp.text
+    job_id = resp.json()["id"]
+
+    # The coordinates reached the job record...
+    with db.get_conn() as conn:
+        row = conn.execute("SELECT image_path, exif_json FROM jobs WHERE id = ?",
+                           (job_id,)).fetchone()
+    assert json.loads(row["exif_json"])["lat"] == pytest.approx(36.16, abs=0.01)
+    # ...and left the file that gets served.
+    assert exif_mod.has_location(row["image_path"]) is False
+
+
+def test_upload_is_refused_when_the_location_really_cannot_be_removed(
+        tmp_path, monkeypatch):
+    """Fail closed still means closed: if every strip leaves coordinates in
+    the file, the upload is rejected rather than served."""
+    import io
+
+    from fastapi.testclient import TestClient
+    from PIL import Image
+
+    from app import exif as exif_mod, main
+    from tests import synth
+
+    monkeypatch.setattr(db, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "asterism.db"))
+    monkeypatch.setattr(main, "UPLOAD_DIR", str(tmp_path / "uploads"))
+    os.makedirs(main.UPLOAD_DIR, exist_ok=True)
+    db.init_db()
+    monkeypatch.setattr(exif_mod, "strip_gps",
+                        lambda path: (_ for _ in ()).throw(RuntimeError("nope")))
+
+    buf = io.BytesIO()
+    Image.new("RGB", (64, 64)).save(
+        buf, format="JPEG", exif=synth.build_exif(f35mm=39, gps=(36.16, -86.78)))
+
+    client = TestClient(main.app)
+    resp = client.post("/jobs", files={"image": ("sky.jpg", buf.getvalue(),
+                                                 "image/jpeg")})
+    assert resp.status_code == 415
+    assert "strip location data" in resp.json()["detail"]
+    assert os.listdir(main.UPLOAD_DIR) == []      # nothing left on disk

@@ -82,6 +82,25 @@ def test_exposure_time_read_for_the_satellite_window(tmp_path):
     assert exif.read_exif(plain)["exposure_seconds"] is None
 
 
+def test_exposure_time_survives_a_raw_rational_pair(tmp_path):
+    """A RATIONAL can come back from Pillow as a bare (num, den) tuple
+    rather than an IFDRational. float() on a tuple raises, and the exposure
+    was silently dropped — which shrinks the satellite window to its
+    one-second default without anything saying so."""
+    path = tmp_path / "rational.jpg"
+    ex = Image.Exif()
+    ex.get_ifd(synth.EXIF_IFD)[synth.TAG_EXPOSURE_TIME] = (16, 1)
+    Image.new("RGB", (64, 64)).save(path, exif=ex)
+    assert exif.read_exif(path)["exposure_seconds"] == 16.0
+
+    # A zero denominator is malformed, not a crash.
+    bad = tmp_path / "bad.jpg"
+    ex2 = Image.Exif()
+    ex2.get_ifd(synth.EXIF_IFD)[synth.TAG_EXPOSURE_TIME] = (16, 0)
+    Image.new("RGB", (64, 64)).save(bad, exif=ex2)
+    assert exif.read_exif(bad)["exposure_seconds"] is None
+
+
 def test_southern_western_gps_signs(tmp_path):
     path = tmp_path / "south.jpg"
     ex = synth.build_exif(gps=(-33.87, -151.21))
@@ -124,14 +143,47 @@ def test_strip_gps_removes_location_keeps_rest(tmp_path):
     assert np.array_equal(before, after)
 
 
-def test_strip_gps_raises_on_non_jpeg(tmp_path):
-    # The upload path treats a strip failure on a GPS-bearing image as a
-    # rejection (fail closed); a PNG must raise, not silently succeed.
+def test_strip_gps_falls_back_when_piexif_cannot_re_encode(tmp_path):
+    """piexif is fragile on real EXIF: a float-valued ExposureTime makes it
+    raise UnboundLocalError re-encoding the block, which used to reject the
+    upload outright. A library that cannot parse a file is not a reason to
+    refuse it, so Pillow finishes the job — lossy, and only on this path."""
+    path = str(tmp_path / "float-exposure.jpg")
+    ex = Image.Exif()
+    ifd = ex.get_ifd(synth.EXIF_IFD)
+    ifd[synth.TAG_EXPOSURE_TIME] = 10.0          # a bare float, not a rational
+    ifd[synth.TAG_FOCAL_35MM] = 39
+    gps = ex.get_ifd(synth.GPS_IFD)
+    gps[1], gps[2] = "N", synth._deg_to_dms(36.16)
+    gps[3], gps[4] = "W", synth._deg_to_dms(86.78)
+    Image.new("RGB", (64, 64)).save(path, exif=ex, quality=92)
+
+    assert exif.read_exif(path)["lat"] == pytest.approx(36.16, abs=0.01)
+    with pytest.raises(Exception):
+        exif._strip_gps_piexif(path)             # the preferred path is out
+
+    assert exif.strip_gps(path) is True
+    assert exif.has_location(path) is False
+    assert exif.read_exif(path)["focal_35mm"] == 39.0
+
+
+def test_a_png_with_gps_still_ends_up_without_it(tmp_path):
+    """piexif handles no format but JPEG and TIFF. What matters is the file
+    afterwards, not which library got there."""
     path = str(tmp_path / "gps.png")
     Image.new("RGB", (64, 64)).save(path,
                                     exif=synth.build_exif(gps=(49.1, 6.1)))
-    with pytest.raises(Exception):
-        exif.strip_gps(path)
+    exif.strip_gps(path)
+    assert exif.has_location(path) is False
+
+
+def test_has_location_never_raises_on_junk(tmp_path):
+    """It answers "is this safe to serve", so an unreadable file is not a
+    leak and must not become a 500 on the upload path."""
+    path = str(tmp_path / "not-an-image.jpg")
+    open(path, "wb").write(b"certainly not a jpeg")
+    assert exif.has_location(path) is False
+    assert exif.has_location(str(tmp_path / "missing.jpg")) is False
 
 
 def test_strip_gps_no_gps_is_a_noop(tmp_path):

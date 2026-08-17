@@ -154,6 +154,13 @@ def read_exif(path):
     exp = exif_ifd.get(TAG_EXPOSURE_TIME)
     if exp is not None:
         try:
+            # Pillow usually hands back an IFDRational, which floats
+            # directly, but a RATIONAL can also arrive as a raw
+            # (numerator, denominator) pair — float() on a tuple raises, and
+            # the exposure was silently dropped, quietly shrinking the
+            # satellite window to its one-second default.
+            if isinstance(exp, tuple) and len(exp) == 2:
+                exp = exp[0] / exp[1]
             exp = float(exp)
             if math.isfinite(exp) and 0 < exp < 3600:
                 info["exposure_seconds"] = exp
@@ -181,12 +188,22 @@ def read_exif(path):
     return info
 
 
-def strip_gps(path):
-    """Remove the GPS IFD from a JPEG in place, losslessly (segment surgery,
-    pixels untouched). Called after read_exif() has captured precise
-    coordinates into the job record — the stored file is served publicly
-    (#22), so it must not carry the photographer's location. Raises on
-    non-JPEG input; callers treat this as best-effort."""
+def has_location(path):
+    """Whether the file still discloses where it was taken.
+
+    Never raises: this answers "is it safe to serve", and a file we cannot
+    read is not one that is leaking coordinates.
+    """
+    try:
+        info = read_exif(path)
+    except Exception:
+        return False
+    return info.get("lat") is not None or info.get("lon") is not None
+
+
+def _strip_gps_piexif(path):
+    """Segment surgery: rewrites the EXIF block, leaving the compressed
+    pixels untouched. Preferred, and raises on anything it cannot parse."""
     import piexif
 
     exif_dict = piexif.load(path)
@@ -195,3 +212,38 @@ def strip_gps(path):
     exif_dict["GPS"] = {}
     piexif.insert(piexif.dump(exif_dict), path)
     return True
+
+
+def _strip_gps_pillow(path):
+    """Drop the GPS IFD through Pillow and re-encode.
+
+    Lossy for JPEG, so it is the fallback rather than the first choice —
+    but piexif is fragile on real-world EXIF (it raises UnboundLocalError
+    re-encoding a float-valued ExposureTime, for one), and a library that
+    cannot parse a file is not a reason to refuse the upload. Everything
+    outside the GPS IFD survives, orientation and focal length included.
+    """
+    with Image.open(path) as img:
+        fmt = img.format
+        data = img.getexif()
+        if GPS_IFD not in data:
+            return False
+        del data[GPS_IFD]
+        img.load()
+        img.save(path, format=fmt, exif=data, quality=95)
+    return True
+
+
+def strip_gps(path):
+    """Remove GPS from the stored file in place. Returns whether anything
+    was removed.
+
+    Called after read_exif() has captured precise coordinates into the job
+    record — the stored file is served publicly (#22), so it must not carry
+    the photographer's location. Callers must confirm with has_location()
+    rather than trusting that no exception means no coordinates.
+    """
+    try:
+        return _strip_gps_piexif(path)
+    except Exception:
+        return _strip_gps_pillow(path)
