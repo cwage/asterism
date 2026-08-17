@@ -165,65 +165,6 @@ def deepen_job(job_id: str):
     return {"id": job_id, "status": "queued", "mode": "deep"}
 
 
-# Bodies a person can be asked to point at. The Moon is the one that makes
-# identification possible at all — it is unmistakable to a human and, per #85,
-# routinely mistaken for a porch light by software.
-ANCHOR_NAMES = {"Moon", "Venus", "Jupiter", "Mars", "Saturn", "Mercury"}
-
-
-@app.post("/jobs/{job_id}/anchor")
-async def anchor_job(job_id: str, request: Request):
-    """Register a failed job from two objects the uploader pointed at (#85).
-
-    Takes {"anchors": [{"name": "Moon", "x": .., "y": ..}, ...]} in image
-    pixels. Taps are snapped to the nearest detected source by the worker, so
-    they only have to be close.
-    """
-    try:
-        payload = await request.json()
-    except Exception:
-        raise HTTPException(400, "expected a JSON body")
-    anchors = payload.get("anchors") if isinstance(payload, dict) else None
-    if not isinstance(anchors, list) or len(anchors) != 2:
-        raise HTTPException(400, "give exactly two anchors")
-
-    with db.get_conn() as conn:
-        row = conn.execute(
-            "SELECT status, hidden, exif_json FROM jobs WHERE id = ?", (job_id,)
-        ).fetchone()
-        if not row or row["hidden"]:
-            raise HTTPException(404, _GONE)
-        if row["status"] != "failed":
-            raise HTTPException(409, "only a failed job can be placed by hand")
-
-        info = json.loads(row["exif_json"] or "{}")
-        width, height = info.get("width") or 0, info.get("height") or 0
-        clean = []
-        names = set()
-        for anchor in anchors:
-            if not isinstance(anchor, dict):
-                raise HTTPException(400, "each anchor needs a name and a position")
-            name = str(anchor.get("name", ""))
-            if name not in ANCHOR_NAMES:
-                raise HTTPException(400, f"unknown object: {name[:20]}")
-            try:
-                x, y = float(anchor["x"]), float(anchor["y"])
-            except (KeyError, TypeError, ValueError):
-                raise HTTPException(400, "each anchor needs numeric x and y")
-            if not (0 <= x < width and 0 <= y < height):
-                raise HTTPException(400, "anchor is outside the photo")
-            names.add(name)
-            clean.append({"name": name, "x": x, "y": y})
-        if len(names) != 2:
-            raise HTTPException(400, "the two anchors must be different objects")
-
-        conn.execute(
-            "UPDATE jobs SET status = 'queued', mode = 'anchors', error = NULL, "
-            "anchors_json = ? WHERE id = ?", (json.dumps(clean), job_id),
-        )
-    return {"id": job_id, "status": "queued", "mode": "anchors"}
-
-
 @app.post("/jobs/{job_id}/hide")
 def hide_job(job_id: str, request: Request):
     """Pull a job out of every public read path (#60).

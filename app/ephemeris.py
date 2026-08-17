@@ -155,12 +155,11 @@ def observer_latlon(exif_info):
     it, otherwise the middle of the timezone band its UTC offset implies
     (#79). Returns (None, None) when even that is unavailable.
 
-    One function so every caller stands in the same place. They did not:
-    the anchor fit (#85) used the timezone fallback while annotate_bodies
-    used exif lat/lon directly — which is None without GPS, i.e. the centre
-    of the Earth. The Moon then labelled 0.91 degrees from where the fit had
-    just put it, measured on a real job, because that difference is exactly
-    lunar parallax. Everything else moves by nothing.
+    One function so every caller stands in the same place. Passing exif
+    lat/lon straight through instead means (None, None) on any photo
+    without GPS — the centre of the Earth — which moves the Moon by up to
+    a degree of parallax and everything else by nothing. Measured at 0.91
+    degrees on a real GPS-less job.
     """
     lat, lon = exif_info.get("lat"), exif_info.get("lon")
     if lat is not None and lon is not None:
