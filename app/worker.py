@@ -142,11 +142,16 @@ def _attach_guess(result, exif_info):
     result["failure"]["guess_unavailable"] = reason or "unavailable"
 
 
-def _label_everything(result, wcs_path, image_path, exif_info, job_id):
+def _label_everything(result, wcs_path, image_path, exif_info, job_id,
+                      verify_corrections=True):
     """Project every layer through a WCS and verify it against the pixels.
 
     Shared by a plate solve and a registration from the Moon and planets
-    (#85): once there is a WCS, where it came from stops mattering.
+    (#85). Where the WCS came from mostly stops mattering — except for the
+    pixel-correction step, which assumes the projection is already close
+    enough that the nearest peak to a star label *is* that star. That holds
+    after a star match and does not hold after an anchor registration, so
+    the anchor path passes verify_corrections=False.
     """
     labels = solver.annotate(
         wcs_path, exif_info["width"], exif_info["height"]
@@ -188,7 +193,7 @@ def _label_everything(result, wcs_path, image_path, exif_info, job_id):
     # stack warp. Best-effort like the layers above.
     try:
         labels, figures, verification = verify.apply(
-            image_path, labels, figures
+            image_path, labels, figures, correct=verify_corrections
         )
     except Exception:
         print(f"worker: verification failed for {job_id}\n{traceback.format_exc()}")
@@ -240,13 +245,10 @@ def _process_anchors(job, exif_info, out_dir):
 
     # The Moon shifts by up to a degree of parallax with the observer, and
     # that lands directly in the fit. Without GPS, the timezone band from #79
-    # still beats treating the observer as the centre of the Earth.
-    lat, lon = exif_info.get("lat"), exif_info.get("lon")
-    if lat is None or lon is None:
-        delta = ephemeris._parse_offset(exif_info.get("offset_time_original"))
-        if delta is not None:
-            lat = ephemeris.FALLBACK_GUESS_LAT
-            lon = ephemeris._band_center(ephemeris.guess_longitudes(delta))
+    # still beats treating the observer as the centre of the Earth — and the
+    # labels drawn afterwards must stand in the same place, or the Moon is
+    # labelled a parallax away from where the fit just put it.
+    lat, lon = ephemeris.observer_latlon(exif_info)
     bodies = ephemeris.compute_bodies(when_utc, lat, lon)
     reg = register.register_from_anchors(job["image_path"], exif_info,
                                          anchors, bodies)
@@ -268,7 +270,8 @@ def _process_anchors(job, exif_info, out_dir):
               "provenance": "anchors",
               "registration": {
                   "bodies": reg["bodies"], "field_deg": reg["field_deg"],
-                  "anchors": [{k: a[k] for k in ("name", "x", "y", "snapped")}
+                  "anchors": [{k: a[k] for k in ("name", "x", "y", "snapped",
+                                                 "moved_px")}
                               for a in reg["anchors"]],
                   # Without GPS the Moon's own position is uncertain by up to a
                   # degree of parallax, and that lands straight in the fit.
@@ -276,7 +279,7 @@ def _process_anchors(job, exif_info, out_dir):
                                       else "timezone_guess"),
               }}
     result = _label_everything(result, wcs_path, job["image_path"], exif_info,
-                               job["id"])
+                               job["id"], verify_corrections=False)
     return "done", result, None
 
 

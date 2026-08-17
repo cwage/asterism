@@ -642,9 +642,15 @@ def register_from_anchors(image_path, exif_info, anchors, bodies, snap_px=120):
     Each is snapped to the nearest detected source so a fingertip on a phone
     doesn't have to be accurate, then the pair is fitted exactly.
 
-    This is the reliable half of the feature. Automatic identification picks
-    the wrong blob on real frames; a person looking at their own photo does
-    not, and the geometry after that is sub-pixel.
+    The geometry is sub-pixel once the anchors are right, and a person
+    looking at their own photo knows which blob is the Moon where automatic
+    identification does not. What neither knows is whether the *second*
+    object was ever visible: point at where Venus ought to be and the snap
+    will find some peak within its radius and hand back a confident fit
+    built on it. Both anchors carry how far the snap moved them, because
+    the baseline between them sets the scale and the roll — measured on a
+    real job, a 110px snap on a 447px baseline was a 25% scale error and
+    3.6 degrees of roll.
     """
     width, height = exif_info.get("width"), exif_info.get("height")
     if not width or not height or len(anchors) < 2:
@@ -663,13 +669,15 @@ def register_from_anchors(image_path, exif_info, anchors, bodies, snap_px=120):
             best = min(near, key=lambda s: math.hypot(s["x"] - x, s["y"] - y))
             placed.append({"name": anchor["name"], "x": best["x"],
                            "y": best["y"], "extent": best["extent"],
-                           "snapped": True})
+                           "snapped": True,
+                           "moved_px": round(math.hypot(best["x"] - x,
+                                                        best["y"] - y), 1)})
         else:
             # Nothing detected under the finger: trust the tap. Worse
             # astrometry than a centroid, but the person can see the object
             # and the detector evidently cannot.
             placed.append({"name": anchor["name"], "x": x, "y": y,
-                           "extent": 0, "snapped": False})
+                           "extent": 0, "snapped": False, "moved_px": 0.0})
 
     a, b = placed
     wcs = wcs_from_pair((a["x"], a["y"]),
