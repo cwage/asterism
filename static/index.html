@@ -123,7 +123,13 @@
      line box, which would gap the feed away from the upload control. */
   #wrap { position: relative; display: none; max-width: 100%;
           margin-top: 0.75rem; border-radius: 6px; overflow: hidden; }
-  #wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  /* pointer-events: none or the overlay eats every tap. It is absolutely
+     positioned over the whole photo, so it is the click target for the
+     entire image — which silently broke tap-to-place (#85): the photo
+     loaded, the crosshair appeared, and nothing ever reached the handler.
+     The canvas is decorative; it should never be a target. */
+  #wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%;
+                 pointer-events: none; }
   #wrap img { display: block; max-width: 100%; }
 
   footer { margin-top: 2rem; font-size: 0.8rem; color: var(--faint); }
@@ -407,7 +413,7 @@ function startAnchoring(id, names) {
       status(`Tap ${bodyLabel(names[picked.length])} in the photo`);
       return;
     }
-    img.removeEventListener('click', onTap);
+    wrap.removeEventListener('click', onTap);
     wrap.style.cursor = '';
     status('placing the sky from those two points…');
     const res = await fetch('/jobs/' + encodeURIComponent(id) + '/anchor', {
@@ -417,7 +423,10 @@ function startAnchoring(id, names) {
     if (!res.ok) { status('could not place it: ' + await res.text()); return; }
     poll(id);
   };
-  img.addEventListener('click', onTap);
+  // On the wrapper, not the image: the image is only the click target while
+  // nothing is painted over it. Listening on the container means a tap
+  // counts wherever inside the frame it lands, whatever is stacked above.
+  wrap.addEventListener('click', onTap);
 }
 
 function renderFailure(id, job) {

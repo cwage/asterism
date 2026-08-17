@@ -108,3 +108,58 @@ test('the no-stars button does not promise a time it cannot keep', () => {
   // shared vCPU; the old "~2 minutes" was measured at twenty (#90).
   assert.doesNotMatch(btn.textContent, /minute/);
 });
+
+test('two taps on the frame post both anchors in photo pixels', async () => {
+  const { sandbox, els } = loadPage();
+  // The whole feature, end to end through the DOM: the button's handler
+  // installs a tap listener, two taps land, and the anchors are POSTed.
+  // Before this test the harness ignored addEventListener entirely, which
+  // is how a listener bound to a covered element shipped twice.
+  const calls = [];
+  sandbox.fetch = async (url, opts) => {
+    calls.push({ url, body: opts && JSON.parse(opts.body) });
+    if (url.endsWith('/anchor')) return { ok: true };
+    return new Promise(() => {});  // the poll that follows; never settles
+  };
+
+  sandbox.startAnchoring('job1', ['Moon', 'Venus']);
+  const wrap = els.wrap;
+  const photo = els.photo;
+  photo.rect = { left: 0, top: 0, width: 500, height: 400 };  // shown at half size
+  photo.naturalWidth = 1000;
+  photo.naturalHeight = 800;
+
+  await wrap.dispatch('click', { clientX: 100, clientY: 50 });
+  await wrap.dispatch('click', { clientX: 400, clientY: 200 });
+
+  const posted = calls.find((c) => c.url.endsWith('/anchor'));
+  assert.ok(posted, 'the anchors were never posted — the taps went nowhere');
+  assert.deepEqual([...posted.body.anchors].map((a) => a.name), ['Moon', 'Venus']);
+  // Displayed at half size, so photo pixels are twice the client offsets.
+  assert.deepEqual(
+    [...posted.body.anchors].map((a) => [a.x, a.y]), [[200, 100], [800, 400]]);
+});
+
+test('the overlay canvas never swallows a tap', () => {
+  const { html } = loadPage();
+  // This one is CSS, not script. The canvas is absolutely positioned across
+  // the whole photo, so without pointer-events: none it is the click target
+  // for every pixel of it and tap-to-place silently does nothing.
+  const rule = html.match(/#wrap canvas \{[^}]*\}/);
+  assert.ok(rule, 'no #wrap canvas rule found');
+  assert.match(rule[0], /pointer-events:\s*none/);
+});
+
+test('a third tap after both anchors is ignored', async () => {
+  const { sandbox, els } = loadPage();
+  const calls = [];
+  sandbox.fetch = async (url, opts) => {
+    calls.push(url);
+    if (url.endsWith('/anchor')) return { ok: true };
+    return new Promise(() => {});
+  };
+  sandbox.startAnchoring('job1', ['Moon', 'Venus']);
+  for (let i = 0; i < 3; i++)
+    await els.wrap.dispatch('click', { clientX: 10 * i, clientY: 10 });
+  assert.equal(calls.filter((u) => u.endsWith('/anchor')).length, 1);
+});
