@@ -41,6 +41,8 @@ export function makeEl() {
     href: '', src: '', alt: '', loading: '', hidden: false, checked: true,
     value: '4.5', onerror: null, onload: null, style: {},
     naturalWidth: 1000, naturalHeight: 800, width: 0, height: 0,
+    rect: { left: 0, top: 0, width: 1000, height: 800 },
+    getBoundingClientRect() { return el.rect; },
     append(...c) {
       for (const child of c) {
         if (child && typeof child === 'object') child.parent = el;
@@ -61,7 +63,18 @@ export function makeEl() {
       if (i >= 0) el.parent.children.splice(i, 1);
       el.parent = null;
     },
-    addEventListener() {},
+    // Recorded, not ignored: which element a handler is bound to is the
+    // difference between tap-to-place working and silently doing nothing,
+    // and a no-op stub cannot tell those apart. dispatch() lets a test
+    // deliver an event the way the browser would.
+    listeners: {},
+    addEventListener(type, fn) { (el.listeners[type] ??= []).push(fn); },
+    removeEventListener(type, fn) {
+      el.listeners[type] = (el.listeners[type] || []).filter((f) => f !== fn);
+    },
+    dispatch(type, event) {
+      return Promise.all((el.listeners[type] || []).map((fn) => fn(event)));
+    },
     getContext() { return (el.ctx ??= makeCtx()); },
   };
   // Minimal classList, kept in sync with className so tests can assert on
@@ -114,5 +127,8 @@ export function loadPage() {
   };
   vm.createContext(sandbox);
   vm.runInContext(match[1], sandbox);
-  return { sandbox, els, store };
+  // `html` so a test can assert on the stylesheet: some of this page's
+  // behaviour is CSS (whether the overlay swallows taps), and that is not
+  // reachable from the script alone.
+  return { sandbox, els, store, html };
 }
