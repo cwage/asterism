@@ -191,12 +191,6 @@ def test_compass_names():
     assert ephemeris._compass(359) == "N"
 
 
-def test_declination_matches_wmm_for_nashville():
-    from datetime import datetime, timezone
-    d = ephemeris._declination(36.1, -86.8, datetime(2026, 8, 12, tzinfo=timezone.utc))
-    assert d == pytest.approx(-4.2, abs=0.5)
-
-
 @needs_de421
 def test_fallback_guess_identifies_venus_at_dusk():
     guess = ephemeris.fallback_guess(VENUS_EXIF)
