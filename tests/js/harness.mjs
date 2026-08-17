@@ -1,7 +1,8 @@
 // Loads static/index.html's inline script into a vm sandbox with minimal
-// DOM/localStorage shims, so the page's pure logic (upload history, label
-// layout) runs under `node --test` with no browser and no dependencies.
-// Canvas drawing itself is out of scope — getContext returns null.
+// DOM/localStorage shims, so the page's logic — feed rendering, label layout,
+// draw(), control wiring — runs under `node --test` with no browser and no
+// dependencies. getContext() hands back the recording context below rather
+// than a real canvas, so tests assert what was drawn instead of pixels.
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
@@ -64,9 +65,9 @@ export function makeEl() {
       el.parent = null;
     },
     // Recorded, not ignored: which element a handler is bound to is the
-    // difference between tap-to-place working and silently doing nothing,
-    // and a no-op stub cannot tell those apart. dispatch() lets a test
-    // deliver an event the way the browser would.
+    // difference between a control working and silently doing nothing, and
+    // a no-op stub cannot tell those apart. dispatch() lets a test deliver
+    // an event the way the browser would — see controls.test.mjs.
     listeners: {},
     addEventListener(type, fn) { (el.listeners[type] ??= []).push(fn); },
     removeEventListener(type, fn) {
