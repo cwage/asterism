@@ -40,11 +40,6 @@ Final home: `asterism.quietlife.net`.
   — so both are checked, a body counts as visible if it clears the horizon
   under either, and the altitude is quoted as the range rather than a
   precision the data doesn't have.
-- When the star pattern can't be matched but bright bodies were up, the
-  uploader can point them out instead (#85): two taps — the Moon and a planet —
-  give an exact registration, since a person can tell the Moon from a porch
-  light and software measurably cannot. Taps snap to the nearest detected
-  source, and the result is marked as registered rather than solved.
 - After projection, labels are verified against the pixels: each star label
   is matched to a detected source near its predicted position, a smooth
   residual field fitted from the matches corrects for computational-stack
@@ -272,11 +267,15 @@ It prints per-image solve success, timing, and the scale hints used.
 
 ## Plan
 
+The original roadmap, all four steps of it now shipped:
+
 1. **Local MVP** (this repo): upload → solve → star labels on canvas. ✅
 2. **Ephemeris layer**: Skyfield + EXIF time/GPS → label the Moon and planets
-   (the thing astrometry.net can't do). ← you are here. Still open: proper
-   timezone handling (#6).
+   (the thing astrometry.net can't do). ✅ Timezone handling (#6) landed with
+   it: EXIF offset when present, else the IANA zone at the GPS fix, else a
+   longitude guess, else UTC — and the results report which one was used.
 3. **Fly.io deploy**: single app, web + worker processes, indexes baked into
-   the image.
+   the image. ✅
 4. **Differentiators**: satellite/streak ID from archived TLEs, LLM narration,
-   shareable cards.
+   shareable cards. ✅ Streak *detection* stayed out of scope — satellite
+   tracks are computed from TLEs and drawn dashed to say so.

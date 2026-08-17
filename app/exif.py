@@ -1,5 +1,7 @@
-"""Pull the EXIF fields we care about: field-of-view hints now, time/GPS for
-the Phase 2 ephemeris layer."""
+"""Pull the EXIF fields the rest of the pipeline runs on: field-of-view hints
+for the solver's scale tiers, timestamp and GPS for the ephemeris and satellite
+layers, exposure time for the crossing window — plus the GPS strip that makes
+an upload safe to serve publicly."""
 
 import math
 
@@ -172,8 +174,10 @@ def read_exif(path):
         lon = _gps_to_degrees(gps.get(4), gps.get(3))
         info["lat"], info["lon"] = lat, lon
 
-        # Compass heading at capture: phones record this even when they drop
-        # lat/lon, and it's what makes the no-solve fallback (#7) possible.
+        # Compass heading at capture. Recorded but deliberately unused: on
+        # real frames whose true pointing a solve could confirm it was wrong
+        # by 60 to 160 degrees, so nothing user-facing is built on it (#81).
+        # It stays in the job record so a future calibration has the data.
         direction = gps.get(TAG_GPS_IMG_DIRECTION)
         if direction is not None:
             try:

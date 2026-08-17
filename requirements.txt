@@ -6,7 +6,6 @@ pillow
 piexif
 numpy
 skyfield
-pygeomag
 timezonefinder
 tzdata
 anthropic

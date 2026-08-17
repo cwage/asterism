@@ -262,16 +262,6 @@ def _compass(az):
     return _COMPASS[round(az / 22.5) % 16]
 
 
-def _declination(lat, lon, when_utc):
-    """Magnetic declination in degrees (+E) from the World Magnetic Model.
-    EXIF headings are almost always magnetic; leaving this uncorrected is a
-    ~5 deg error in the eastern US and >15 deg in places."""
-    from pygeomag import GeoMag
-
-    year = when_utc.year + (when_utc.timetuple().tm_yday - 1) / 365.25
-    return float(GeoMag().calculate(glat=lat, glon=lon, alt=0, time=year).d)
-
-
 def guess_unavailable_reason(exif_info):
     """Why fallback_guess would decline, or None if it wouldn't (#82).
 
