@@ -275,10 +275,21 @@ def _dso_visible(img, lab, x, y, width):
     return _dso_glow_visible(img, x, y, r)
 
 
-def apply(image_path, labels, figures):
+def apply(image_path, labels, figures, correct=True):
     """Verify and correct labels/figures against the image. Returns
     (labels, figures, meta). Never raises on a bad image: the originals
-    come back with meta["verified"] = False."""
+    come back with meta["verified"] = False.
+
+    `correct=False` reports what it sees but moves nothing. Use it when the
+    WCS did not come from a star match — a registration from two anchors
+    (#85). The displacement field is fitted by pairing each projected star
+    with the nearest peak inside a search radius, which assumes the
+    projection is already close enough that the nearest peak *is* the star.
+    Where the star field never matched, every label finds some peak in a
+    noisy night frame and the fit is noise: measured on a real anchored job,
+    it moved every label by a median of 92px (p90 125px) and reported 28
+    confident star matches on a photo the solver could not solve at all.
+    """
     try:
         with Image.open(image_path) as src:
             img = np.asarray(src.convert("L"), dtype=np.float32)
@@ -292,7 +303,10 @@ def apply(image_path, labels, figures):
     peaks_by_label = []
     matches = []
     for lab in labels:
-        if lab.get("kind") != "star":
+        # correct=False means no label is paired with a pixel at all: with
+        # an unverified projection, "the nearest peak" is not evidence of
+        # anything, in either direction. Report the projection as-is.
+        if not correct or lab.get("kind") != "star":
             peaks_by_label.append(None)
             continue
         peaks = _peaks_near(img, lab["x"], lab["y"], search_r)
@@ -308,7 +322,8 @@ def apply(image_path, labels, figures):
             matches.append((lab["x"], lab["y"],
                             nearest[0] - lab["x"], nearest[1] - lab["y"]))
 
-    field, n_used = _fit_field(matches, float(max(width, height)))
+    field, n_used = (_fit_field(matches, float(max(width, height)))
+                     if correct else ((lambda x, y: (0.0, 0.0)), 0))
 
     def field_at(x, y):
         # Sample at the nearest on-frame point: TPS extrapolation far
@@ -327,7 +342,7 @@ def apply(image_path, labels, figures):
             lab["x"], lab["y"] = round(cx, 1), round(cy, 1)
             # A DSO label must not circle empty sky-glow (#50): check the
             # pixels for extended-source signal at the corrected position.
-            if lab.get("kind") == "dso" \
+            if correct and lab.get("kind") == "dso" \
                     and _dso_visible(img, lab, cx, cy, width) is False:
                 lab["status"] = "hidden"
         else:
@@ -384,5 +399,8 @@ def apply(image_path, labels, figures):
         if corrections else 0.0,
         "p90_correction_px": round(p90, 1),
         "warped": bool(p90 > max(6.0, width * WARP_FLAG_FRAC)),
+        # So a reader can tell "nothing needed moving" from "we declined to
+        # move anything", which look identical in every field above.
+        "corrected": bool(correct),
     }
     return out, out_figures, meta

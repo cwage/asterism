@@ -152,3 +152,41 @@ def test_a_tap_on_nothing_is_used_as_given(tmp_path):
     placed = {a["name"]: a for a in out["anchors"]}
     assert placed["Venus"]["snapped"] is False
     assert (placed["Venus"]["x"], placed["Venus"]["y"]) == (3000.0, 2000.0)
+
+
+def test_each_anchor_reports_how_far_the_snap_moved_it(tmp_path):
+    """The baseline between the anchors sets both scale and roll, so how far
+    the snap dragged one is the single number that says whether the fit can
+    be believed. On a real job a 110px snap on a 447px baseline was a 25%
+    scale error and 3.6 degrees of roll — because the object being pointed
+    at was not visible in the frame at all, and the snap found a peak
+    anyway."""
+    from tests import synth
+    path = tmp_path / "sky.jpg"
+    synth.render_points(str(path), [(1200, 900), (2600, 1800)], width=4000,
+                        height=3000, amps=[220.0, 200.0])
+    bodies = [{"name": "Moon", "ra": 190.0, "dec": -5.0, "kind": "moon"},
+              {"name": "Venus", "ra": 176.0, "dec": 2.0, "kind": "planet"}]
+    anchors = [{"name": "Moon", "x": 1200, "y": 900},   # dead on
+               {"name": "Venus", "x": 2660, "y": 1800}]  # 60px away
+    out = register.register_from_anchors(str(path), {"width": 4000, "height": 3000},
+                                         anchors, bodies)
+    placed = {a["name"]: a for a in out["anchors"]}
+    assert placed["Moon"]["moved_px"] < 5
+    assert 50 < placed["Venus"]["moved_px"] < 70
+
+
+def test_an_unsnapped_anchor_moved_nothing(tmp_path):
+    from tests import synth
+    path = tmp_path / "empty.jpg"
+    synth.render_points(str(path), [(1200, 900)], width=4000, height=3000,
+                        amps=[220.0])
+    bodies = [{"name": "Moon", "ra": 190.0, "dec": -5.0, "kind": "moon"},
+              {"name": "Venus", "ra": 176.0, "dec": 2.0, "kind": "planet"}]
+    anchors = [{"name": "Moon", "x": 1200, "y": 900},
+               {"name": "Venus", "x": 3000, "y": 2000}]
+    out = register.register_from_anchors(str(path), {"width": 4000, "height": 3000},
+                                         anchors, bodies)
+    placed = {a["name"]: a for a in out["anchors"]}
+    assert placed["Venus"]["snapped"] is False
+    assert placed["Venus"]["moved_px"] == 0.0

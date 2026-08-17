@@ -361,3 +361,58 @@ def test_each_body_still_carries_its_own_compass_direction():
     venus = next(c for c in guess["candidates"] if c["name"] == "Venus")
     assert venus["direction"] == "WSW"
     assert 0 <= venus["az_deg"] <= 360
+
+
+# ---- one observer, used by everyone (#85 follow-up) ----
+
+
+def test_observer_latlon_prefers_gps():
+    assert ephemeris.observer_latlon(
+        {"lat": 36.1, "lon": -86.8, "offset_time_original": "-05:00"}) == (36.1, -86.8)
+
+
+def test_observer_latlon_falls_back_to_the_timezone_band():
+    lat, lon = ephemeris.observer_latlon({"offset_time_original": "-05:00"})
+    assert lat == ephemeris.FALLBACK_GUESS_LAT
+    assert lon == ephemeris._band_center(
+        ephemeris.guess_longitudes(ephemeris._parse_offset("-05:00")))
+
+
+def test_observer_latlon_gives_up_without_a_time_offset():
+    assert ephemeris.observer_latlon({}) == (None, None)
+
+
+@needs_de421
+def test_labels_stand_where_the_anchor_fit_stood(tmp_path):
+    """The anchor fit (#85) and the labels drawn afterwards must compute the
+    Moon from the same place on Earth. They did not: the fit used the
+    timezone-band fallback while annotate_bodies passed exif lat/lon
+    straight through, which is None without GPS — i.e. the centre of the
+    Earth. On a real job the Moon labelled 0.91 degrees, 45px, from where
+    the fit had just put it, and Venus was unaffected: lunar parallax
+    exactly."""
+    exif_info = {
+        "datetime_original": "2024:04:08 12:17:16",
+        "offset_time_original": "-06:00",
+        "lat": None, "lon": None, "width": 1200, "height": 900,
+    }
+    when, _ = ephemeris.resolve_utc(exif_info)
+
+    # What the anchor fit computes, via the shared helper.
+    lat, lon = ephemeris.observer_latlon(exif_info)
+    assert lat is not None, "a UTC offset alone must still place the observer"
+    fit = {b["name"]: b for b in ephemeris.compute_bodies(when, lat, lon)}
+
+    # Centre the frame on the fit's Moon, then let annotate_bodies project.
+    moon = fit["Moon"]
+    wcs = synth.make_wcs(ra=moon["ra"], dec=moon["dec"], fov_deg=40.0,
+                         width=1200, height=900)
+    wcs_path = tmp_path / "register.wcs"
+    fits.PrimaryHDU(header=wcs.to_header()).writeto(wcs_path)
+    labels, _ = ephemeris.annotate_bodies(str(wcs_path), 1200, 900, exif_info)
+
+    drawn = {l["name"]: l for l in labels}
+    assert "Moon" in drawn
+    # Sub-pixel, not a parallax away. At this scale 0.91 deg would be ~27px.
+    assert drawn["Moon"]["x"] == pytest.approx(600, abs=1)
+    assert drawn["Moon"]["y"] == pytest.approx(450, abs=1)

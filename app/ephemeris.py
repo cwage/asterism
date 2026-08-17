@@ -150,6 +150,27 @@ def compute_bodies(when_utc, lat=None, lon=None):
     return bodies
 
 
+def observer_latlon(exif_info):
+    """Where to stand when computing body positions. GPS if the photo has
+    it, otherwise the middle of the timezone band its UTC offset implies
+    (#79). Returns (None, None) when even that is unavailable.
+
+    One function so every caller stands in the same place. They did not:
+    the anchor fit (#85) used the timezone fallback while annotate_bodies
+    used exif lat/lon directly — which is None without GPS, i.e. the centre
+    of the Earth. The Moon then labelled 0.91 degrees from where the fit had
+    just put it, measured on a real job, because that difference is exactly
+    lunar parallax. Everything else moves by nothing.
+    """
+    lat, lon = exif_info.get("lat"), exif_info.get("lon")
+    if lat is not None and lon is not None:
+        return lat, lon
+    delta = _parse_offset(exif_info.get("offset_time_original"))
+    if delta is None:
+        return None, None
+    return FALLBACK_GUESS_LAT, _band_center(guess_longitudes(delta))
+
+
 def annotate_bodies(wcs_path, width, height, exif_info):
     """Project the bodies through the solved WCS. Returns (labels, meta).
 
@@ -163,7 +184,8 @@ def annotate_bodies(wcs_path, width, height, exif_info):
         return [], meta
 
     try:
-        bodies = compute_bodies(when_utc, exif_info.get("lat"), exif_info.get("lon"))
+        lat, lon = observer_latlon(exif_info)
+        bodies = compute_bodies(when_utc, lat, lon)
     except FileNotFoundError:
         meta["error"] = "ephemeris file missing"
         return [], meta
