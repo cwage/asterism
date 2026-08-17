@@ -3,6 +3,7 @@ known WCS (exact ground truth for solver tests), plus obviously-unsolvable
 images (noise, black, gradient) for graceful-failure tests."""
 
 import csv
+import math
 import os
 
 import numpy as np
@@ -19,6 +20,7 @@ TAG_FOCAL_PLANE_X_RESOLUTION = 41486
 TAG_FOCAL_PLANE_RESOLUTION_UNIT = 41488
 TAG_PIXEL_X_DIMENSION = 40962
 TAG_DATETIME_ORIGINAL = 36867
+TAG_OFFSET_TIME_ORIGINAL = 36881
 TAG_EXPOSURE_TIME = 33434
 
 
@@ -53,7 +55,7 @@ def make_wcs(ra, dec, fov_deg, width, height):
 def build_exif(f35mm=None, datetime_original=None, gps=None, heading=None,
                exposure_seconds=None, focal_length=None,
                focal_plane_x_res=None, focal_plane_unit=None,
-               pixel_x_dimension=None):
+               pixel_x_dimension=None, offset_time_original=None):
     """PIL Exif with the fields app.exif reads. gps = (lat, lon) in degrees;
     heading = (degrees, ref) with ref 'M' (magnetic) or 'T' (true).
 
@@ -73,6 +75,11 @@ def build_exif(f35mm=None, datetime_original=None, gps=None, heading=None,
         ifd[TAG_PIXEL_X_DIMENSION] = pixel_x_dimension
     if datetime_original is not None:
         ifd[TAG_DATETIME_ORIGINAL] = datetime_original
+    if offset_time_original is not None:
+        # DateTimeOriginal is local time with no zone; without this tag the
+        # instant is only as good as a zone lookup. Satellites care: a low
+        # pass moves about a degree a second.
+        ifd[TAG_OFFSET_TIME_ORIGINAL] = offset_time_original
     if exposure_seconds is not None:
         ifd[TAG_EXPOSURE_TIME] = exposure_seconds
     if gps is not None or heading is not None:
@@ -125,6 +132,26 @@ def stamp_blobs(arr, blobs):
         arr += amp * np.exp(-((xx - x) ** 2 + (yy - y) ** 2) / (2 * sigma ** 2))
 
 
+def stamp_trail(arr, points, amp=200.0, sigma=1.3, step=0.5):
+    """Draw a continuous streak through consecutive (x, y) points, in place.
+
+    What a satellite actually leaves on a long exposure: the same PSF as a
+    star, smeared along its apparent motion. Sampling the polyline at
+    sub-pixel spacing and stamping the star PSF at each sample gives a line
+    of the right width and brightness profile, without a separate
+    line-drawing path that could disagree with how stars are rendered.
+    """
+    samples = []
+    for (x0, y0), (x1, y1) in zip(points, points[1:]):
+        span = math.hypot(x1 - x0, y1 - y0)
+        for i in range(max(1, int(span / step))):
+            f = i / max(1, int(span / step))
+            samples.append((x0 + (x1 - x0) * f, y0 + (y1 - y0) * f, amp * step))
+    if points:
+        samples.append((points[-1][0], points[-1][1], amp * step))
+    stamp_stars(arr, samples, sigma=sigma)
+
+
 def render_points(path, points, width=1200, height=900, amp=180.0, seed=11,
                   amps=None, blobs=None, sigma=1.3):
     """Render Gaussian stars at explicit pixel positions over a flat noisy
@@ -146,9 +173,17 @@ def render_points(path, points, width=1200, height=900, amp=180.0, seed=11,
 
 
 def render_starfield(path, ra=95.0, dec=-10.0, fov_deg=50.0, width=1600,
-                     height=1200, max_mag=5.5, seed=42, f35mm=39):
+                     height=1200, max_mag=5.5, seed=42, f35mm=39,
+                     trails=None, exif=None):
     """Render a star field and save it as JPEG with a matching EXIF focal
-    length. Returns the WCS used, i.e. the ground truth."""
+    length. Returns the WCS used, i.e. the ground truth.
+
+    `trails` are [[(ra, dec), ...], ...] polylines in sky coordinates,
+    projected through the same WCS and drawn as streaks — a satellite
+    crossing the frame during the exposure (#11). `exif` overrides the
+    default focal-length-only block when a test needs GPS, a timestamp or
+    an exposure time in the file.
+    """
     wcs = make_wcs(ra, dec, fov_deg, width, height)
     stars = load_stars(max_mag)
     ras = np.array([s[0] for s in stars])
@@ -168,8 +203,13 @@ def render_starfield(path, ra=95.0, dec=-10.0, fov_deg=50.0, width=1600,
     stamp_stars(arr, [(x, y, 255.0 * 10 ** (-0.4 * (mag - 3.0)))
                       for x, y, mag in zip(xs[ok], ys[ok], mags[ok])])
 
+    for trail in (trails or []):
+        tx, ty = wcs.all_world2pix([p[0] for p in trail], [p[1] for p in trail], 0)
+        stamp_trail(arr, list(zip(tx, ty)))
+
     img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8)).convert("RGB")
-    img.save(path, quality=92, exif=build_exif(f35mm=f35mm))
+    img.save(path, quality=92,
+             exif=exif if exif is not None else build_exif(f35mm=f35mm))
     return wcs
 
 
