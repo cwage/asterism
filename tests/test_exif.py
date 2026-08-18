@@ -48,6 +48,11 @@ def test_focal35_derives_fov_bounds(tmp_path):
     assert info["focal_35mm"] == 27.0
     assert info["fov_bounds"][0] == pytest.approx(fov * 0.35, rel=1e-6)
     assert info["fov_bounds"][1] == pytest.approx(fov * 1.2, rel=1e-6)
+    # The envelope is searched as two tiers: uncropped range first, then
+    # the sensor-crop extension, meeting at the CROP_SPLIT fraction.
+    (p_lo, p_hi), (c_lo, c_hi) = info["fov_tiers"]
+    assert p_lo == c_hi == pytest.approx(fov * exif.CROP_SPLIT, rel=1e-6)
+    assert (c_lo, p_hi) == pytest.approx(info["fov_bounds"], rel=1e-6)
     assert info["datetime_original"] == "2021:07:30 23:52:43"
     assert info["lat"] == pytest.approx(49.1415, abs=1e-3)
     assert info["lon"] == pytest.approx(6.1170, abs=1e-3)
@@ -81,13 +86,20 @@ def test_bracket_reaches_below_a_2x_sensor_crop(tmp_path):
     quick pass cannot solve the photo at all."""
     path = tmp_path / "cropped.jpg"
     Image.new("RGB", (64, 64)).save(path, exif=synth.build_exif(f35mm=24))
-    lo, hi = exif.read_exif(path)["fov_bounds"]
+    info = exif.read_exif(path)
+    lo, hi = info["fov_bounds"]
     # 38.4 is measured, not derived: it comes from the solved WCS of the
     # real photos, so it stays a literal even if the estimator changes.
     assert lo <= 38.4 <= hi, f"true field 38.4 deg outside bracket {lo:.1f}-{hi:.1f}"
     # The estimate itself must stay inside too, for uncropped shots.
     estimate = math.degrees(2 * math.atan(36.0 / (2 * 24)))
     assert lo <= estimate <= hi
+    # And each case must land in its intended search tier: the estimate in
+    # the primary bracket, the crop in the extension — a CROP_SPLIT above
+    # 38.4/74 would silently push these shots out of the quick pass.
+    primary, crop = info["fov_tiers"]
+    assert primary[0] <= estimate <= primary[1]
+    assert crop[0] <= 38.4 <= crop[1]
 
 
 def test_exposure_time_read_for_the_satellite_window(tmp_path):

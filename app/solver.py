@@ -183,24 +183,37 @@ FALLBACK_TIERS = [(30.0, 90.0), (8.0, 35.0), (2.5, 10.0)]
 MAX_EXIF_FIELD = 110.0
 
 
+def exif_tiers(exif_info):
+    """The EXIF-derived scale tiers, most likely first: the uncropped
+    bracket, then the sensor-crop extension. Empty when EXIF offers no
+    trustworthy hint — no focal length, or a field wider than the indexes
+    cover (#46, ultrawide lenses).
+
+    Split out of tier_plan so the worker can size its quick pass to the
+    EXIF tiers: a hidden-crop shot then solves without a "try harder"
+    click instead of failing the uncropped bracket and stopping."""
+    f35 = exif_info.get("focal_35mm")
+    if not f35:
+        return []
+    # fov_deg is orientation-corrected (portrait frames are narrower
+    # across than 36mm/f35 implies). Older job records predate the key —
+    # deepen replans from stored exif_json — so fall back to the
+    # landscape formula they were written with (likewise fov_tiers,
+    # whose records carried one full-envelope tier in fov_bounds).
+    fov = exif_info.get("fov_deg")
+    if fov is None:
+        fov = math.degrees(2 * math.atan(36.0 / (2 * f35)))
+    if fov > MAX_EXIF_FIELD:
+        return []
+    return [tuple(t) for t in exif_info.get("fov_tiers")
+            or [exif_info["fov_bounds"]]]
+
+
 def tier_plan(exif_info):
     """The scale tiers a full solve would try, in order: EXIF-derived
-    bounds first when trustworthy, then the fallbacks (deduped).
-    An EXIF tier implying a field wider than the indexes cover (#46,
-    ultrawide lenses) is skipped — the fallbacks still run in case the
-    EXIF was lying about the optics."""
-    tiers = []
-    f35 = exif_info.get("focal_35mm")
-    if f35:
-        # fov_deg is orientation-corrected (portrait frames are narrower
-        # across than 36mm/f35 implies). Older job records predate the key —
-        # deepen replans from stored exif_json — so fall back to the
-        # landscape formula they were written with.
-        fov = exif_info.get("fov_deg")
-        if fov is None:
-            fov = math.degrees(2 * math.atan(36.0 / (2 * f35)))
-        if fov <= MAX_EXIF_FIELD:
-            tiers.append(tuple(exif_info["fov_bounds"]))
+    bounds first when trustworthy — the uncropped range, then the
+    sensor-crop extension — then the fallbacks (deduped)."""
+    tiers = exif_tiers(exif_info)
     for t in FALLBACK_TIERS:
         if not any(abs(t[0] - u[0]) < 2 and abs(t[1] - u[1]) < 2 for u in tiers):
             tiers.append(t)

@@ -65,9 +65,27 @@ def test_empty_tiers_returns_clean_failure(monkeypatch, tmp_path):
 
 
 def test_tier_plan_matches_solve_order():
+    # A pre-fov_tiers job record: the stored envelope is the one EXIF tier.
     info = {"focal_35mm": 27.0, "fov_bounds": (47.17, 94.33)}
     assert solver.tier_plan(info) == [(47.17, 94.33)] + solver.FALLBACK_TIERS
     assert solver.tier_plan({"focal_35mm": None}) == solver.FALLBACK_TIERS
+
+
+def test_split_exif_tiers_lead_the_plan():
+    # Current records carry the split: uncropped bracket, then the
+    # sensor-crop extension, then the fallbacks.
+    info = {"focal_35mm": 27.0, "fov_bounds": (23.6, 80.9),
+            "fov_tiers": [[47.2, 80.9], [23.6, 47.2]]}
+    assert solver.exif_tiers(info) == [(47.2, 80.9), (23.6, 47.2)]
+    assert solver.tier_plan(info) == [(47.2, 80.9), (23.6, 47.2)] + \
+        solver.FALLBACK_TIERS
+
+
+def test_exif_tiers_empty_without_a_hint():
+    assert solver.exif_tiers({"focal_35mm": None}) == []
+    # Ultrawide beyond index coverage: no EXIF tiers at all (#46).
+    assert solver.exif_tiers({"focal_35mm": 11.0,
+                              "fov_bounds": (82.0, 164.0)}) == []
 
 
 def test_ultrawide_exif_tier_skipped():
