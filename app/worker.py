@@ -238,8 +238,11 @@ def process(job):
                 f"only {n} star-like sources detected — cloudy, daylight, "
                 "or not a sky photo"
             )
-        # Checkpoint 2: quick mode tries only the most likely scale tier.
-        tiers = plan[:1]
+        # Checkpoint 2: quick mode tries the EXIF-derived tiers — the
+        # uncropped bracket plus the sensor-crop extension, so a hidden-crop
+        # phone shot (#57) solves without a "try harder" click. Without
+        # EXIF, just the most likely fallback.
+        tiers = plan[:len(solver.exif_tiers(exif_info))] or plan[:1]
     else:
         # Deep mode: whatever the quick pass didn't already try.
         prior = json.loads(_col(job, "result_json") or "{}")

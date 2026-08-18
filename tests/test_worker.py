@@ -174,6 +174,30 @@ def test_quick_mode_runs_only_the_first_tier(monkeypatch):
                                  "guess_unavailable": "no_timestamp"}
 
 
+def test_quick_mode_runs_every_exif_tier(monkeypatch):
+    """With a focal length, quick covers both split brackets: a hidden-crop
+    phone shot (#57) solves in the extension tier without a "try harder"
+    click, at the cost of one extra tier on photos that fail outright."""
+    seen = {}
+    def record(image_path, out_dir, exif_info, tiers=None):
+        seen["tiers"] = tiers
+        return {"success": False, "total_seconds": 2.0, "log_tail": "",
+                "attempts": [{"fov_bounds": [47.2, 80.9], "seconds": 1.0,
+                              "success": False},
+                             {"fov_bounds": [23.6, 47.2], "seconds": 1.0,
+                              "success": False}]}
+    monkeypatch.setattr(solver, "solve_tiered", record)
+    job = dict(JOB)
+    job["exif_json"] = json.dumps(
+        {"width": 100, "height": 100, "focal_35mm": 27.0,
+         "fov_bounds": [23.6, 80.9],
+         "fov_tiers": [[47.2, 80.9], [23.6, 47.2]]})
+    status, result, error = worker.process(job)
+    assert seen["tiers"] == [(47.2, 80.9), (23.6, 47.2)]
+    assert status == "failed"
+    assert result["failure"]["can_deepen"] is True  # fallbacks remain
+
+
 def test_deep_mode_skips_tiers_the_quick_pass_tried(monkeypatch):
     monkeypatch.setattr(verify, "count_stars",
                         lambda *a: pytest.fail("no pre-check in deep mode"))
