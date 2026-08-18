@@ -53,6 +53,27 @@ def test_focal35_derives_fov_bounds(tmp_path):
     assert info["lon"] == pytest.approx(6.1170, abs=1e-3)
 
 
+def test_portrait_frame_narrows_the_fov_estimate(tmp_path):
+    """Portrait pixels put the sensor's SHORT side across the image width,
+    so 36mm/f35 overstates the field by the aspect ratio. The prod ultrawide
+    job of 2026-08-18: f35=12 read as 112.6 deg — over solver.MAX_EXIF_FIELD,
+    which dropped the only scale tier containing the answer — when the
+    portrait frame truly spans ~97 deg across."""
+    path = tmp_path / "portrait.jpg"
+    Image.new("RGB", (768, 1024)).save(path, exif=synth.build_exif(f35mm=12))
+    info = exif.read_exif(path)
+    fov = math.degrees(2 * math.atan((36.0 * 768 / 1024) / 24.0))  # ~96.9
+    assert info["fov_deg"] == pytest.approx(fov, rel=1e-6)
+    assert info["fov_bounds"][0] == pytest.approx(fov * 0.35, rel=1e-6)
+    assert info["fov_bounds"][1] == pytest.approx(fov * 1.2, rel=1e-6)
+
+    # The same lens held landscape keeps the full 36mm width.
+    land = tmp_path / "landscape.jpg"
+    Image.new("RGB", (1024, 768)).save(land, exif=synth.build_exif(f35mm=12))
+    wide = math.degrees(2 * math.atan(36.0 / 24.0))
+    assert exif.read_exif(land)["fov_deg"] == pytest.approx(wide, rel=1e-6)
+
+
 def test_bracket_reaches_below_a_2x_sensor_crop(tmp_path):
     """The Pixel 9 case (measured 2026-08-14): EXIF says 24mm-equivalent,
     implying ~74 deg, but the saved frame is a 2x crop of the 50MP sensor

@@ -77,6 +77,15 @@ def test_ultrawide_exif_tier_skipped():
     assert solver.tier_plan(info) == solver.FALLBACK_TIERS
 
 
+def test_portrait_ultrawide_exif_tier_kept():
+    # The same lens as above held in portrait: read_exif's orientation-
+    # corrected fov_deg comes back under MAX_EXIF_FIELD, so the EXIF tier
+    # runs first (the 2026-08-18 prod regression — without the correction
+    # every tier that ran excluded the true scale).
+    info = {"focal_35mm": 12.0, "fov_deg": 96.9, "fov_bounds": (33.9, 116.3)}
+    assert solver.tier_plan(info)[0] == (33.9, 116.3)
+
+
 def test_moderately_wide_exif_tier_kept():
     # f35=16mm -> ~96.7 deg: wide but within coverage, EXIF tier stays
     # first. Bounds follow read_exif's bracketing (fov * 0.7, fov * 1.4).

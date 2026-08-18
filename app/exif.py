@@ -34,11 +34,30 @@ def _gps_to_degrees(dms, ref):
     return deg
 
 
-def _fov_bounds(f35):
-    """Scale bracket around a 35mm-equivalent focal length.
+def fov_width_deg(f35, width=None, height=None):
+    """Horizontal field of view implied by a 35mm-equivalent focal length,
+    across the IMAGE width — the dimension solve-field's degwidth scale
+    hints measure.
 
-    Horizontal FOV for a 36mm-wide full frame at this equivalent focal
-    length. The bracket is deliberately lopsided: sensor crops and digital
+    The 36mm frame width matches the image width only for landscape frames.
+    Phones store portrait shots with the pixels physically rotated, so the
+    image width is the sensor's SHORT side: treating it as 36mm-wide
+    overstates the field by the aspect ratio (4:3 → 1.33x). The prod
+    ultrawide job this fixes reported 112.6 deg for a portrait frame that
+    truly spans ~97 deg across — pushing it over MAX_EXIF_FIELD, which
+    dropped the only scale tier that contained the answer. Scaling by the
+    aspect ratio is approximate (35mm frames are 3:2, phone sensors 4:3),
+    but the error is a few degrees against a 0.35x-1.2x bracket."""
+    frame_mm = 36.0
+    if width and height and height > width:
+        frame_mm *= width / height
+    return math.degrees(2 * math.atan(frame_mm / (2 * f35)))
+
+
+def _fov_bounds(fov):
+    """Scale bracket around an estimated horizontal field of view.
+
+    The bracket is deliberately lopsided: sensor crops and digital
     zoom only ever make the real field NARROWER than the lens implies, and
     nothing makes it wider, so this estimate is an upper bound with a long
     tail below it.
@@ -54,7 +73,6 @@ def _fov_bounds(f35):
     The same bracket covers a focal length derived from sensor width: a
     dedicated camera is less likely to be secretly cropping, but an exported
     crop keeps the focal length and narrows the field exactly the same way."""
-    fov = math.degrees(2 * math.atan(36.0 / (2 * f35)))
     return (max(1.0, fov * 0.35), min(180.0, fov * 1.2))
 
 
@@ -103,10 +121,11 @@ def _derive_focal_35mm(exif_ifd, px_width):
 
 
 def read_exif(path):
-    """Return {fov_bounds, focal_35mm, datetime_original, offset_time_original,
+    """Return {fov_bounds, fov_deg, focal_35mm, datetime_original, offset_time_original,
     exposure_seconds, lat, lon, heading, heading_ref, width, height}."""
     info = {
         "fov_bounds": DEFAULT_FOV_BOUNDS,
+        "fov_deg": None,
         "focal_35mm": None,
         # Which route produced focal_35mm: the EXIF tag, or the sensor-width
         # derivation (#70). Recorded so a bad scale hint is traceable.
@@ -141,7 +160,16 @@ def read_exif(path):
             info["focal_35mm_source"] = "sensor_width"
 
     if info["focal_35mm"]:
-        info["fov_bounds"] = _fov_bounds(info["focal_35mm"])
+        # Orientation correction applies only to the 35mm tag: the
+        # sensor-width derivation above already measures the extent along
+        # the image width, whichever sensor dimension that is.
+        if info["focal_35mm_source"] == "exif_35mm":
+            fov = fov_width_deg(info["focal_35mm"],
+                                info["width"], info["height"])
+        else:
+            fov = fov_width_deg(info["focal_35mm"])
+        info["fov_deg"] = fov
+        info["fov_bounds"] = _fov_bounds(fov)
 
     dto = exif_ifd.get(TAG_DATETIME_ORIGINAL)
     if dto:

@@ -192,7 +192,13 @@ def tier_plan(exif_info):
     tiers = []
     f35 = exif_info.get("focal_35mm")
     if f35:
-        fov = math.degrees(2 * math.atan(36.0 / (2 * f35)))
+        # fov_deg is orientation-corrected (portrait frames are narrower
+        # across than 36mm/f35 implies). Older job records predate the key —
+        # deepen replans from stored exif_json — so fall back to the
+        # landscape formula they were written with.
+        fov = exif_info.get("fov_deg")
+        if fov is None:
+            fov = math.degrees(2 * math.atan(36.0 / (2 * f35)))
         if fov <= MAX_EXIF_FIELD:
             tiers.append(tuple(exif_info["fov_bounds"]))
     for t in FALLBACK_TIERS:
