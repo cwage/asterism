@@ -312,6 +312,15 @@ def claim_next_job(conn):
     """Take the next queued job and mark it 'solving'. Returns the row, or
     None if there was nothing to take.
 
+    Quick jobs always run before deep ones: a deep solve is the slowest job
+    type with the worst odds, and on a single worker equal priority lets one
+    person's lost cause hold every fresh upload hostage for minutes (measured
+    2026-08-19: a five-tier deep solve blocked three quick jobs, each of
+    which would have finished in seconds). A deep job therefore only gets
+    the worker when the quick queue is empty; it can be pushed back
+    repeatedly, which is the right trade — its uploader already got a
+    verdict and chose to wait, while quick uploaders are staring at a queue.
+
     The id tiebreak keeps FIFO deterministic when created_at (second
     resolution) collides, and matches the API's queue-position math.
     hidden = 0 keeps a job pulled by the kill switch (#60) from burning a
@@ -323,7 +332,7 @@ def claim_next_job(conn):
     unconditional claim would go on to solve a job that is already hidden."""
     job = conn.execute(
         "SELECT * FROM jobs WHERE status = 'queued' AND hidden = 0 "
-        "ORDER BY created_at, id LIMIT 1"
+        "ORDER BY mode = 'deep', created_at, id LIMIT 1"
     ).fetchone()
     if not job:
         return None

@@ -115,12 +115,13 @@ def test_rejected_tier_does_not_leak_into_the_next(monkeypatch, tmp_path):
     def fake(cmd, **kwargs):
         calls.append(cmd)
         if len(calls) == 1:
-            # First tier: a low-confidence match, rejected but left on disk.
+            # First pass of the first tier: a low-confidence match, rejected
+            # but left on disk.
             open(os.path.join(out, "solve.wcs"), "w").close()
             write_match(out, 9.53, 2)
             rc = 0
         else:
-            # Later tiers: solve-field finds nothing and writes nothing.
+            # Every later pass: solve-field finds nothing and writes nothing.
             rc = 1
 
         class Proc:
@@ -134,7 +135,8 @@ def test_rejected_tier_does_not_leak_into_the_next(monkeypatch, tmp_path):
     monkeypatch.setattr(solver.subprocess, "run", fake)
     result = solver.solve_tiered("x.jpg", out, {"focal_35mm": None})
 
-    assert len(calls) == len(solver.FALLBACK_TIERS), "every tier should run"
+    # Two solve-field passes per tier: capped, then unbounded.
+    assert len(calls) == 2 * len(solver.FALLBACK_TIERS), "every tier should run"
     assert result["success"] is False
     assert all(a["success"] is False for a in result["attempts"])
     assert not os.path.exists(os.path.join(out, "solve.wcs")), \

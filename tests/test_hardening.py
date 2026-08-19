@@ -88,6 +88,32 @@ def test_queue_position_counts_solving_and_earlier_queued(tmp_path, monkeypatch)
     assert "queue_position" not in main.get_job("busy")   # solving, not queued
 
 
+def test_quick_jobs_jump_deep_jobs_in_queue(tmp_path, monkeypatch):
+    """Claim order and queue positions agree: quick before deep, FIFO within
+    each class, however the arrival times interleave."""
+    monkeypatch.setattr(db, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "asterism.db"))
+    db.init_db()
+    with db.get_conn() as conn:
+        conn.execute("INSERT INTO jobs (id, image_path, status, mode, created_at) VALUES "
+                     "('deep-early', '/a.jpg', 'queued', 'deep', '2026-08-19 05:00:00')")
+        conn.execute("INSERT INTO jobs (id, image_path, status, mode, created_at) VALUES "
+                     "('quick-late', '/b.jpg', 'queued', 'quick', '2026-08-19 05:01:00')")
+        conn.execute("INSERT INTO jobs (id, image_path, status, mode, created_at) VALUES "
+                     "('quick-later', '/c.jpg', 'queued', 'quick', '2026-08-19 05:02:00')")
+
+    # The deep job arrived first but reports both quick jobs ahead of it.
+    assert main.get_job("quick-late")["queue_position"] == 0
+    assert main.get_job("quick-later")["queue_position"] == 1
+    assert main.get_job("deep-early")["queue_position"] == 2
+
+    with db.get_conn() as conn:
+        assert worker.claim_next_job(conn)["id"] == "quick-late"
+        assert worker.claim_next_job(conn)["id"] == "quick-later"
+        assert worker.claim_next_job(conn)["id"] == "deep-early"
+        assert worker.claim_next_job(conn) is None
+
+
 def test_orphaned_solving_jobs_requeued_on_startup(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DATA_DIR", str(tmp_path))
     monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "asterism.db"))

@@ -304,13 +304,17 @@ def _public_exif(exif_info):
 
 def _queue_position(conn, row):
     """How many jobs run before this queued one: the one solving now plus
-    queued jobs ahead in FIFO order (created_at, then id — the same order
-    the worker consumes)."""
+    queued jobs ahead in the worker's claim order — quick jobs before deep
+    ones, FIFO (created_at, then id) within each class. Must stay in step
+    with worker.claim_next_job, or the count shown to a waiting uploader
+    drifts from the order jobs actually run."""
+    deep = 1 if row["mode"] == "deep" else 0
     ahead = conn.execute(
         "SELECT COUNT(*) AS n FROM jobs WHERE hidden = 0 AND (status = 'solving' "
-        "OR (status = 'queued' AND (created_at < :c "
-        "    OR (created_at = :c AND id < :i))))",
-        {"c": row["created_at"], "i": row["id"]},
+        "OR (status = 'queued' AND ((mode = 'deep') < :d "
+        "    OR ((mode = 'deep') = :d AND (created_at < :c "
+        "        OR (created_at = :c AND id < :i))))))",
+        {"d": deep, "c": row["created_at"], "i": row["id"]},
     ).fetchone()
     return ahead["n"]
 
