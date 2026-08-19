@@ -12,14 +12,25 @@ INDEX_DIR = os.environ.get("ASTROMETRY_INDEX_DIR", "./indexes")
 CATALOG_DIR = os.environ.get("CATALOG_DIR", "./catalogs")
 CPU_LIMIT = int(os.environ.get("SOLVE_CPULIMIT", "60"))
 
-# Only the brightest sources are worth matching. A short handheld exposure
-# (0.3s, no night mode) yielded 1166 extracted sources of which ~34 were real
-# stars; unbounded, solve-field drowned in noise quads and burned the CPU
-# limit on all five scale tiers (500+s, never solved). Capped to the brightest
-# 50 the same frame solved in 2.4s — real stars outrank sensor noise, so the
-# cap keeps the signal and discards the haystack. Long-exposure frames solve
-# from their brightest few dozen sources anyway.
+# Each tier solves in two passes: first with the source list capped to the
+# brightest SOURCE_DEPTH detections under a short CPU limit, then the
+# original unbounded search with the full budget. Neither alone survives
+# contact with real uploads (measured 2026-08-19):
+#
+#   - A short handheld exposure (0.3s, no night mode) yielded 1166 extracted
+#     sources of which ~34 were real stars. Unbounded, solve-field drowned in
+#     noise quads and failed every tier — 500+s across quick and deep passes,
+#     and still unsolved at a 600s CPU limit. Capped to the brightest 50 it
+#     solved in 2.4s: real stars outrank sensor noise.
+#   - Two corpus night-mode frames that solve unbounded in 4.5s/12.3s FAIL
+#     with the 50 cap (and solve again at 200) — in star-rich fields the
+#     brightest 50 sources alone don't form the quads the index needs.
+#
+# No single depth serves both, so the capped pass runs as a cheap prefix:
+# noisy frames solve there in seconds, and everything else falls through to
+# exactly the search that shipped before, with its full CPU_LIMIT intact.
 SOURCE_DEPTH = int(os.environ.get("SOLVE_SOURCE_DEPTH", "50"))
+CAPPED_PASS_CPULIMIT = int(os.environ.get("SOLVE_CAPPED_CPULIMIT", "15"))
 
 # Confidence floor for accepting a solve (#71). solve-field's exit code is not
 # enough: when the CPU limit cuts a search short it can still write out the best
@@ -121,10 +132,22 @@ def _clear_artifacts(out_dir):
 
 
 def solve(image_path, out_dir, fov_bounds):
-    """Run solve-field. Returns dict with success, seconds, wcs_path, log tail.
+    """Run one tier: the capped pass, then the unbounded pass if it misses.
+    Returns dict with success, seconds, wcs_path, log tail.
 
     A solve-field exit code of 0 is necessary but not sufficient: the match has
     to clear MIN_LOGODDS/MIN_MATCHES as well (#71)."""
+    first = _solve_once(image_path, out_dir, fov_bounds,
+                        objs=SOURCE_DEPTH, cpulimit=CAPPED_PASS_CPULIMIT)
+    if first["success"]:
+        return first
+    second = _solve_once(image_path, out_dir, fov_bounds,
+                         objs=None, cpulimit=CPU_LIMIT)
+    second["seconds"] = round(first["seconds"] + second["seconds"], 2)
+    return second
+
+
+def _solve_once(image_path, out_dir, fov_bounds, objs, cpulimit):
     os.makedirs(out_dir, exist_ok=True)
     _clear_artifacts(out_dir)
     cfg = _write_cfg(out_dir)
@@ -137,13 +160,14 @@ def solve(image_path, out_dir, fov_bounds):
         "--overwrite",
         "--no-plots",
         "--downsample", "2",
-        "--objs", str(SOURCE_DEPTH),
-        "--cpulimit", str(CPU_LIMIT),
+        "--cpulimit", str(cpulimit),
         "--scale-units", "degwidth",
         "--scale-low", f"{low:.2f}",
         "--scale-high", f"{high:.2f}",
-        image_path,
     ]
+    if objs:
+        cmd += ["--objs", str(objs)]
+    cmd.append(image_path)
     t0 = time.monotonic()
     proc = subprocess.run(cmd, capture_output=True, text=True)
     seconds = time.monotonic() - t0
