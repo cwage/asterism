@@ -12,6 +12,15 @@ INDEX_DIR = os.environ.get("ASTROMETRY_INDEX_DIR", "./indexes")
 CATALOG_DIR = os.environ.get("CATALOG_DIR", "./catalogs")
 CPU_LIMIT = int(os.environ.get("SOLVE_CPULIMIT", "60"))
 
+# Only the brightest sources are worth matching. A short handheld exposure
+# (0.3s, no night mode) yielded 1166 extracted sources of which ~34 were real
+# stars; unbounded, solve-field drowned in noise quads and burned the CPU
+# limit on all five scale tiers (500+s, never solved). Capped to the brightest
+# 50 the same frame solved in 2.4s — real stars outrank sensor noise, so the
+# cap keeps the signal and discards the haystack. Long-exposure frames solve
+# from their brightest few dozen sources anyway.
+SOURCE_DEPTH = int(os.environ.get("SOLVE_SOURCE_DEPTH", "50"))
+
 # Confidence floor for accepting a solve (#71). solve-field's exit code is not
 # enough: when the CPU limit cuts a search short it can still write out the best
 # hypothesis it had, and "best" can be a three-star triangle with two matching
@@ -128,6 +137,7 @@ def solve(image_path, out_dir, fov_bounds):
         "--overwrite",
         "--no-plots",
         "--downsample", "2",
+        "--objs", str(SOURCE_DEPTH),
         "--cpulimit", str(CPU_LIMIT),
         "--scale-units", "degwidth",
         "--scale-low", f"{low:.2f}",
