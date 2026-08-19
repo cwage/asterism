@@ -244,9 +244,14 @@ def process(job):
         # EXIF, just the most likely fallback.
         tiers = plan[:len(solver.exif_tiers(exif_info))] or plan[:1]
     else:
-        # Deep mode: whatever the quick pass didn't already try.
+        # Deep mode: whatever the quick pass didn't already try with the
+        # full budget. Quick attempts run trimmed (thorough=False, see
+        # solve_tiered) and must be re-run, not skipped; records from
+        # before the flag existed were full-budget runs, hence the True
+        # default.
         prior = json.loads(_col(job, "result_json") or "{}")
-        tried = {tuple(a["fov_bounds"]) for a in prior.get("attempts", [])}
+        tried = {tuple(a["fov_bounds"]) for a in prior.get("attempts", [])
+                 if a.get("thorough", True)}
         tiers = [t for t in plan
                  if (round(t[0], 1), round(t[1], 1)) not in tried]
         if (prior.get("failure") or {}).get("reason") == "no_stars":
@@ -260,7 +265,7 @@ def process(job):
             tiers = tiers[:1]
 
     result = solver.solve_tiered(job["image_path"], out_dir, exif_info,
-                                 tiers=tiers)
+                                 tiers=tiers, quick=(mode != "deep"))
     if mode == "deep":
         # Keep the quick pass's attempts visible in the final record.
         prior = json.loads(_col(job, "result_json") or "{}")
@@ -269,7 +274,10 @@ def process(job):
             result["total_seconds"] + (prior.get("total_seconds") or 0), 2)
 
     if not result["success"]:
-        remaining = len(plan) - len(result["attempts"])
+        # Only full-budget attempts retire a tier; trimmed quick attempts
+        # leave the whole plan open to a deeper run.
+        remaining = len(plan) - sum(
+            1 for a in result["attempts"] if a.get("thorough", True))
         reason, message = _describe_failure(result["attempts"])
         result["failure"] = {"reason": reason,
                              "can_deepen": mode != "deep" and remaining > 0}

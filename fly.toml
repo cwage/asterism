@@ -24,5 +24,9 @@ primary_region = "iad"
   processes = ["app"]
 
 [[vm]]
-  size = "shared-cpu-2x"
-  memory = "2gb"
+  # Dedicated CPUs, not shared (2026-08-19): solve-field pegs the CPU for
+  # its whole budget, so a busy night drains a shared VM's burst credits
+  # and every later solve runs ~5x slower — the queue backs up exactly
+  # when the site is being used. performance-2x needs >= 4gb.
+  size = "performance-2x"
+  memory = "4gb"

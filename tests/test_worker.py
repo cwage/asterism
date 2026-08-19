@@ -161,7 +161,7 @@ def test_fallback_guess_crash_does_not_mask_the_failure(monkeypatch):
 
 def test_quick_mode_runs_only_the_first_tier(monkeypatch):
     seen = {}
-    def record(image_path, out_dir, exif_info, tiers=None):
+    def record(image_path, out_dir, exif_info, tiers=None, quick=False):
         seen["tiers"] = tiers
         return {"success": False, "total_seconds": 1.0, "log_tail": "",
                 "attempts": [{"fov_bounds": [30.0, 90.0], "seconds": 1.0,
@@ -179,7 +179,7 @@ def test_quick_mode_runs_every_exif_tier(monkeypatch):
     phone shot (#57) solves in the extension tier without a "try harder"
     click, at the cost of one extra tier on photos that fail outright."""
     seen = {}
-    def record(image_path, out_dir, exif_info, tiers=None):
+    def record(image_path, out_dir, exif_info, tiers=None, quick=False):
         seen["tiers"] = tiers
         return {"success": False, "total_seconds": 2.0, "log_tail": "",
                 "attempts": [{"fov_bounds": [47.2, 80.9], "seconds": 1.0,
@@ -202,7 +202,7 @@ def test_deep_mode_skips_tiers_the_quick_pass_tried(monkeypatch):
     monkeypatch.setattr(verify, "count_stars",
                         lambda *a: pytest.fail("no pre-check in deep mode"))
     seen = {}
-    def record(image_path, out_dir, exif_info, tiers=None):
+    def record(image_path, out_dir, exif_info, tiers=None, quick=False):
         seen["tiers"] = tiers
         return {"success": False, "total_seconds": 2.0, "log_tail": "",
                 "attempts": [{"fov_bounds": [8.0, 35.0], "seconds": 2.0,
@@ -228,7 +228,7 @@ def test_deep_mode_after_the_star_gate_runs_one_tier_not_four(monkeypatch):
     20 minutes of wall clock on the deploy — to reach the conclusion the
     gate already reached. One tier honours the override (#90)."""
     seen = {}
-    def record(image_path, out_dir, exif_info, tiers=None):
+    def record(image_path, out_dir, exif_info, tiers=None, quick=False):
         seen["tiers"] = tiers
         return {"success": False, "total_seconds": 60.0, "log_tail": "",
                 "attempts": [{"fov_bounds": [30.0, 90.0], "seconds": 60.0,
@@ -249,7 +249,7 @@ def test_deep_mode_after_a_real_solve_attempt_is_not_capped(monkeypatch):
     solver and found no match still gets every remaining scale tier — there
     were stars, so the field size is the open question."""
     seen = {}
-    def record(image_path, out_dir, exif_info, tiers=None):
+    def record(image_path, out_dir, exif_info, tiers=None, quick=False):
         seen["tiers"] = tiers
         return {"success": False, "total_seconds": 2.0, "log_tail": "",
                 "attempts": [], "fov_bounds": [8.0, 35.0]}

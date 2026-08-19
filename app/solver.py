@@ -32,6 +32,15 @@ CPU_LIMIT = int(os.environ.get("SOLVE_CPULIMIT", "60"))
 SOURCE_DEPTH = int(os.environ.get("SOLVE_SOURCE_DEPTH", "50"))
 CAPPED_PASS_CPULIMIT = int(os.environ.get("SOLVE_CAPPED_CPULIMIT", "15"))
 
+# The quick pass answers "will this solve?" while an uploader watches a
+# ticker, so it gets a hard ceiling instead of thoroughness: the full
+# unbounded budget only on the most likely tier, and the capped pass alone
+# on the rest — worst case ~60s of CPU to a verdict (2026-08-19: the
+# unthrottled two-pass quick pass held one upload for six minutes, with
+# two more people queued behind it). Deep mode re-runs every tier with the
+# full budget, so nothing is lost, only deferred behind an explicit click.
+QUICK_UNBOUNDED_CPULIMIT = int(os.environ.get("SOLVE_QUICK_CPULIMIT", "30"))
+
 # Confidence floor for accepting a solve (#71). solve-field's exit code is not
 # enough: when the CPU limit cuts a search short it can still write out the best
 # hypothesis it had, and "best" can be a three-star triangle with two matching
@@ -131,18 +140,22 @@ def _clear_artifacts(out_dir):
             pass
 
 
-def solve(image_path, out_dir, fov_bounds):
+def solve(image_path, out_dir, fov_bounds, unbounded_cpulimit=None):
     """Run one tier: the capped pass, then the unbounded pass if it misses.
     Returns dict with success, seconds, wcs_path, log tail.
+
+    `unbounded_cpulimit` trims or skips the unbounded pass: None means the
+    full CPU_LIMIT, 0 means capped pass only (the quick pass's ceiling on
+    less-likely tiers).
 
     A solve-field exit code of 0 is necessary but not sufficient: the match has
     to clear MIN_LOGODDS/MIN_MATCHES as well (#71)."""
     first = _solve_once(image_path, out_dir, fov_bounds,
                         objs=SOURCE_DEPTH, cpulimit=CAPPED_PASS_CPULIMIT)
-    if first["success"]:
+    if first["success"] or unbounded_cpulimit == 0:
         return first
-    second = _solve_once(image_path, out_dir, fov_bounds,
-                         objs=None, cpulimit=CPU_LIMIT)
+    second = _solve_once(image_path, out_dir, fov_bounds, objs=None,
+                         cpulimit=unbounded_cpulimit or CPU_LIMIT)
     second["seconds"] = round(first["seconds"] + second["seconds"], 2)
     return second
 
@@ -254,10 +267,15 @@ def tier_plan(exif_info):
     return tiers
 
 
-def solve_tiered(image_path, out_dir, exif_info, tiers=None):
+def solve_tiered(image_path, out_dir, exif_info, tiers=None, quick=False):
     """Run solve() over successively broader scale guesses until one sticks.
     Returns the last solve() result, with an `attempts` summary appended.
-    `tiers` overrides the plan (the worker's quick/deep split)."""
+    `tiers` overrides the plan (the worker's quick/deep split).
+
+    `quick` applies the uploader-is-watching budget: the trimmed unbounded
+    pass on the first (most likely) tier, the capped pass alone on the
+    rest. Attempts then carry thorough=False so deep mode re-runs those
+    tiers with the full budget instead of skipping them as already tried."""
     if tiers is None:
         tiers = tier_plan(exif_info)
     if not tiers:
@@ -267,13 +285,15 @@ def solve_tiered(image_path, out_dir, exif_info, tiers=None):
 
     attempts = []
     result = None
-    for bounds in tiers:
-        result = solve(image_path, out_dir, bounds)
+    for i, bounds in enumerate(tiers):
+        limit = (QUICK_UNBOUNDED_CPULIMIT if i == 0 else 0) if quick else None
+        result = solve(image_path, out_dir, bounds, unbounded_cpulimit=limit)
         attempt = {
             "fov_bounds": result["fov_bounds"],
             "seconds": result["seconds"],
             "success": result["success"],
             "timed_out": result.get("timed_out", False),
+            "thorough": not quick,
         }
         # match/low_confidence ride along only when solve-field produced a
         # match to judge; timed_out above is on every attempt. The common
