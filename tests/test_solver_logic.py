@@ -4,7 +4,7 @@ from app import solver
 
 
 def _stub_solve(record, succeed_on=None):
-    def fake(image_path, out_dir, fov_bounds):
+    def fake(image_path, out_dir, fov_bounds, unbounded_cpulimit=None):
         record.append(fov_bounds)
         success = succeed_on is not None and len(record) == succeed_on
         return {

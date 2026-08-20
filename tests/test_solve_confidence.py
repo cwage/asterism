@@ -115,12 +115,13 @@ def test_rejected_tier_does_not_leak_into_the_next(monkeypatch, tmp_path):
     def fake(cmd, **kwargs):
         calls.append(cmd)
         if len(calls) == 1:
-            # First tier: a low-confidence match, rejected but left on disk.
+            # First pass of the first tier: a low-confidence match, rejected
+            # but left on disk.
             open(os.path.join(out, "solve.wcs"), "w").close()
             write_match(out, 9.53, 2)
             rc = 0
         else:
-            # Later tiers: solve-field finds nothing and writes nothing.
+            # Every later pass: solve-field finds nothing and writes nothing.
             rc = 1
 
         class Proc:
@@ -134,8 +135,53 @@ def test_rejected_tier_does_not_leak_into_the_next(monkeypatch, tmp_path):
     monkeypatch.setattr(solver.subprocess, "run", fake)
     result = solver.solve_tiered("x.jpg", out, {"focal_35mm": None})
 
-    assert len(calls) == len(solver.FALLBACK_TIERS), "every tier should run"
+    # Two solve-field passes per tier: capped, then unbounded.
+    assert len(calls) == 2 * len(solver.FALLBACK_TIERS), "every tier should run"
     assert result["success"] is False
     assert all(a["success"] is False for a in result["attempts"])
     assert not os.path.exists(os.path.join(out, "solve.wcs")), \
         "the rejected WCS should not survive the next attempt"
+
+
+def test_quick_budget_trims_and_marks_attempts(monkeypatch, tmp_path):
+    """The quick pass runs the trimmed unbounded pass only on the first tier,
+    the capped pass alone on the rest, and marks every attempt thorough=False
+    so deep mode re-runs the tiers instead of skipping them."""
+    out = str(tmp_path)
+    calls = []
+
+    def fake(cmd, **kwargs):
+        calls.append(cmd)
+
+        class Proc:
+            pass
+        proc = Proc()
+        proc.returncode = 1  # nothing ever solves
+        proc.stdout = ""
+        proc.stderr = ""
+        return proc
+
+    monkeypatch.setattr(solver.subprocess, "run", fake)
+    result = solver.solve_tiered("x.jpg", out, {"focal_35mm": None},
+                                 tiers=[(30.0, 90.0), (8.0, 35.0)], quick=True)
+
+    def flag(cmd, name):
+        return cmd[cmd.index(name) + 1] if name in cmd else None
+
+    # Tier 1: capped pass, then the trimmed unbounded pass.
+    assert flag(calls[0], "--objs") == str(solver.SOURCE_DEPTH)
+    assert flag(calls[0], "--cpulimit") == str(solver.CAPPED_PASS_CPULIMIT)
+    assert flag(calls[1], "--objs") is None
+    assert flag(calls[1], "--cpulimit") == str(solver.QUICK_UNBOUNDED_CPULIMIT)
+    # Tier 2: capped pass only.
+    assert flag(calls[2], "--objs") == str(solver.SOURCE_DEPTH)
+    assert len(calls) == 3
+    assert all(a["thorough"] is False for a in result["attempts"])
+
+    # The full-budget path is unchanged: two passes per tier, full cpulimit.
+    calls.clear()
+    result = solver.solve_tiered("x.jpg", out, {"focal_35mm": None},
+                                 tiers=[(30.0, 90.0), (8.0, 35.0)])
+    assert [flag(c, "--cpulimit") for c in calls] == [
+        str(solver.CAPPED_PASS_CPULIMIT), str(solver.CPU_LIMIT)] * 2
+    assert all(a["thorough"] is True for a in result["attempts"])

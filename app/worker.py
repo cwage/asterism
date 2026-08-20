@@ -244,9 +244,14 @@ def process(job):
         # EXIF, just the most likely fallback.
         tiers = plan[:len(solver.exif_tiers(exif_info))] or plan[:1]
     else:
-        # Deep mode: whatever the quick pass didn't already try.
+        # Deep mode: whatever the quick pass didn't already try with the
+        # full budget. Quick attempts run trimmed (thorough=False, see
+        # solve_tiered) and must be re-run, not skipped; records from
+        # before the flag existed were full-budget runs, hence the True
+        # default.
         prior = json.loads(_col(job, "result_json") or "{}")
-        tried = {tuple(a["fov_bounds"]) for a in prior.get("attempts", [])}
+        tried = {tuple(a["fov_bounds"]) for a in prior.get("attempts", [])
+                 if a.get("thorough", True)}
         tiers = [t for t in plan
                  if (round(t[0], 1), round(t[1], 1)) not in tried]
         if (prior.get("failure") or {}).get("reason") == "no_stars":
@@ -260,7 +265,7 @@ def process(job):
             tiers = tiers[:1]
 
     result = solver.solve_tiered(job["image_path"], out_dir, exif_info,
-                                 tiers=tiers)
+                                 tiers=tiers, quick=(mode != "deep"))
     if mode == "deep":
         # Keep the quick pass's attempts visible in the final record.
         prior = json.loads(_col(job, "result_json") or "{}")
@@ -269,7 +274,10 @@ def process(job):
             result["total_seconds"] + (prior.get("total_seconds") or 0), 2)
 
     if not result["success"]:
-        remaining = len(plan) - len(result["attempts"])
+        # Only full-budget attempts retire a tier; trimmed quick attempts
+        # leave the whole plan open to a deeper run.
+        remaining = len(plan) - sum(
+            1 for a in result["attempts"] if a.get("thorough", True))
         reason, message = _describe_failure(result["attempts"])
         result["failure"] = {"reason": reason,
                              "can_deepen": mode != "deep" and remaining > 0}
@@ -312,6 +320,15 @@ def claim_next_job(conn):
     """Take the next queued job and mark it 'solving'. Returns the row, or
     None if there was nothing to take.
 
+    Quick jobs always run before deep ones: a deep solve is the slowest job
+    type with the worst odds, and on a single worker equal priority lets one
+    person's lost cause hold every fresh upload hostage for minutes (measured
+    2026-08-19: a five-tier deep solve blocked three quick jobs, each of
+    which would have finished in seconds). A deep job therefore only gets
+    the worker when the quick queue is empty; it can be pushed back
+    repeatedly, which is the right trade — its uploader already got a
+    verdict and chose to wait, while quick uploaders are staring at a queue.
+
     The id tiebreak keeps FIFO deterministic when created_at (second
     resolution) collides, and matches the API's queue-position math.
     hidden = 0 keeps a job pulled by the kill switch (#60) from burning a
@@ -323,7 +340,7 @@ def claim_next_job(conn):
     unconditional claim would go on to solve a job that is already hidden."""
     job = conn.execute(
         "SELECT * FROM jobs WHERE status = 'queued' AND hidden = 0 "
-        "ORDER BY created_at, id LIMIT 1"
+        "ORDER BY mode = 'deep', created_at, id LIMIT 1"
     ).fetchone()
     if not job:
         return None
