@@ -29,6 +29,12 @@ def _gps_to_degrees(dms, ref):
         deg = float(dms[0]) + float(dms[1]) / 60 + float(dms[2]) / 3600
     except (TypeError, ValueError, IndexError, ZeroDivisionError):
         return None
+    # Phones with GPS tags but no fix write 0/0 rationals; Pillow's
+    # IFDRational floats those to nan instead of raising, and a stored NaN
+    # is unrepresentable in strict JSON — every status poll for the job
+    # 500s on serialization.
+    if not math.isfinite(deg):
+        return None
     if ref in ("S", "W"):
         deg = -deg
     return deg
@@ -174,7 +180,9 @@ def read_exif(path):
         gps = ex.get_ifd(GPS_IFD)
 
     f35 = exif_ifd.get(TAG_FOCAL_35MM)
-    if f35:
+    # Same 0/0-rational hazard as the GPS tags: a NaN here would poison
+    # every fov_* field below it.
+    if f35 and math.isfinite(float(f35)):
         info["focal_35mm"] = float(f35)
         info["focal_35mm_source"] = "exif_35mm"
     else:
