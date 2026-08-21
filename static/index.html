@@ -98,9 +98,9 @@
   #controls input[type="range"] { width: 110px; accent-color: var(--accent); }
   #controls input[type="checkbox"] { accent-color: var(--accent); }
   #mag-val { min-width: 2.2em; color: var(--ink); }
-  #guess { border: 1px solid #1c2634; border-radius: 10px; background: var(--panel);
+  #guess, #advice { border: 1px solid #1c2634; border-radius: 10px; background: var(--panel);
            padding: 0.75rem 1rem; margin: 0 0 0.75rem; font-size: 0.95rem; }
-  #guess:empty { display: none; }
+  #guess:empty, #advice:empty { display: none; }
   #guess ul { margin: 0.4rem 0 0; padding-left: 1.3rem; }
   #guess .name { color: var(--accent); }
   #guess .hedge { color: var(--faint); font-size: 0.8rem; margin: 0.5rem 0 0; }
@@ -186,6 +186,7 @@
      control, above the feed and the explainer. Everything here collapses to
      nothing before the first solve. -->
 <div id="status"></div>
+<div id="advice"></div>
 <div id="guess"></div>
 <div id="actions"></div>
 <div id="controls" hidden>
@@ -330,6 +331,7 @@ window.addEventListener('popstate', () => location.reload());
 async function poll(id) {
   status('solving…');
   document.getElementById('actions').replaceChildren();
+  document.getElementById('advice').replaceChildren();
   document.getElementById('guess').replaceChildren();
   document.getElementById('narration').textContent = '';
   document.getElementById('controls').hidden = true;
@@ -358,9 +360,33 @@ async function poll(id) {
   }
 }
 
+// A failure the worker could diagnose comes with an advice code; the copy
+// here says what happened AND what to do differently, because "use night
+// mode and hold still" turns tonight's failure into tonight's solve, where
+// a bare "no stars detected" just ends the visit. Unknown codes render
+// nothing: wrong advice is worse than no advice.
+const ADVICE_COPY = {
+  daylight: "This looks like a daytime shot — the sun was up when it was taken, and the solver needs stars. Nothing wrong with your technique; the sky just wasn't ready yet.",
+  twilight: "The sky was still glowing with twilight when this was taken — bright enough to wash out the stars a phone can catch. Try again an hour or so later, once it's properly dark.",
+  short_exposure: "The camera took a quick snap (a fraction of a second), so almost no starlight reached the sensor. Try night or astro mode, and keep the phone perfectly still for the whole exposure — a tripod is ideal, but propping it on a wall, a car roof, or a bag of rice works too. A few seconds of stillness will reveal stars the screen never showed you.",
+  dark_but_empty: "The camera did its part — a long exposure under a dark sky — but almost nothing star-like came through. That's usually clouds, haze, a bright moon, or heavy light pollution. A clearer night or a darker spot should do it.",
+};
+
+function renderAdvice(code) {
+  const copy = ADVICE_COPY[code];
+  if (!copy) return;
+  const box = document.getElementById('advice');
+  box.replaceChildren();
+  const p = document.createElement('p');
+  p.style.margin = '0';
+  p.textContent = copy;
+  box.append(p);
+}
+
 function renderFailure(id, job) {
   const f = job.result && job.result.failure;
   status('solve failed — ' + (job.error || 'unknown'));
+  if (f && f.advice) renderAdvice(f.advice);
   if (f && f.guess) renderGuess(job, f.guess);
   else if (f && f.guess_unavailable) renderNoGuess(f.guess_unavailable);
 

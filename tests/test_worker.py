@@ -159,6 +159,58 @@ def test_fallback_guess_crash_does_not_mask_the_failure(monkeypatch):
                                  "guess_unavailable": "no_timestamp"}
 
 
+def _no_stars_job(**exif_extra):
+    return {"id": "abc123", "image_path": "/photos/x.jpg", "mode": "quick",
+            "exif_json": json.dumps({"width": 100, "height": 100,
+                                     **exif_extra})}
+
+
+def test_daylight_advice_from_the_sun_altitude(monkeypatch):
+    monkeypatch.setattr(verify, "count_stars", lambda *a: 0)
+    monkeypatch.setattr(ephemeris, "fallback_guess",
+                        lambda e: {"sun_alt_deg": 35, "candidates": []})
+    status, result, error = worker.process(JOB)
+    assert status == "failed"
+    assert result["failure"]["advice"] == "daylight"
+
+
+def test_twilight_advice_outranks_the_exposure(monkeypatch):
+    # Sun at -8: still nautical twilight. A short exposure is true but not
+    # the problem — night mode can't beat a bright sky.
+    monkeypatch.setattr(verify, "count_stars", lambda *a: 0)
+    monkeypatch.setattr(ephemeris, "fallback_guess",
+                        lambda e: {"sun_alt_deg": -8, "candidates": []})
+    status, result, error = worker.process(_no_stars_job(exposure_seconds=0.05))
+    assert result["failure"]["advice"] == "twilight"
+
+
+def test_snapshot_exposure_gets_night_mode_advice(monkeypatch):
+    # The prod case: dark sky, 0.098s handheld snap, zero stars.
+    monkeypatch.setattr(verify, "count_stars", lambda *a: 0)
+    monkeypatch.setattr(ephemeris, "fallback_guess",
+                        lambda e: {"sun_alt_deg": -30, "candidates": []})
+    status, result, error = worker.process(_no_stars_job(exposure_seconds=0.098))
+    assert result["failure"]["advice"] == "short_exposure"
+
+
+def test_long_empty_exposure_blames_the_sky(monkeypatch):
+    monkeypatch.setattr(verify, "count_stars", lambda *a: 0)
+    monkeypatch.setattr(ephemeris, "fallback_guess",
+                        lambda e: {"sun_alt_deg": -30, "candidates": []})
+    status, result, error = worker.process(_no_stars_job(exposure_seconds=16.0))
+    assert result["failure"]["advice"] == "dark_but_empty"
+
+
+def test_no_advice_without_evidence(monkeypatch):
+    # No guess (so no sun altitude) and no exposure: wrong advice is worse
+    # than no advice, so the key stays absent.
+    monkeypatch.setattr(verify, "count_stars", lambda *a: 0)
+    monkeypatch.setattr(ephemeris, "fallback_guess", lambda e: None)
+    status, result, error = worker.process(JOB)
+    assert status == "failed"
+    assert "advice" not in result["failure"]
+
+
 def test_quick_mode_runs_only_the_first_tier(monkeypatch):
     seen = {}
     def record(image_path, out_dir, exif_info, tiers=None, quick=False):

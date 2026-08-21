@@ -122,6 +122,42 @@ def _describe_failure(attempts):
     return "no_match", f"no solution (tried field widths: {_widths(attempts)})"
 
 
+# Advice thresholds. Sun above the horizon is daylight; down to -12 deg
+# (nautical twilight) the sky glow still washes out stars to a phone camera.
+# Night modes expose for whole seconds, while a handheld auto snap is ~1/15s,
+# so half a second separates "the phone never tried a long exposure" from
+# "the exposure happened and the sky gave nothing back".
+ADVICE_SUN_UP_DEG = 0
+ADVICE_TWILIGHT_SUN_DEG = -12
+ADVICE_LONG_EXPOSURE_SECONDS = 0.5
+
+
+def _advise_no_stars(failure, exif_info):
+    """Why a photo had no star-like sources in it, when the EXIF can tell.
+
+    The point is the retry: "use night mode and hold still" turns tonight's
+    failure into tonight's solve, where a bare "no stars detected" just ends
+    the visit. Codes, checked in evidence order — sun position first because
+    it trumps anything the camera did:
+      daylight        sun was up
+      twilight        sky still washing out the stars
+      short_exposure  dark sky, but a snapshot exposure — night mode advice
+      dark_but_empty  dark sky AND a long exposure: clouds, moon, or glow
+    None when the EXIF can't support a diagnosis; wrong advice is worse
+    than no advice."""
+    sun_alt = (failure.get("guess") or {}).get("sun_alt_deg")
+    exposure = exif_info.get("exposure_seconds")
+    if sun_alt is not None and sun_alt > ADVICE_SUN_UP_DEG:
+        return "daylight"
+    if sun_alt is not None and sun_alt > ADVICE_TWILIGHT_SUN_DEG:
+        return "twilight"
+    if exposure is not None and exposure < ADVICE_LONG_EXPOSURE_SECONDS:
+        return "short_exposure"
+    if exposure is not None:
+        return "dark_but_empty"
+    return None
+
+
 def _attach_guess(result, exif_info):
     """A failed solve still gets a best-effort 'here's what was up' answer
     from the ephemeris (#7). Never lets a guess failure mask the real result."""
@@ -234,6 +270,9 @@ def process(job):
                       "failure": {"reason": "no_stars", "stars_detected": n,
                                   "can_deepen": True}}
             _attach_guess(result, exif_info)
+            advice = _advise_no_stars(result["failure"], exif_info)
+            if advice:
+                result["failure"]["advice"] = advice
             return "failed", result, (
                 f"only {n} star-like sources detected — cloudy, daylight, "
                 "or not a sky photo"
