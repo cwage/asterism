@@ -1,8 +1,12 @@
 """LLM narration (#12): payload trimming, response parsing, and the
 no-key/no-labels guards. The Claude call is stubbed — no network."""
 
+import base64
+import io
 import json
 import types
+
+from PIL import Image
 
 from app import narrate
 
@@ -109,3 +113,68 @@ def test_unverified_result_skips_the_call():
 def test_missing_api_key_returns_none(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     assert narrate.annotate(RESULT) is None
+
+
+def test_photo_rides_along_downscaled(tmp_path):
+    path = str(tmp_path / "sky.jpg")
+    Image.new("RGB", (4000, 3000)).save(path)
+    client = FakeClient()
+    narrate.annotate(RESULT, image_path=path, client=client)
+    content = client.calls[0]["messages"][0]["content"]
+    assert content[0]["type"] == "image"
+    assert content[0]["source"]["media_type"] == "image/jpeg"
+    # Downscaled to the model's native long edge before upload: sending
+    # more pixels costs bandwidth without changing what the model sees.
+    sent = Image.open(io.BytesIO(
+        base64.b64decode(content[0]["source"]["data"])))
+    assert max(sent.size) == narrate.IMAGE_MAX_EDGE
+    assert json.loads(content[1]["text"])["labels"]
+
+
+def test_unreadable_photo_falls_back_to_text_only(tmp_path):
+    client = FakeClient()
+    out = narrate.annotate(RESULT, image_path=str(tmp_path / "gone.jpg"),
+                           client=client)
+    assert out is not None  # the writeup still happens
+    assert isinstance(client.calls[0]["messages"][0]["content"], str)
+
+
+FAILED = {"failure": {
+    "reason": "no_stars", "stars_detected": 3, "advice": "short_exposure",
+    "guess": {"sun_alt_deg": -30, "candidates": [
+        {"name": "Venus", "direction": "W", "alt_deg": 10, "az_deg": 270}]}}}
+
+
+def test_failure_narration_sends_photo_and_context(tmp_path):
+    path = str(tmp_path / "blt.jpg")
+    Image.new("RGB", (640, 480)).save(path)
+    client = FakeClient(reply={"text": "That appears to be a sandwich."})
+    out = narrate.annotate_failure(FAILED, path, client=client)
+    assert out == {"text": "That appears to be a sandwich.",
+                   "model": narrate.MODEL}
+    content = client.calls[0]["messages"][0]["content"]
+    assert content[0]["type"] == "image"
+    payload = json.loads(content[1]["text"])
+    assert payload["reason"] == "no_stars"
+    assert payload["advice"] == "short_exposure"
+    assert payload["sun_alt_deg"] == -30
+    # candidates carry name/direction/altitude only — no azimuth, nothing
+    # positional beyond what the guess panel already shows
+    assert payload["was_up"] == [{"name": "Venus", "direction": "W",
+                                  "alt_deg": 10}]
+
+
+def test_failure_narration_needs_readable_pixels(tmp_path):
+    # Without the photo there is nothing the failure copy doesn't already
+    # say — no call, no spend.
+    client = FakeClient()
+    assert narrate.annotate_failure(
+        FAILED, str(tmp_path / "gone.jpg"), client=client) is None
+    assert client.calls == []
+
+
+def test_failure_narration_missing_api_key(monkeypatch, tmp_path):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    path = str(tmp_path / "x.jpg")
+    Image.new("RGB", (64, 64)).save(path)
+    assert narrate.annotate_failure(FAILED, path) is None

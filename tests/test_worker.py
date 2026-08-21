@@ -30,6 +30,7 @@ def stub_solve(tmp_path, monkeypatch):
     monkeypatch.setattr(verify, "count_stars", lambda *a: 50)
     # No narration by default: tests never depend on an API key in the env.
     monkeypatch.setattr(narrate, "annotate", lambda *a, **k: None)
+    monkeypatch.setattr(narrate, "annotate_failure", lambda *a, **k: None)
     # Likewise no Space-Track credentials, and never a network call.
     monkeypatch.setattr(satellites, "annotate",
                         lambda *a, **k: {"skipped": "no_credentials"})
@@ -199,6 +200,38 @@ def test_long_empty_exposure_blames_the_sky(monkeypatch):
                         lambda e: {"sun_alt_deg": -30, "candidates": []})
     status, result, error = worker.process(_no_stars_job(exposure_seconds=16.0))
     assert result["failure"]["advice"] == "dark_but_empty"
+
+
+def test_failure_narration_attaches(monkeypatch):
+    monkeypatch.setattr(verify, "count_stars", lambda *a: 0)
+    note = {"text": "That appears to be a sandwich.", "model": "test"}
+    monkeypatch.setattr(narrate, "annotate_failure", lambda *a, **k: note)
+    status, result, error = worker.process(JOB)
+    assert status == "failed"
+    assert result["narration"] == note
+
+
+def test_failure_narration_crash_does_not_mask_the_failure(monkeypatch):
+    monkeypatch.setattr(verify, "count_stars", lambda *a: 0)
+    def boom(*a, **k):
+        raise RuntimeError("vision exploded")
+    monkeypatch.setattr(narrate, "annotate_failure", boom)
+    status, result, error = worker.process(JOB)
+    assert status == "failed"
+    assert "narration" not in result
+
+
+def test_solved_narration_gets_the_image_path(monkeypatch):
+    monkeypatch.setattr(ephemeris, "annotate_bodies",
+                        lambda *a: ([], {"time_source": None}))
+    seen = {}
+    def record(result, image_path=None):
+        seen["image_path"] = image_path
+        return None
+    monkeypatch.setattr(narrate, "annotate", record)
+    status, result, error = worker.process(JOB)
+    assert status == "done"
+    assert seen["image_path"] == JOB["image_path"]
 
 
 def test_no_advice_without_evidence(monkeypatch):

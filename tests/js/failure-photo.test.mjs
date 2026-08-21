@@ -19,6 +19,22 @@ test('a failed solve shows the photo', () => {
   assert.equal(els.wrap.style.display, 'inline-block');
 });
 
+test('a failure narration lands in the narration panel', () => {
+  const { sandbox, els } = loadPage();
+  sandbox.renderFailure('j9', {
+    error: 'only 3 star-like sources detected',
+    result: { failure: { reason: 'no_stars' },
+              narration: { text: 'That appears to be a sandwich.' } },
+  });
+  assert.equal(els.narration.textContent, 'That appears to be a sandwich.');
+});
+
+test('no narration leaves the panel empty', () => {
+  const { sandbox, els } = loadPage();
+  sandbox.renderFailure('j9', FAILED_JOB);
+  assert.equal(els.narration.textContent, '');
+});
+
 test('labels from a previously viewed solve are cleared off the overlay', () => {
   const { sandbox, els } = loadPage();
   const recording = sandbox.document.getElementById('overlay').getContext();
