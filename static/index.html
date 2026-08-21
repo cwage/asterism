@@ -179,7 +179,9 @@
   metadata is removed from the stored photo (uploads with location data we
   can't remove are rejected), coordinates shown in results are rounded to city
   scale, and everything is deleted after 24 hours — apart from the occasional
-  solve kept on as an example of what the site does.</p>
+  solve kept on as an example of what the site does. Photos are also sent to
+  an AI service (Anthropic) to write the short description of what they
+  show.</p>
 </details>
 
 <!-- The result is the point of the page: it sits directly under the upload
@@ -389,6 +391,11 @@ function renderFailure(id, job) {
   if (f && f.advice) renderAdvice(f.advice);
   if (f && f.guess) renderGuess(job, f.guess);
   else if (f && f.guess_unavailable) renderNoGuess(f.guess_unavailable);
+  // The LLM's "what this photo appears to be" note (#109), in the same
+  // panel a solved narration uses.
+  const narration = job.result && job.result.narration;
+  document.getElementById('narration').textContent =
+    (narration && narration.text) || '';
 
   // The photo renders even without a solve: next to the guess's "Venus was
   // low in the west", the un-annotated frame is how "wow, that IS Venus"

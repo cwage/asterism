@@ -158,6 +158,19 @@ def _advise_no_stars(failure, exif_info):
     return None
 
 
+def _attach_failure_narration(result, image_path, job_id):
+    """Best-effort LLM note about what a failed upload appears to be
+    (#109) — "that looks like a sandwich" beats a bare star count. Rides
+    the same never-mask-the-failure rule as the guess."""
+    try:
+        narration = narrate.annotate_failure(result, image_path)
+        if narration:
+            result["narration"] = narration
+    except Exception:
+        print(f"worker: failure narration failed for {job_id}\n"
+              f"{traceback.format_exc()}")
+
+
 def _attach_guess(result, exif_info):
     """A failed solve still gets a best-effort 'here's what was up' answer
     from the ephemeris (#7). Never lets a guess failure mask the real result."""
@@ -247,7 +260,7 @@ def _label_everything(result, wcs_path, image_path, exif_info, job_id):
     # LLM narration (#12), best-effort: no API key or a failed call just
     # leaves the deterministic card caption in place.
     try:
-        narration = narrate.annotate(result)
+        narration = narrate.annotate(result, image_path=image_path)
         if narration:
             result["narration"] = narration
     except Exception:
@@ -273,6 +286,7 @@ def process(job):
             advice = _advise_no_stars(result["failure"], exif_info)
             if advice:
                 result["failure"]["advice"] = advice
+            _attach_failure_narration(result, job["image_path"], job["id"])
             return "failed", result, (
                 f"only {n} star-like sources detected — cloudy, daylight, "
                 "or not a sky photo"
@@ -321,6 +335,7 @@ def process(job):
         result["failure"] = {"reason": reason,
                              "can_deepen": mode != "deep" and remaining > 0}
         _attach_guess(result, exif_info)
+        _attach_failure_narration(result, job["image_path"], job["id"])
         return "failed", result, message
 
     result = _label_everything(result, result["wcs_path"],
