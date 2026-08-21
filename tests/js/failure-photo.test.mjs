@@ -19,20 +19,27 @@ test('a failed solve shows the photo', () => {
   assert.equal(els.wrap.style.display, 'inline-block');
 });
 
-test('a failure narration lands in the narration panel', () => {
+test('a failure narration leads the failure panel', () => {
   const { sandbox, els } = loadPage();
   sandbox.renderFailure('j9', {
     error: 'only 3 star-like sources detected',
     result: { failure: { reason: 'no_stars' },
               narration: { text: 'That appears to be a sandwich.' } },
   });
-  assert.equal(els.narration.textContent, 'That appears to be a sandwich.');
+  assert.equal(els.failbox.hidden, false);
+  assert.equal(els.advice.children[0].textContent,
+               'That appears to be a sandwich.');
+  // The success-narration panel stays out of the failure page entirely
+  // (untouched, so the harness never even created it).
+  assert.ok(!els.narration || els.narration.textContent === '');
 });
 
-test('no narration leaves the panel empty', () => {
+test('the solver detail is demoted to a footnote in the panel', () => {
   const { sandbox, els } = loadPage();
   sandbox.renderFailure('j9', FAILED_JOB);
-  assert.equal(els.narration.textContent, '');
+  assert.equal(els['fail-detail'].textContent, FAILED_JOB.error);
+  // The status line stays human — no field widths or degree jargon.
+  assert.ok(!els.status.textContent.includes('deg'), els.status.textContent);
 });
 
 test('labels from a previously viewed solve are cleared off the overlay', () => {

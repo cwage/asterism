@@ -98,12 +98,20 @@
   #controls input[type="range"] { width: 110px; accent-color: var(--accent); }
   #controls input[type="checkbox"] { accent-color: var(--accent); }
   #mag-val { min-width: 2.2em; color: var(--ink); }
-  #guess, #advice { border: 1px solid #1c2634; border-radius: 10px; background: var(--panel);
-           padding: 0.75rem 1rem; margin: 0 0 0.75rem; font-size: 0.95rem; }
-  #guess:empty, #advice:empty { display: none; }
+  /* One panel for everything a failed solve has to say (#110), tinted a
+     quiet red so the page reads "this ain't it" before a word lands. */
+  #failbox { border: 1px solid #4b2733; border-radius: 10px;
+             background: #1d141a; padding: 0.75rem 1rem;
+             margin: 0 0 0.75rem; font-size: 0.95rem; }
+  #failbox[hidden] { display: none; }
+  #advice, #guess { margin: 0 0 0.75rem; }
+  #advice:empty, #guess:empty { display: none; }
   #guess ul { margin: 0.4rem 0 0; padding-left: 1.3rem; }
   #guess .name { color: var(--accent); }
   #guess .hedge { color: var(--faint); font-size: 0.8rem; margin: 0.5rem 0 0; }
+  /* The solver's own account — kept for the curious, styled as a footnote. */
+  #fail-detail { color: var(--faint); font-size: 0.8rem; margin: 0; }
+  #fail-detail:empty { display: none; }
   #actions button { width: 100%; background: #1a2230; color: var(--ink);
                     border: 1px solid var(--line); border-radius: 10px;
                     padding: 0.9rem 1rem; font-size: 1rem; cursor: pointer; }
@@ -116,7 +124,7 @@
 
   #narration { border: 1px solid #1c2634; border-radius: 10px;
                background: var(--panel); padding: 0.75rem 1rem;
-               margin: 0.75rem 0 0; font-size: 0.95rem; color: var(--ink); }
+               margin: 0 0 0.75rem; font-size: 0.95rem; color: var(--ink); }
   #narration:empty { display: none; }
 
   /* Hidden until render() has a photo: an empty inline-block still claims a
@@ -188,9 +196,13 @@
      control, above the feed and the explainer. Everything here collapses to
      nothing before the first solve. -->
 <div id="status"></div>
-<div id="advice"></div>
-<div id="guess"></div>
+<div id="failbox" hidden>
+  <div id="advice"></div>
+  <div id="guess"></div>
+  <p id="fail-detail"></p>
+</div>
 <div id="actions"></div>
+<div id="narration"></div>
 <div id="controls" hidden>
   <label><input type="checkbox" id="lay-stars" checked> stars</label>
   <label><input type="checkbox" id="lay-solar" checked> moon &amp; planets</label>
@@ -202,7 +214,6 @@
     <span id="mag-val">4.5</span></label>
 </div>
 <div id="wrap"><img id="photo" hidden><canvas id="overlay"></canvas></div>
-<div id="narration"></div>
 
 <div id="feed"></div>
 
@@ -333,8 +344,10 @@ window.addEventListener('popstate', () => location.reload());
 async function poll(id) {
   status('solving…');
   document.getElementById('actions').replaceChildren();
+  document.getElementById('failbox').hidden = true;
   document.getElementById('advice').replaceChildren();
   document.getElementById('guess').replaceChildren();
+  document.getElementById('fail-detail').textContent = '';
   document.getElementById('narration').textContent = '';
   document.getElementById('controls').hidden = true;
   const t0 = Date.now();
@@ -374,28 +387,37 @@ const ADVICE_COPY = {
   dark_but_empty: "The camera did its part — a long exposure under a dark sky — but almost nothing star-like came through. That's usually clouds, haze, a bright moon, or heavy light pollution. A clearer night or a darker spot should do it.",
 };
 
-function renderAdvice(code) {
-  const copy = ADVICE_COPY[code];
-  if (!copy) return;
+function renderLead(text) {
   const box = document.getElementById('advice');
   box.replaceChildren();
   const p = document.createElement('p');
   p.style.margin = '0';
-  p.textContent = copy;
+  p.textContent = text;
   box.append(p);
+}
+
+function renderAdvice(code) {
+  const copy = ADVICE_COPY[code];
+  if (copy) renderLead(copy);
 }
 
 function renderFailure(id, job) {
   const f = job.result && job.result.failure;
-  status('solve failed — ' + (job.error || 'unknown'));
-  if (f && f.advice) renderAdvice(f.advice);
+  status('solve failed');
+  // One explanation panel (#110), everything above the photo. The LLM's
+  // note about what the photo appears to be leads when present — it
+  // already folds in the advice diagnosis — with the static advice copy
+  // as the offline fallback. Never both: they say the same thing by
+  // design, and two boxes paraphrasing each other reads as a bug.
+  const narration = job.result && job.result.narration;
+  if (narration && narration.text) renderLead(narration.text);
+  else if (f && f.advice) renderAdvice(f.advice);
   if (f && f.guess) renderGuess(job, f.guess);
   else if (f && f.guess_unavailable) renderNoGuess(f.guess_unavailable);
-  // The LLM's "what this photo appears to be" note (#109), in the same
-  // panel a solved narration uses.
-  const narration = job.result && job.result.narration;
-  document.getElementById('narration').textContent =
-    (narration && narration.text) || '';
+  // The solver's own account, demoted to a footnote: field widths and
+  // timeouts are troubleshooting data, not copy to greet an uploader with.
+  document.getElementById('fail-detail').textContent = job.error || '';
+  document.getElementById('failbox').hidden = false;
 
   // The photo renders even without a solve: next to the guess's "Venus was
   // low in the west", the un-annotated frame is how "wow, that IS Venus"
