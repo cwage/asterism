@@ -19,6 +19,20 @@ test('a short-exposure failure explains night mode and holding still', () => {
   assert.ok(els.guess.children.length > 0, 'guess panel still renders');
 });
 
+test('a narration outranks the static advice copy — never both', () => {
+  const { sandbox, els } = loadPage();
+  sandbox.renderFailure('j1', {
+    error: 'only 0 star-like sources detected',
+    result: { failure: { reason: 'no_stars', advice: 'short_exposure' },
+              narration: { text: 'A quick snap of a dark sky.' } },
+  });
+  // The narration is prompted to build on the advice diagnosis, so showing
+  // both would say the same thing twice in adjacent paragraphs.
+  assert.equal(els.advice.children.length, 1);
+  assert.equal(els.advice.children[0].textContent,
+               'A quick snap of a dark sky.');
+});
+
 test('every worker advice code has real copy', () => {
   const { sandbox, els } = loadPage();
   for (const code of ['daylight', 'twilight', 'short_exposure',
