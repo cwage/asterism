@@ -23,6 +23,15 @@ def test_gps_to_degrees_garbage():
     assert exif._gps_to_degrees((1,), "N") is None
 
 
+def test_gps_to_degrees_rejects_no_fix_rationals():
+    # A phone with GPS tags but no fix writes 0/0 rationals, which Pillow
+    # floats to nan instead of raising — the stored NaN then 500s every
+    # status poll for the job (the strict JSON encoder refuses it).
+    from PIL.TiffImagePlugin import IFDRational
+    zero = IFDRational(0, 0)
+    assert exif._gps_to_degrees((zero, zero, zero), "N") is None
+
+
 def test_no_exif_falls_back_to_default_bounds(tmp_path):
     path = tmp_path / "plain.jpg"
     Image.new("RGB", (320, 240)).save(path)
@@ -236,6 +245,17 @@ def test_public_exif_rounds_coordinates():
     assert out["focal_35mm"] == 27.0
     assert _public_exif({"lat": None, "lon": None})["lat"] is None
     assert _public_exif(None) is None
+
+
+def test_public_exif_nulls_stored_nan():
+    # Rows written before _gps_to_degrees rejected no-fix rationals hold
+    # literal NaN; the endpoint must keep serving them.
+    from app.main import _public_exif
+    out = _public_exif({"lat": float("nan"), "lon": float("nan"),
+                        "exposure_seconds": 0.098})
+    assert out["lat"] is None
+    assert out["lon"] is None
+    assert out["exposure_seconds"] == 0.098
 
 
 # --- 35mm equivalent derived from sensor width (#70) ---

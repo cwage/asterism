@@ -1,5 +1,6 @@
 import hmac
 import json
+import math
 import os
 import re
 import time
@@ -296,6 +297,14 @@ def _public_exif(exif_info):
     if not exif_info:
         return exif_info
     out = dict(exif_info)
+    # NaN survives a json.dumps/loads round trip but not the strict encoder
+    # Starlette serves responses with, so a single non-finite value stored
+    # before exif.py learned to reject them 500s the whole payload. Null it
+    # here as well: this endpoint has to keep working for rows already in
+    # the database.
+    for key, value in out.items():
+        if isinstance(value, float) and not math.isfinite(value):
+            out[key] = None
     for key in ("lat", "lon"):
         if out.get(key) is not None:
             out[key] = round(out[key], 1)
