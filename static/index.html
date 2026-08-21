@@ -390,6 +390,22 @@ function renderFailure(id, job) {
   if (f && f.guess) renderGuess(job, f.guess);
   else if (f && f.guess_unavailable) renderNoGuess(f.guess_unavailable);
 
+  // The photo renders even without a solve: next to the guess's "Venus was
+  // low in the west", the un-annotated frame is how "wow, that IS Venus"
+  // happens — and it shows the uploader what the solver actually saw.
+  const img = document.getElementById('photo');
+  const canvas = document.getElementById('overlay');
+  img.onload = () => {
+    // A previously viewed solve leaves its labels on the overlay, where
+    // they would masquerade as a result for this failed one.
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+  };
+  img.hidden = false;
+  document.getElementById('wrap').style.display = 'inline-block';
+  img.src = '/jobs/' + encodeURIComponent(id) + '/image';
+
   if (!f || !f.can_deepen) return;
   // Failed fast on purpose; deeper attempts are the user's call. Slow: the
   // budget is CPU seconds, and on a shared vCPU the wall clock runs several
@@ -726,6 +742,11 @@ function render(id, job) {
   img.hidden = false;
   document.getElementById('wrap').style.display = 'inline-block';
   img.src = '/jobs/' + encodeURIComponent(id) + '/image';
+  // The failure path may have shown this exact URL already (a deepen that
+  // came good); a same-src assignment can satisfy from cache without ever
+  // firing load, which would leave the overlay unlabelled. The handler is
+  // idempotent, so firing it alongside a real load event is harmless.
+  if (img.complete && img.naturalWidth) img.onload();
 }
 
 // One entry per checkbox controlState() reads: a layer missing here still
