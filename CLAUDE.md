@@ -26,8 +26,6 @@
 - Full-corpus bench takes hours (~45s/image, ~200s per failure). Sample instead.
 
 ## Deploy workflow
-- Prod is https://asterism.quietlife.net — always use this host in links and
-  when verifying; never hand out the asterism.fly.dev URL.
 - Deploy BEFORE merging: `fly deploy` from the feature branch, verify it works
   in prod, and only then merge the PR. main stays pristine as the rollback
   target — if the deploy misbehaves, redeploy main.
