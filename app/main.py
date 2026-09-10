@@ -8,6 +8,7 @@ import uuid
 from collections import defaultdict, deque
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse
 
 from . import card, db, exif
@@ -120,6 +121,11 @@ async def create_job(request: Request, image: UploadFile):
         f.write(data)
 
     try:
+        # Lay the pixels out the way a viewer shows them before anything
+        # reads the file — the dimensions and FOV hint captured just below,
+        # the solver, the card, the browser (see exif.normalize_orientation).
+        # A 12MP re-encode is a CPU-bound moment; keep it off the event loop.
+        await run_in_threadpool(exif.normalize_orientation, image_path)
         exif_info = exif.read_exif(image_path)
     except Exception as e:
         os.unlink(image_path)

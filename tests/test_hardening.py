@@ -242,3 +242,48 @@ def test_upload_is_refused_when_the_location_really_cannot_be_removed(
     assert resp.status_code == 415
     assert "strip location data" in resp.json()["detail"]
     assert os.listdir(main.UPLOAD_DIR) == []      # nothing left on disk
+
+
+def test_upload_stores_the_photo_the_way_a_browser_shows_it(tmp_path, monkeypatch):
+    """A portrait phone shot arrives as the landscape sensor frame plus
+    Orientation=6. Browsers rotate it and report the rotated size; the
+    solver and the card read the raw frame; the overlay drew raw-frame
+    coordinates on the rotated photo, so every label sat 90 degrees off
+    the sky (prod 2026-09-10). Upright on disk, every reader agrees — and
+    the record's dimensions describe the stored pixels."""
+    import io
+
+    from fastapi.testclient import TestClient
+    from PIL import Image
+
+    from app import exif as exif_mod, main
+    from tests import synth
+
+    monkeypatch.setattr(db, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "asterism.db"))
+    monkeypatch.setattr(main, "UPLOAD_DIR", str(tmp_path / "uploads"))
+    os.makedirs(main.UPLOAD_DIR, exist_ok=True)
+    db.init_db()
+
+    ex = synth.build_exif(f35mm=24, gps=(36.16, -86.78))
+    ex[exif_mod.TAG_ORIENTATION] = 6
+    buf = io.BytesIO()
+    Image.new("RGB", (64, 32)).save(buf, format="JPEG", exif=ex, quality=95)
+
+    client = TestClient(main.app)
+    resp = client.post("/jobs", files={"image": ("sky.jpg", buf.getvalue(),
+                                                 "image/jpeg")})
+    assert resp.status_code == 200, resp.text
+    job_id = resp.json()["id"]
+
+    with db.get_conn() as conn:
+        row = conn.execute("SELECT image_path, exif_json FROM jobs WHERE id = ?",
+                           (job_id,)).fetchone()
+    info = json.loads(row["exif_json"])
+    assert (info["width"], info["height"]) == (32, 64)
+    assert info["lat"] == pytest.approx(36.16, abs=0.01)
+    with Image.open(row["image_path"]) as stored:
+        assert stored.size == (32, 64)
+        assert stored.getexif().get(exif_mod.TAG_ORIENTATION, 1) == 1
+    assert os.listdir(main.UPLOAD_DIR) == [os.path.basename(row["image_path"])]
+    assert exif_mod.has_location(row["image_path"]) is False

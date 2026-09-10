@@ -372,3 +372,107 @@ def test_a_crop_narrows_the_hint_rather_than_breaking_it(tmp_path):
     info = exif.read_exif(path)
     assert info["focal_35mm"] == pytest.approx(48.0, abs=0.1)
     assert info["focal_35mm_source"] == "sensor_width"
+
+
+def _oriented_jpeg(path, orientation, **exif_kw):
+    """A 64x32 frame with a solid red block in its stored top-left corner,
+    tagged as needing `orientation` applied to view it."""
+    img = Image.new("RGB", (64, 32), (0, 0, 0))
+    img.paste((255, 0, 0), (0, 0, 16, 16))
+    ex = synth.build_exif(**exif_kw)
+    ex[exif.TAG_ORIENTATION] = orientation
+    img.save(path, exif=ex, quality=95)
+
+
+def _is_red(px):
+    return px[0] > 200 and px[1] < 60 and px[2] < 60
+
+
+@pytest.mark.parametrize("orientation, size, block_at", [
+    (3, (64, 32), (56, 24)),     # upside down: block ends bottom-right
+    (6, (32, 64), (24, 8)),      # phone held portrait: rotate 90 CW to view
+    (8, (32, 64), (8, 56)),      # held the other way: rotate 90 CCW
+])
+def test_normalize_orientation_bakes_the_tag_into_the_pixels(
+        tmp_path, orientation, size, block_at):
+    """Portrait phone shots arrive as the landscape sensor frame plus an
+    Orientation tag. Browsers rotate the photo; the solver, verifier and
+    card do not — so the overlay's label layer came out 90 degrees off the
+    sky (prod 2026-09-10). After normalizing, the pixels sit the way a
+    viewer shows them and the tag no longer asks for anything."""
+    path = str(tmp_path / f"orient-{orientation}.jpg")
+    _oriented_jpeg(path, orientation, f35mm=24)
+
+    assert exif.normalize_orientation(path) is True
+
+    with Image.open(path) as img:
+        assert img.size == size
+        assert img.getexif().get(exif.TAG_ORIENTATION, 1) == 1
+        assert _is_red(img.getpixel(block_at))
+        assert not _is_red(img.getpixel((8, 8)))     # it moved, not copied
+    # a second pass has nothing to do
+    assert exif.normalize_orientation(path) is False
+
+
+def test_normalize_orientation_keeps_what_the_pipeline_reads(tmp_path):
+    """One re-encode must not cost the fields read_exif runs on, and the
+    record's dimensions and FOV hint must describe the stored pixels — a
+    normalized portrait frame is narrower across than 36mm/f35 implies."""
+    path = str(tmp_path / "portrait.jpg")
+    _oriented_jpeg(path, 6, f35mm=24, gps=(36.16, -86.78),
+                   datetime_original="2026:09:10 00:28:54",
+                   offset_time_original="+03:00", exposure_seconds=1,
+                   pixel_x_dimension=64)
+    with Image.open(path) as img:
+        ex = img.getexif()
+    ex.get_ifd(exif.EXIF_IFD)[exif.TAG_PIXEL_Y_DIMENSION] = 32
+    Image.open(path).save(path, exif=ex, quality=95)
+
+    assert exif.normalize_orientation(path) is True
+
+    info = exif.read_exif(path)
+    assert (info["width"], info["height"]) == (32, 64)
+    assert info["fov_deg"] == pytest.approx(
+        exif.fov_width_deg(24, 32, 64))
+    assert info["fov_deg"] < exif.fov_width_deg(24)
+    assert info["focal_35mm"] == 24.0
+    assert info["datetime_original"] == "2026:09:10 00:28:54"
+    assert info["offset_time_original"] == "+03:00"
+    assert info["exposure_seconds"] == 1.0
+    # GPS is still there for the job record; strip_gps runs after this
+    assert info["lat"] == pytest.approx(36.16, abs=0.01)
+    # the camera's recorded dimensions follow the pixels, so the
+    # sensor-width derivation (#70) keeps trusting the file
+    with Image.open(path) as img:
+        ifd = img.getexif().get_ifd(exif.EXIF_IFD)
+    assert (ifd[exif.TAG_PIXEL_X_DIMENSION],
+            ifd[exif.TAG_PIXEL_Y_DIMENSION]) == (32, 64)
+
+
+def test_normalize_orientation_leaves_an_upright_file_alone(tmp_path):
+    for orientation in (None, 1):
+        path = str(tmp_path / f"upright-{orientation}.jpg")
+        ex = synth.build_exif(f35mm=24)
+        if orientation:
+            ex[exif.TAG_ORIENTATION] = orientation
+        Image.new("RGB", (64, 32)).save(path, exif=ex, quality=95)
+        with open(path, "rb") as f:
+            before = f.read()
+
+        assert exif.normalize_orientation(path) is False
+
+        with open(path, "rb") as f:
+            assert f.read() == before
+
+
+def test_strip_gps_still_scrubs_a_normalized_file(tmp_path):
+    """The re-encode rewrites the EXIF block through Pillow; the GPS strip
+    that runs after it has to find the coordinates in what Pillow wrote."""
+    path = str(tmp_path / "portrait-gps.jpg")
+    _oriented_jpeg(path, 6, f35mm=24, gps=(36.16, -86.78))
+
+    assert exif.normalize_orientation(path) is True
+    assert exif.has_location(path) is True
+    assert exif.strip_gps(path) is True
+    assert exif.has_location(path) is False
+    assert exif.read_exif(path)["focal_35mm"] == 24.0
