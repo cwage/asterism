@@ -397,7 +397,7 @@ def _is_red(px):
     (4, (64, 32), (8, 24), (8, 8)),      # flipped: bottom-left
     (5, (32, 64), (8, 8), (24, 56)),     # transposed: the corner stays
     (6, (32, 64), (24, 8), (8, 8)),      # phone held portrait: rotate 90 CW
-    (7, (32, 64), (24, 56), (8, 8)),     # transversed: bottom-right
+    (7, (32, 64), (24, 56), (8, 8)),     # transverse: bottom-right
     (8, (32, 64), (8, 56), (8, 8)),      # held the other way: rotate 90 CCW
 ])
 def test_normalize_orientation_bakes_the_tag_into_the_pixels(
@@ -535,3 +535,29 @@ def test_strip_gps_still_scrubs_a_normalized_file(tmp_path):
     assert exif.strip_gps(path) is True
     assert exif.has_location(path) is False
     assert exif.read_exif(path)["focal_35mm"] == 24.0
+
+
+@pytest.mark.parametrize("ext", ["jpg", "png"])
+def test_icc_profile_survives_the_bake_and_the_strip_fallback(tmp_path, ext):
+    """Phone JPEGs carry a Display P3 profile; a re-encode that drops it
+    shifts the served photo's colours. Both re-encodes on the upload path
+    have to forward it: the orientation bake, and the Pillow strip that
+    PNGs and piexif-hostile EXIF fall back to."""
+    profile = b"not a real profile, but bytes that must come back intact" * 4
+    path = tmp_path / f"p3.{ext}"
+    ex = Image.Exif()
+    ifd = ex.get_ifd(synth.EXIF_IFD)
+    ifd[synth.TAG_EXPOSURE_TIME] = 10.0        # piexif refuses this: fallback
+    ifd[synth.TAG_FOCAL_35MM] = 24
+    gps = ex.get_ifd(synth.GPS_IFD)
+    gps[1], gps[2] = "N", synth._deg_to_dms(36.16)
+    gps[3], gps[4] = "W", synth._deg_to_dms(86.78)
+    ex[exif.TAG_ORIENTATION] = 6
+    Image.new("RGB", (64, 32)).save(path, exif=ex, icc_profile=profile)
+
+    assert exif.normalize_orientation(path) is True
+    assert exif.strip_gps(path) is True
+    assert exif.has_location(path) is False
+    with Image.open(path) as img:
+        assert img.size == (32, 64)
+        assert img.info.get("icc_profile") == profile

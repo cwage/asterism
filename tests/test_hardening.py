@@ -287,3 +287,32 @@ def test_upload_stores_the_photo_the_way_a_browser_shows_it(tmp_path, monkeypatc
         assert stored.getexif().get(exif_mod.TAG_ORIENTATION, 1) == 1
     assert os.listdir(main.UPLOAD_DIR) == [os.path.basename(row["image_path"])]
     assert exif_mod.has_location(row["image_path"]) is False
+
+
+def test_upload_refuses_a_frame_that_decodes_too_large(tmp_path, monkeypatch):
+    """MAX_UPLOAD_BYTES bounds compressed bytes; the orientation bake decodes
+    the whole frame in the web process, so the decoded size gets its own
+    cap, checked from the header before anything is decoded."""
+    import io
+
+    from fastapi.testclient import TestClient
+    from PIL import Image
+
+    from app import main
+
+    monkeypatch.setattr(db, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "asterism.db"))
+    monkeypatch.setattr(main, "UPLOAD_DIR", str(tmp_path / "uploads"))
+    monkeypatch.setattr(main, "MAX_IMAGE_PIXELS", 1000)
+    os.makedirs(main.UPLOAD_DIR, exist_ok=True)
+    db.init_db()
+
+    buf = io.BytesIO()
+    Image.new("RGB", (64, 32)).save(buf, format="JPEG")     # 2048 pixels
+
+    client = TestClient(main.app)
+    resp = client.post("/jobs", files={"image": ("sky.jpg", buf.getvalue(),
+                                                 "image/jpeg")})
+    assert resp.status_code == 413
+    assert "64x32" in resp.json()["detail"]
+    assert os.listdir(main.UPLOAD_DIR) == []      # nothing left on disk

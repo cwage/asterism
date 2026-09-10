@@ -339,6 +339,13 @@ def normalize_orientation(path):
     return True
 
 
+def dimensions(path):
+    """(width, height) from the file header alone — Image.open is lazy, so
+    nothing is decoded. Raises on a file Pillow cannot read."""
+    with Image.open(path) as img:
+        return img.size
+
+
 def has_location(path):
     """Whether the file still discloses where it was taken.
 
@@ -381,7 +388,10 @@ def _strip_gps_pillow(path):
             return False
         del data[GPS_IFD]
         img.load()
-        img.save(path, format=fmt, exif=data, quality=95)
+        # Forward the colour profile: phone JPEGs carry Display P3, and a
+        # re-encode that drops it shifts the served photo's colours.
+        img.save(path, format=fmt, exif=data, quality=95,
+                 icc_profile=img.info.get("icc_profile"))
     return True
 
 
