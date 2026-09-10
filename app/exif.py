@@ -4,6 +4,7 @@ layers, exposure time for the crossing window — plus the GPS strip that makes
 an upload safe to serve publicly."""
 
 import math
+import os
 
 from PIL import Image
 
@@ -19,6 +20,8 @@ TAG_OFFSET_TIME_ORIGINAL = 36881
 TAG_EXPOSURE_TIME = 33434
 TAG_GPS_IMG_DIRECTION_REF = 16  # 'M' magnetic / 'T' true
 TAG_GPS_IMG_DIRECTION = 17
+TAG_ORIENTATION = 274
+TAG_PIXEL_Y_DIMENSION = 40963
 
 # Fallback when EXIF gives us nothing: generous phone-plausible field widths.
 DEFAULT_FOV_BOUNDS = (30.0, 90.0)
@@ -258,6 +261,91 @@ def read_exif(path):
     return info
 
 
+# EXIF Orientation value -> the transpose that lays the pixels out the way a
+# viewer shows them. Same table as Pillow's ImageOps.exif_transpose; spelled
+# out here so the tag rewrite below stays under our control.
+_ORIENTATION_TRANSPOSE = {
+    2: Image.Transpose.FLIP_LEFT_RIGHT,
+    3: Image.Transpose.ROTATE_180,
+    4: Image.Transpose.FLIP_TOP_BOTTOM,
+    5: Image.Transpose.TRANSPOSE,
+    6: Image.Transpose.ROTATE_270,
+    7: Image.Transpose.TRANSVERSE,
+    8: Image.Transpose.ROTATE_90,
+}
+
+
+def normalize_orientation(path):
+    """Bake the EXIF Orientation tag into the pixels, in place. Returns
+    whether the file changed.
+
+    A phone held portrait stores the landscape sensor frame plus
+    Orientation=6, and the readers downstream of an upload disagreed about
+    it: solve-field, the verifier, the card and read_exif's width/height
+    all took the stored frame, while the browser rotated the photo and
+    reported the rotated size. The overlay canvas was sized from that and
+    drew stored-frame coordinates on it, so the whole label layer came out
+    90 degrees off the sky (prod job 3af55c47, 2026-09-10). In a dense
+    field every circle lands near *some* faint star, which is why it was
+    reported as "slightly off" rather than broken.
+
+    Rewriting the pixels once, before anything else reads the file, is what
+    makes every later reader agree — including the portrait correction to
+    the FOV hint, which keys off width < height. Lossy for JPEG (one
+    re-encode at quality 95, ICC profile kept): a fair trade against
+    teaching every overlay consumer, present and future, to transform
+    coordinates.
+    """
+    path = os.fspath(path)
+    with Image.open(path) as img:
+        ex = img.getexif()
+        method = _ORIENTATION_TRANSPOSE.get(ex.get(TAG_ORIENTATION))
+        if method is None:
+            return False
+        fmt = img.format
+        size = img.size
+        icc = img.info.get("icc_profile")
+        img.load()
+        out = img.transpose(method)
+
+    ex[TAG_ORIENTATION] = 1
+    if out.size != size and EXIF_IFD in ex:
+        # The camera's recorded dimensions describe the sensor frame. The
+        # sensor-width derivation (#70) refuses a file whose stored width
+        # disagrees with its pixel width, so a tag that described the
+        # stored frame goes on describing the file. One that already
+        # disagreed — a resize that never updated it — is the derivation's
+        # evidence, and stays as it was. Each tag on its own: a camera may
+        # write only the width.
+        ifd = ex.get_ifd(EXIF_IFD)
+        for tag, was, now in ((TAG_PIXEL_X_DIMENSION, size[0], out.width),
+                              (TAG_PIXEL_Y_DIMENSION, size[1], out.height)):
+            try:
+                if tag in ifd and int(ifd[tag]) == was:
+                    ifd[tag] = now
+            except (TypeError, ValueError):
+                pass
+
+    # Encode beside the upload and swap in, so a failure mid-write leaves
+    # the file as it arrived rather than truncated.
+    tmp = path + ".orient"
+    try:
+        out.save(tmp, format=fmt, exif=ex, quality=95, icc_profile=icc)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+    return True
+
+
+def dimensions(path):
+    """(width, height) from the file header alone — Image.open is lazy, so
+    nothing is decoded. Raises on a file Pillow cannot read."""
+    with Image.open(path) as img:
+        return img.size
+
+
 def has_location(path):
     """Whether the file still discloses where it was taken.
 
@@ -300,7 +388,10 @@ def _strip_gps_pillow(path):
             return False
         del data[GPS_IFD]
         img.load()
-        img.save(path, format=fmt, exif=data, quality=95)
+        # Forward the colour profile: phone JPEGs carry Display P3, and a
+        # re-encode that drops it shifts the served photo's colours.
+        img.save(path, format=fmt, exif=data, quality=95,
+                 icc_profile=img.info.get("icc_profile"))
     return True
 
 

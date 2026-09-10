@@ -1,3 +1,4 @@
+import asyncio
 import hmac
 import json
 import math
@@ -8,6 +9,7 @@ import uuid
 from collections import defaultdict, deque
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse
 
 from . import card, db, exif
@@ -21,6 +23,12 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 # Abuse limits (#10): every accepted upload is worker CPU (worst case ~200s
 # for an unsolvable image in deep mode), so the open endpoint gets caps.
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))
+# Decoded size is capped separately from the byte count: the orientation
+# bake in create_job decodes the whole frame in the web process, and the
+# byte cap only bounds compressed data. 100MP clears every phone and
+# full-frame body; a 20MB JPEG that opens to more is 0.2 bytes a pixel — a
+# flat frame or a decompression bomb, never a sky.
+MAX_IMAGE_PIXELS = int(os.environ.get("MAX_IMAGE_PIXELS", str(100 * 1000 * 1000)))
 UPLOADS_PER_HOUR = int(os.environ.get("UPLOADS_PER_HOUR", "12"))
 MAX_QUEUE_DEPTH = int(os.environ.get("MAX_QUEUE_DEPTH", "20"))
 
@@ -35,6 +43,20 @@ _GONE = f"no such job (results expire after {RETENTION_HOURS} hours)"
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
 _upload_log = defaultdict(deque)  # client ip -> recent upload monotonic times
+
+# The orientation bake holds a decoded frame (and its transposed copy) in
+# memory and runs in the threadpool that also serves the sync handlers. One
+# at a time: the queue-depth check runs before it, so a burst that passed
+# the gate would otherwise stack that many decodes at once. A phone frame
+# takes ~0.1s, so the wait is invisible.
+_orient_slot = asyncio.Semaphore(1)
+
+
+def _discard(path):
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
 
 
 def _require_admin(request):
@@ -118,11 +140,42 @@ async def create_job(request: Request, image: UploadFile):
     image_path = os.path.join(UPLOAD_DIR, f"{job_id}{ext}")
     with open(image_path, "wb") as f:
         f.write(data)
+    # The body is on disk. Let go of the in-memory copy and the spooled
+    # upload behind it before parking on the bake slot below: a burst that
+    # passed the gates above would otherwise hold that many 20MB buffers
+    # while waiting its turn, with no job row yet for the depth gate to see.
+    del data
+    await image.close()
 
     try:
-        exif_info = exif.read_exif(image_path)
+        width, height = exif.dimensions(image_path)      # header only
     except Exception as e:
         os.unlink(image_path)
+        raise HTTPException(400, f"could not read image: {e}")
+    if width * height > MAX_IMAGE_PIXELS:
+        os.unlink(image_path)
+        raise HTTPException(
+            413, f"image too large ({width}x{height}; "
+                 f"max {MAX_IMAGE_PIXELS // 1_000_000} megapixels)")
+
+    try:
+        # Lay the pixels out the way a viewer shows them before anything
+        # reads the file — the dimensions and FOV hint captured just below,
+        # the solver, the card, the browser (see exif.normalize_orientation).
+        # A 12MP re-encode is a CPU-bound moment; keep it off the event loop.
+        async with _orient_slot:
+            await run_in_threadpool(exif.normalize_orientation, image_path)
+        exif_info = exif.read_exif(image_path)
+    except asyncio.CancelledError:
+        # Cancelled while waiting on the bake (a server shutdown): the row
+        # was never going to be inserted, so drop the file now rather than
+        # leave it to the orphan sweep. A bake already mid-encode cannot be
+        # interrupted and its replace brings the file back; the sweep
+        # collects that one.
+        _discard(image_path)
+        raise
+    except Exception as e:
+        _discard(image_path)
         raise HTTPException(400, f"could not read image: {e}")
 
     # Precise GPS is captured into the job record above (the ephemeris layer

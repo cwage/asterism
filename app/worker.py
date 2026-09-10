@@ -81,6 +81,46 @@ def sweep_expired():
                         pass
             shutil.rmtree(os.path.join(db.DATA_DIR, "jobs", row["id"]),
                           ignore_errors=True)
+        orphans = _sweep_orphans(conn)
+    if orphans:
+        print(f"worker: swept {orphans} orphaned upload file(s)")
+    return removed
+
+
+def _sweep_orphans(conn):
+    """Delete files in the upload directory that no job references and
+    that are older than the retention window. Returns how many.
+
+    The row sweep above only knows files by their job. An upload the
+    request handler wrote but never inserted (a crash or a cancelled
+    request in the gap), or the orientation bake's `.orient` sidecar if
+    the process died mid-encode, would otherwise stay for good. Age covers
+    the gap between a file being written and its row appearing; the only
+    live files that old belong to featured jobs (#67), and those are
+    referenced. Matched by name: uploads are flat and named by job id, so
+    a name is exact and immune to how the stored path was spelled."""
+    uploads = os.path.join(db.DATA_DIR, "uploads")
+    try:
+        names = os.listdir(uploads)
+    except FileNotFoundError:
+        return 0
+    referenced = set()
+    for row in conn.execute(
+            "SELECT image_path FROM jobs WHERE image_path IS NOT NULL"):
+        base = os.path.basename(row["image_path"])
+        referenced.update((base, base + ".card.png"))
+    cutoff = time.time() - RETENTION_HOURS * 3600
+    removed = 0
+    for name in names:
+        if name in referenced:
+            continue
+        path = os.path.join(uploads, name)
+        try:
+            if os.path.getmtime(path) < cutoff:
+                os.unlink(path)
+                removed += 1
+        except FileNotFoundError:
+            pass
     return removed
 
 

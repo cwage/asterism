@@ -2,7 +2,7 @@ import math
 
 import numpy as np
 import pytest
-from PIL import Image
+from PIL import Image, ImageOps
 
 from app import exif
 from tests import synth
@@ -372,3 +372,192 @@ def test_a_crop_narrows_the_hint_rather_than_breaking_it(tmp_path):
     info = exif.read_exif(path)
     assert info["focal_35mm"] == pytest.approx(48.0, abs=0.1)
     assert info["focal_35mm_source"] == "sensor_width"
+
+
+def _oriented_jpeg(path, orientation, **exif_kw):
+    """A 64x32 frame with a solid red block in its stored top-left corner,
+    tagged as needing `orientation` applied to view it."""
+    img = Image.new("RGB", (64, 32), (0, 0, 0))
+    img.paste((255, 0, 0), (0, 0, 16, 16))
+    ex = synth.build_exif(**exif_kw)
+    ex[exif.TAG_ORIENTATION] = orientation
+    img.save(path, exif=ex, quality=95)
+
+
+def _is_red(px):
+    return px[0] > 200 and px[1] < 60 and px[2] < 60
+
+
+# Where the stored top-left block ends up once each Orientation value is
+# applied, plus a spot that must be dark afterwards (the block moved rather
+# than copied — except for 5, a transpose, which leaves that corner put).
+@pytest.mark.parametrize("orientation, size, block_at, dark_at", [
+    (2, (64, 32), (56, 8), (8, 8)),      # mirrored: block ends top-right
+    (3, (64, 32), (56, 24), (8, 8)),     # upside down: bottom-right
+    (4, (64, 32), (8, 24), (8, 8)),      # flipped: bottom-left
+    (5, (32, 64), (8, 8), (24, 56)),     # transposed: the corner stays
+    (6, (32, 64), (24, 8), (8, 8)),      # phone held portrait: rotate 90 CW
+    (7, (32, 64), (24, 56), (8, 8)),     # transverse: bottom-right
+    (8, (32, 64), (8, 56), (8, 8)),      # held the other way: rotate 90 CCW
+])
+def test_normalize_orientation_bakes_the_tag_into_the_pixels(
+        tmp_path, orientation, size, block_at, dark_at):
+    """Portrait phone shots arrive as the landscape sensor frame plus an
+    Orientation tag. Browsers rotate the photo; the solver, verifier and
+    card do not — so the overlay's label layer came out 90 degrees off the
+    sky (prod 2026-09-10). After normalizing, the pixels sit the way a
+    viewer shows them and the tag no longer asks for anything."""
+    path = str(tmp_path / f"orient-{orientation}.jpg")
+    _oriented_jpeg(path, orientation, f35mm=24)
+
+    assert exif.normalize_orientation(path) is True
+
+    with Image.open(path) as img:
+        assert img.size == size
+        assert img.getexif().get(exif.TAG_ORIENTATION, 1) == 1
+        assert _is_red(img.getpixel(block_at))
+        assert not _is_red(img.getpixel(dark_at))
+    # a second pass has nothing to do
+    assert exif.normalize_orientation(path) is False
+
+
+@pytest.mark.parametrize("orientation", range(2, 9))
+def test_normalize_orientation_agrees_with_pillows_reference(
+        tmp_path, orientation):
+    """ImageOps.exif_transpose is the reference for what a viewer shows.
+    A lossless format, so the pixels compare exactly; a pathlib.Path, as
+    tmp_path hands out and the other helpers accept."""
+    path = tmp_path / f"orient-{orientation}.png"
+    img = Image.new("RGB", (64, 32))
+    img.paste((255, 0, 0), (0, 0, 16, 16))
+    img.paste((0, 0, 255), (48, 16, 64, 32))
+    ex = Image.Exif()
+    ex[exif.TAG_ORIENTATION] = orientation
+    img.save(path, exif=ex)
+    with Image.open(path) as src:
+        expected = np.asarray(ImageOps.exif_transpose(src))
+
+    assert exif.normalize_orientation(path) is True
+
+    with Image.open(path) as out:
+        assert np.array_equal(np.asarray(out), expected)
+        assert out.getexif().get(exif.TAG_ORIENTATION, 1) == 1
+
+
+def test_normalize_orientation_keeps_what_the_pipeline_reads(tmp_path):
+    """One re-encode must not cost the fields read_exif runs on, and the
+    record's dimensions and FOV hint must describe the stored pixels — a
+    normalized portrait frame is narrower across than 36mm/f35 implies."""
+    path = str(tmp_path / "portrait.jpg")
+    _oriented_jpeg(path, 6, f35mm=24, gps=(36.16, -86.78),
+                   datetime_original="2026:09:10 00:28:54",
+                   offset_time_original="+03:00", exposure_seconds=1,
+                   pixel_x_dimension=64)
+    with Image.open(path) as img:
+        ex = img.getexif()
+    ex.get_ifd(exif.EXIF_IFD)[exif.TAG_PIXEL_Y_DIMENSION] = 32
+    Image.open(path).save(path, exif=ex, quality=95)
+
+    assert exif.normalize_orientation(path) is True
+
+    info = exif.read_exif(path)
+    assert (info["width"], info["height"]) == (32, 64)
+    assert info["fov_deg"] == pytest.approx(
+        exif.fov_width_deg(24, 32, 64))
+    assert info["fov_deg"] < exif.fov_width_deg(24)
+    assert info["focal_35mm"] == 24.0
+    assert info["datetime_original"] == "2026:09:10 00:28:54"
+    assert info["offset_time_original"] == "+03:00"
+    assert info["exposure_seconds"] == 1.0
+    # GPS is still there for the job record; strip_gps runs after this
+    assert info["lat"] == pytest.approx(36.16, abs=0.01)
+    # the camera's recorded dimensions follow the pixels, so the
+    # sensor-width derivation (#70) keeps trusting the file
+    with Image.open(path) as img:
+        ifd = img.getexif().get_ifd(exif.EXIF_IFD)
+    assert (ifd[exif.TAG_PIXEL_X_DIMENSION],
+            ifd[exif.TAG_PIXEL_Y_DIMENSION]) == (32, 64)
+
+
+def test_normalize_orientation_keeps_a_lone_width_tag_honest(tmp_path):
+    """Cameras that record only PixelXDimension are the ones the
+    sensor-width derivation (#70) serves. After a 90-degree turn the tag
+    has to describe the upright width, or the derivation refuses the file
+    as a resize — while a tag that already disagreed keeps disagreeing,
+    since that disagreement is what the refusal is built on."""
+    def portrait_canon(name, pixel_x_dimension):
+        ex = synth.build_exif(pixel_x_dimension=pixel_x_dimension,
+                              **CANON_5DS)
+        ex[exif.TAG_ORIENTATION] = 6
+        path = tmp_path / name
+        Image.new("RGB", (2172, 1418)).save(path, exif=ex)
+        assert exif.normalize_orientation(path) is True
+        with Image.open(path) as img:
+            ifd = img.getexif().get_ifd(exif.EXIF_IFD)
+        assert exif.TAG_PIXEL_Y_DIMENSION not in ifd
+        return path, ifd[exif.TAG_PIXEL_X_DIMENSION]
+
+    # the tag described the stored frame: it follows the pixels
+    path, stored_width = portrait_canon("honest.jpg", 2172)
+    assert stored_width == 1418
+    assert exif.read_exif(path)["focal_35mm_source"] == "sensor_width"
+
+    # it already disagreed (a resize that never updated it): still does
+    path, stored_width = portrait_canon("stale.jpg", 8688)
+    assert stored_width == 8688
+    assert exif.read_exif(path)["focal_35mm"] is None
+
+
+def test_normalize_orientation_leaves_an_upright_file_alone(tmp_path):
+    for orientation in (None, 1):
+        path = str(tmp_path / f"upright-{orientation}.jpg")
+        ex = synth.build_exif(f35mm=24)
+        if orientation:
+            ex[exif.TAG_ORIENTATION] = orientation
+        Image.new("RGB", (64, 32)).save(path, exif=ex, quality=95)
+        with open(path, "rb") as f:
+            before = f.read()
+
+        assert exif.normalize_orientation(path) is False
+
+        with open(path, "rb") as f:
+            assert f.read() == before
+
+
+def test_strip_gps_still_scrubs_a_normalized_file(tmp_path):
+    """The re-encode rewrites the EXIF block through Pillow; the GPS strip
+    that runs after it has to find the coordinates in what Pillow wrote."""
+    path = str(tmp_path / "portrait-gps.jpg")
+    _oriented_jpeg(path, 6, f35mm=24, gps=(36.16, -86.78))
+
+    assert exif.normalize_orientation(path) is True
+    assert exif.has_location(path) is True
+    assert exif.strip_gps(path) is True
+    assert exif.has_location(path) is False
+    assert exif.read_exif(path)["focal_35mm"] == 24.0
+
+
+@pytest.mark.parametrize("ext", ["jpg", "png"])
+def test_icc_profile_survives_the_bake_and_the_strip_fallback(tmp_path, ext):
+    """Phone JPEGs carry a Display P3 profile; a re-encode that drops it
+    shifts the served photo's colours. Both re-encodes on the upload path
+    have to forward it: the orientation bake, and the Pillow strip that
+    PNGs and piexif-hostile EXIF fall back to."""
+    profile = b"not a real profile, but bytes that must come back intact" * 4
+    path = tmp_path / f"p3.{ext}"
+    ex = Image.Exif()
+    ifd = ex.get_ifd(synth.EXIF_IFD)
+    ifd[synth.TAG_EXPOSURE_TIME] = 10.0        # piexif refuses this: fallback
+    ifd[synth.TAG_FOCAL_35MM] = 24
+    gps = ex.get_ifd(synth.GPS_IFD)
+    gps[1], gps[2] = "N", synth._deg_to_dms(36.16)
+    gps[3], gps[4] = "W", synth._deg_to_dms(86.78)
+    ex[exif.TAG_ORIENTATION] = 6
+    Image.new("RGB", (64, 32)).save(path, exif=ex, icc_profile=profile)
+
+    assert exif.normalize_orientation(path) is True
+    assert exif.strip_gps(path) is True
+    assert exif.has_location(path) is False
+    with Image.open(path) as img:
+        assert img.size == (32, 64)
+        assert img.info.get("icc_profile") == profile
