@@ -140,6 +140,12 @@ async def create_job(request: Request, image: UploadFile):
     image_path = os.path.join(UPLOAD_DIR, f"{job_id}{ext}")
     with open(image_path, "wb") as f:
         f.write(data)
+    # The body is on disk. Let go of the in-memory copy and the spooled
+    # upload behind it before parking on the bake slot below: a burst that
+    # passed the gates above would otherwise hold that many 20MB buffers
+    # while waiting its turn, with no job row yet for the depth gate to see.
+    del data
+    await image.close()
 
     try:
         width, height = exif.dimensions(image_path)      # header only
