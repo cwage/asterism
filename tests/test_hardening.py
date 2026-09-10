@@ -316,3 +316,38 @@ def test_upload_refuses_a_frame_that_decodes_too_large(tmp_path, monkeypatch):
     assert resp.status_code == 413
     assert "64x32" in resp.json()["detail"]
     assert os.listdir(main.UPLOAD_DIR) == []      # nothing left on disk
+
+
+def test_sweep_collects_orphaned_upload_files(tmp_path, monkeypatch):
+    """Files no job references — an upload whose row never got inserted, or
+    the orientation bake's sidecar after a crash mid-encode — are collected
+    once they are older than the retention window. A fresh orphan is the
+    write-then-insert gap and stays; a featured job's old upload and card
+    are referenced and stay."""
+    import time
+
+    monkeypatch.setattr(db, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "asterism.db"))
+    db.init_db()
+    uploads = tmp_path / "uploads"
+    uploads.mkdir()
+    old = time.time() - 25 * 3600
+
+    ghost = uploads / "ghost.jpg"                 # crashed before the INSERT
+    sidecar = uploads / "ghost2.jpg.orient"       # died mid-encode
+    fresh = uploads / "fresh.jpg"                 # being uploaded right now
+    kept = uploads / "kept.jpg"                   # featured: exempt from expiry
+    kept_card = uploads / "kept.jpg.card.png"
+    for f in (ghost, sidecar, fresh, kept, kept_card):
+        f.write_bytes(b"x")
+    for f in (ghost, sidecar, kept, kept_card):
+        os.utime(f, (old, old))
+    with db.get_conn() as conn:
+        conn.execute(
+            "INSERT INTO jobs (id, image_path, created_at, featured) VALUES "
+            "('kept', ?, datetime('now', '-25 hours'), 1)", (str(kept),))
+
+    assert worker.sweep_expired() == 0            # no job expired
+
+    assert not ghost.exists() and not sidecar.exists()
+    assert fresh.exists() and kept.exists() and kept_card.exists()

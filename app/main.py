@@ -52,6 +52,13 @@ _upload_log = defaultdict(deque)  # client ip -> recent upload monotonic times
 _orient_slot = asyncio.Semaphore(1)
 
 
+def _discard(path):
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+
+
 def _require_admin(request):
     """404 rather than 401/403: an unauthenticated caller learns nothing about
     whether the endpoint (or the job) is there."""
@@ -153,8 +160,16 @@ async def create_job(request: Request, image: UploadFile):
         async with _orient_slot:
             await run_in_threadpool(exif.normalize_orientation, image_path)
         exif_info = exif.read_exif(image_path)
+    except asyncio.CancelledError:
+        # Cancelled while waiting on the bake (a server shutdown): the row
+        # was never going to be inserted, so drop the file now rather than
+        # leave it to the orphan sweep. A bake already mid-encode cannot be
+        # interrupted and its replace brings the file back; the sweep
+        # collects that one.
+        _discard(image_path)
+        raise
     except Exception as e:
-        os.unlink(image_path)
+        _discard(image_path)
         raise HTTPException(400, f"could not read image: {e}")
 
     # Precise GPS is captured into the job record above (the ephemeris layer
