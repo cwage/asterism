@@ -2,7 +2,7 @@ import math
 
 import numpy as np
 import pytest
-from PIL import Image
+from PIL import Image, ImageOps
 
 from app import exif
 from tests import synth
@@ -388,13 +388,20 @@ def _is_red(px):
     return px[0] > 200 and px[1] < 60 and px[2] < 60
 
 
-@pytest.mark.parametrize("orientation, size, block_at", [
-    (3, (64, 32), (56, 24)),     # upside down: block ends bottom-right
-    (6, (32, 64), (24, 8)),      # phone held portrait: rotate 90 CW to view
-    (8, (32, 64), (8, 56)),      # held the other way: rotate 90 CCW
+# Where the stored top-left block ends up once each Orientation value is
+# applied, plus a spot that must be dark afterwards (the block moved rather
+# than copied — except for 5, a transpose, which leaves that corner put).
+@pytest.mark.parametrize("orientation, size, block_at, dark_at", [
+    (2, (64, 32), (56, 8), (8, 8)),      # mirrored: block ends top-right
+    (3, (64, 32), (56, 24), (8, 8)),     # upside down: bottom-right
+    (4, (64, 32), (8, 24), (8, 8)),      # flipped: bottom-left
+    (5, (32, 64), (8, 8), (24, 56)),     # transposed: the corner stays
+    (6, (32, 64), (24, 8), (8, 8)),      # phone held portrait: rotate 90 CW
+    (7, (32, 64), (24, 56), (8, 8)),     # transversed: bottom-right
+    (8, (32, 64), (8, 56), (8, 8)),      # held the other way: rotate 90 CCW
 ])
 def test_normalize_orientation_bakes_the_tag_into_the_pixels(
-        tmp_path, orientation, size, block_at):
+        tmp_path, orientation, size, block_at, dark_at):
     """Portrait phone shots arrive as the landscape sensor frame plus an
     Orientation tag. Browsers rotate the photo; the solver, verifier and
     card do not — so the overlay's label layer came out 90 degrees off the
@@ -409,9 +416,32 @@ def test_normalize_orientation_bakes_the_tag_into_the_pixels(
         assert img.size == size
         assert img.getexif().get(exif.TAG_ORIENTATION, 1) == 1
         assert _is_red(img.getpixel(block_at))
-        assert not _is_red(img.getpixel((8, 8)))     # it moved, not copied
+        assert not _is_red(img.getpixel(dark_at))
     # a second pass has nothing to do
     assert exif.normalize_orientation(path) is False
+
+
+@pytest.mark.parametrize("orientation", range(2, 9))
+def test_normalize_orientation_agrees_with_pillows_reference(
+        tmp_path, orientation):
+    """ImageOps.exif_transpose is the reference for what a viewer shows.
+    A lossless format, so the pixels compare exactly; a pathlib.Path, as
+    tmp_path hands out and the other helpers accept."""
+    path = tmp_path / f"orient-{orientation}.png"
+    img = Image.new("RGB", (64, 32))
+    img.paste((255, 0, 0), (0, 0, 16, 16))
+    img.paste((0, 0, 255), (48, 16, 64, 32))
+    ex = Image.Exif()
+    ex[exif.TAG_ORIENTATION] = orientation
+    img.save(path, exif=ex)
+    with Image.open(path) as src:
+        expected = np.asarray(ImageOps.exif_transpose(src))
+
+    assert exif.normalize_orientation(path) is True
+
+    with Image.open(path) as out:
+        assert np.array_equal(np.asarray(out), expected)
+        assert out.getexif().get(exif.TAG_ORIENTATION, 1) == 1
 
 
 def test_normalize_orientation_keeps_what_the_pipeline_reads(tmp_path):
@@ -447,6 +477,35 @@ def test_normalize_orientation_keeps_what_the_pipeline_reads(tmp_path):
         ifd = img.getexif().get_ifd(exif.EXIF_IFD)
     assert (ifd[exif.TAG_PIXEL_X_DIMENSION],
             ifd[exif.TAG_PIXEL_Y_DIMENSION]) == (32, 64)
+
+
+def test_normalize_orientation_keeps_a_lone_width_tag_honest(tmp_path):
+    """Cameras that record only PixelXDimension are the ones the
+    sensor-width derivation (#70) serves. After a 90-degree turn the tag
+    has to describe the upright width, or the derivation refuses the file
+    as a resize — while a tag that already disagreed keeps disagreeing,
+    since that disagreement is what the refusal is built on."""
+    def portrait_canon(name, pixel_x_dimension):
+        ex = synth.build_exif(pixel_x_dimension=pixel_x_dimension,
+                              **CANON_5DS)
+        ex[exif.TAG_ORIENTATION] = 6
+        path = tmp_path / name
+        Image.new("RGB", (2172, 1418)).save(path, exif=ex)
+        assert exif.normalize_orientation(path) is True
+        with Image.open(path) as img:
+            ifd = img.getexif().get_ifd(exif.EXIF_IFD)
+        assert exif.TAG_PIXEL_Y_DIMENSION not in ifd
+        return path, ifd[exif.TAG_PIXEL_X_DIMENSION]
+
+    # the tag described the stored frame: it follows the pixels
+    path, stored_width = portrait_canon("honest.jpg", 2172)
+    assert stored_width == 1418
+    assert exif.read_exif(path)["focal_35mm_source"] == "sensor_width"
+
+    # it already disagreed (a resize that never updated it): still does
+    path, stored_width = portrait_canon("stale.jpg", 8688)
+    assert stored_width == 8688
+    assert exif.read_exif(path)["focal_35mm"] is None
 
 
 def test_normalize_orientation_leaves_an_upright_file_alone(tmp_path):

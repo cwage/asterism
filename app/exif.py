@@ -296,6 +296,7 @@ def normalize_orientation(path):
     teaching every overlay consumer, present and future, to transform
     coordinates.
     """
+    path = os.fspath(path)
     with Image.open(path) as img:
         ex = img.getexif()
         method = _ORIENTATION_TRANSPOSE.get(ex.get(TAG_ORIENTATION))
@@ -311,12 +312,19 @@ def normalize_orientation(path):
     if out.size != size and EXIF_IFD in ex:
         # The camera's recorded dimensions describe the sensor frame. The
         # sensor-width derivation (#70) refuses a file whose stored width
-        # disagrees with its pixel width, so keep them describing the file.
+        # disagrees with its pixel width, so a tag that described the
+        # stored frame goes on describing the file. One that already
+        # disagreed — a resize that never updated it — is the derivation's
+        # evidence, and stays as it was. Each tag on its own: a camera may
+        # write only the width.
         ifd = ex.get_ifd(EXIF_IFD)
-        px_x = ifd.get(TAG_PIXEL_X_DIMENSION)
-        px_y = ifd.get(TAG_PIXEL_Y_DIMENSION)
-        if px_x is not None and px_y is not None:
-            ifd[TAG_PIXEL_X_DIMENSION], ifd[TAG_PIXEL_Y_DIMENSION] = px_y, px_x
+        for tag, was, now in ((TAG_PIXEL_X_DIMENSION, size[0], out.width),
+                              (TAG_PIXEL_Y_DIMENSION, size[1], out.height)):
+            try:
+                if tag in ifd and int(ifd[tag]) == was:
+                    ifd[tag] = now
+            except (TypeError, ValueError):
+                pass
 
     # Encode beside the upload and swap in, so a failure mid-write leaves
     # the file as it arrived rather than truncated.
