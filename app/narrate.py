@@ -49,9 +49,11 @@ identified in the frame and the constellations drawn.
 Rules:
 - Mention only objects present in the input. Never invent objects, and never
   state a fact (distance, type, lore) unless you are certain of it.
-- status "hidden" means the object was in frame but not actually visible in
-  the pixels (cloud or haze, usually). You may mention at most one notable
-  hidden object, clearly as being there but not visible tonight.
+- status "visible" means the object was confirmed in the pixels. Describe
+  it as seen. status "hidden" means the object was in frame but not
+  actually visible in the pixels (cloud or haze, usually). You may mention
+  at most one notable hidden object, clearly as being there but not visible
+  tonight. Never call a "visible" object hidden, faint, or washed out.
 - kind "dso" is a deep-sky object; dso_type: OC = open cluster,
   Gxy = galaxy, Neb/OC+Neb = nebula, GC = globular cluster.
 - Lower magnitude = brighter. Lead with the most notable catch: the Moon,
@@ -154,11 +156,17 @@ def _client_or_none(client):
 
 
 def _payload(result):
-    """The trimmed, public-only view of the result the model gets to see."""
+    """The trimmed, public-only view of the result the model gets to see.
+
+    Verification statuses collapse to visible/hidden: the internal
+    "projected" (Moon, planets, DSOs that passed the pixel check) read to
+    the model as "computed but not seen", and it narrated a plainly
+    visible M31 as lost to haze."""
     labels = []
     for lab in result.get("labels") or []:
+        status = "hidden" if lab.get("status") == "hidden" else "visible"
         entry = {"name": lab.get("name"), "kind": lab.get("kind", "star"),
-                 "mag": lab.get("mag"), "status": lab.get("status")}
+                 "mag": lab.get("mag"), "status": status}
         if lab.get("dso_type"):
             entry["dso_type"] = lab["dso_type"]
         if lab.get("phase") is not None:
