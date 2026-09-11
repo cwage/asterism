@@ -68,6 +68,12 @@ def test_payload_is_trimmed_to_public_fields():
     assert m31["status"] == "hidden" and m31["dso_type"] == "Gxy"
     moon = next(l for l in payload["labels"] if l["name"] == "Moon")
     assert moon["moon_phase"] == 0.42
+    # internal statuses ("projected", "matched") collapse to "visible" so
+    # the model never reads a passed pixel check as "not seen"
+    assert moon["status"] == "visible"
+    sirius = next(l for l in payload["labels"] if l["name"] == "Sirius")
+    assert sirius["status"] == "visible"
+    assert {l["status"] for l in payload["labels"]} <= {"visible", "hidden"}
     assert payload["constellations"] == ["Orion"]
     # satellite crossings (#11) ride along as names only
     assert payload["satellites_crossing"] == ["Iss (Zarya)"]
