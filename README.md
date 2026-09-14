@@ -195,6 +195,14 @@ design; a few dozen phone JPEGs and their cards is nothing against the volume.
 
 ## Following new solves
 
+The homepage thumbnails carry up to two small sky labels (#126), such as
+"Milky Way core", "Summer Triangle", or "Pleiades". A deterministic table
+uses the solved constellations and non-hidden, in-frame object labels;
+otherwise it names the constellation of the brightest non-hidden catalog
+star. Region tags describe where the camera pointed, not whether Milky Way
+light was detected. They are derived on read, so older retained solves gain
+them too, without a new solve or model call.
+
 `/feed.atom` is the homepage strip as an Atom feed (#127): the same 24 newest
 successful solves, caption as the entry title, the share card inline and as an
 enclosure, and a link to the result page. It is the one way to follow the site

@@ -16,7 +16,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.routing import APIRoute
 
-from . import card, db, exif, stats
+from . import card, db, exif, sky_tags, stats
 
 app = FastAPI(title="asterism")
 db.init_db()
@@ -407,6 +407,7 @@ def _recent_solves():
         narration = result.get("narration") or {}
         solves.append({"id": row["id"], "created_at": row["created_at"],
                        "caption": narration.get("caption"),
+                       "sky_tags": sky_tags.for_result(result),
                        "text": narration.get("text")})
     return solves
 
@@ -416,12 +417,15 @@ def feed():
     """The homepage's public "recently solved" strip. This deliberately
     makes recent solves discoverable — job links used to be unlisted —
     and the upload-page disclosure says so before anyone uploads. The
-    caption is the thumbnail's alt text, sent only when there is one."""
+    caption is the thumbnail's alt text, sent only when there is one;
+    sky_tags give the eye a hint of what part of the sky it shows."""
     jobs = []
     for solve in _recent_solves():
         entry = {"id": solve["id"], "created_at": solve["created_at"]}
         if solve["caption"]:
             entry["caption"] = solve["caption"]
+        if solve["sky_tags"]:
+            entry["sky_tags"] = solve["sky_tags"]
         jobs.append(entry)
     return {"jobs": jobs}
 

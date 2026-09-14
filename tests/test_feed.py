@@ -65,6 +65,23 @@ def test_feed_empty_db(fresh_db):
     assert main.feed() == {"jobs": []}
 
 
+def test_feed_derives_sky_tags_for_existing_results(fresh_db, mini_catalog):
+    with db.get_conn() as conn:
+        _insert(conn, "orion", "done", "2026-08-13 23:00:00",
+                {"labels": [{"name": "Rigel", "kind": "star", "status": "matched"}],
+                 "exif": {"private": "must not leak"}})
+        _insert(conn, "core", "done", "2026-08-13 22:00:00",
+                {"constellations": [{"abbr": "Sco"}, {"abbr": "Sgr"}]})
+        _insert(conn, "hidden", "done", "2026-08-13 23:30:00",
+                {"constellations": [{"abbr": "Cru"}]})
+        conn.execute("UPDATE jobs SET hidden = 1 WHERE id = 'hidden'")
+    jobs = TestClient(main.app).get("/feed").json()["jobs"]
+    assert [job["id"] for job in jobs] == ["orion", "core"]
+    assert jobs[0]["sky_tags"] == ["Orion"]
+    assert jobs[1]["sky_tags"] == ["Milky Way core"]
+    assert set(jobs[0]) == {"id", "created_at", "sky_tags"}
+
+
 def _atom(base_url="http://testserver"):
     resp = TestClient(main.app, base_url=base_url).get("/feed.atom")
     assert resp.status_code == 200
