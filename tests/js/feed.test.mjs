@@ -54,6 +54,39 @@ test('malformed feed payload leaves the page alone', async () => {
   assert.equal(els.feed.children.length, 0);
 });
 
+test('sky chips sit under the photo inside the same result link', async () => {
+  const { sandbox, els } = loadPage();
+  sandbox.fetch = async () => ({ ok: true, json: async () => ({ jobs: [
+    { ...JOBS[0], sky_tags: ['Milky Way core', 'Ptolemy Cluster'] }, JOBS[1],
+  ] }) });
+  await sandbox.renderFeed();
+  const [tagged, legacy] = els.feed.children[1].children;
+  assert.ok(tagged.href.includes('bbb'));
+  assert.ok(tagged.children[0].alt.includes(JOBS[0].caption), 'caption stays as alt text');
+  assert.equal(tagged.children[1].className, 'sky-tags');
+  assert.deepEqual(Array.from(tagged.children[1].children, c => c.textContent),
+    ['Milky Way core', 'Ptolemy Cluster']);
+  assert.equal(legacy.children.length, 1, 'no empty chip container on older payloads');
+  sandbox.fetch = async () => ({ status: 410 });
+  await tagged.children[0].onerror();
+  assert.equal(els.feed.children[1].children.length, 1, 'expiration removes chips too');
+});
+
+test('sky chips are bounded plain text and tolerate missing or malformed tags', async () => {
+  const { sandbox, els } = loadPage();
+  sandbox.fetch = async () => ({ ok: true, json: async () => ({ jobs: [
+    { ...JOBS[0], sky_tags: [null, '', 123, '  ', '<img src=x onerror=alert(1)>', 'Orion', 'third'] },
+    { ...JOBS[1], sky_tags: 'Orion' },
+  ] }) });
+  await sandbox.renderFeed();
+  const [tagged, malformed] = els.feed.children[1].children;
+  const chips = tagged.children[1].children;
+  assert.equal(chips.length, 2);
+  assert.equal(chips[0].textContent, '<img src=x onerror=alert(1)>');
+  assert.equal(chips[0].children.length, 0);
+  assert.equal(malformed.children.length, 1);
+});
+
 test('empty feed renders nothing', async () => {
   const { sandbox, els } = loadPage();
   sandbox.fetch = async () => ({ ok: true, json: async () => ({ jobs: [] }) });

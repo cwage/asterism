@@ -11,6 +11,12 @@ def test_proper_names_still_win(mini_catalog):
     assert "α CMa" not in names
 
 
+def test_constellation_membership_for_feed_fallback(mini_catalog):
+    membership = {s["name"]: s["con"] for s in solver.load_catalog()}
+    assert membership["Rigel"] == "Ori"
+    assert membership["α Lup"] == "Lup"
+
+
 def test_unnamed_bright_star_gets_bayer_designation(mini_catalog):
     names = {s["name"] for s in solver.load_catalog()}
     assert "α Lup" in names

@@ -367,7 +367,8 @@ def load_catalog():
                 continue
             if mag > 4.5:
                 continue
-            stars.append({"name": name, "ra": ra, "dec": dec, "mag": mag})
+            stars.append({"name": name, "ra": ra, "dec": dec, "mag": mag,
+                          "con": (row.get("con") or "").strip()})
     stars.sort(key=lambda s: s["mag"])
     _catalog_cache = stars
     return stars
