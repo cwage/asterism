@@ -25,7 +25,7 @@ def test_init_db_adds_mode_column_to_old_schema(tmp_path, monkeypatch):
     with db.get_conn() as conn:
         row = conn.execute(
             "SELECT mode, orphan_recoveries, uploader_hash, device_json, "
-            "counted FROM jobs WHERE id = 'old1'"
+            "counted, content_hash FROM jobs WHERE id = 'old1'"
         ).fetchone()
         assert row["mode"] == "quick"
         assert row["orphan_recoveries"] == 0
@@ -34,6 +34,12 @@ def test_init_db_adds_mode_column_to_old_schema(tmp_path, monkeypatch):
         assert row["uploader_hash"] is None
         assert row["device_json"] is None
         assert row["counted"] == 0
+        # Dedupe (#120): an old row has no hash, so it never matches; the
+        # index is built after the column exists.
+        assert row["content_hash"] is None
         tables = {r[0] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table'")}
         assert {"meta", "daily_stats", "daily_uploaders"} <= tables
+        indexes = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index'")}
+        assert "jobs_content_hash" in indexes

@@ -23,7 +23,10 @@ CREATE TABLE IF NOT EXISTS jobs (
     -- been folded into daily_stats yet.
     uploader_hash TEXT,
     device_json TEXT,
-    counted INTEGER NOT NULL DEFAULT 0
+    counted INTEGER NOT NULL DEFAULT 0,
+    -- SHA-256 of the upload as received (#120): a second send of the same
+    -- bytes is answered with this row instead of a second solve.
+    content_hash TEXT
 );
 
 -- Daily history (#116), written by the retention sweep before it deletes
@@ -78,6 +81,7 @@ def init_db():
             ("uploader_hash", "TEXT"),
             ("device_json", "TEXT"),
             ("counted", "INTEGER NOT NULL DEFAULT 0"),
+            ("content_hash", "TEXT"),
         ):
             if name not in cols:
                 try:
@@ -85,3 +89,8 @@ def init_db():
                 except sqlite3.OperationalError as e:
                     if "duplicate column" not in str(e):
                         raise
+        # After the ALTERs, not in SCHEMA: on an older database the column
+        # is not there until the loop above adds it.
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS jobs_content_hash ON jobs (content_hash)"
+        )

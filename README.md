@@ -129,6 +129,8 @@ existed, so an abuser learns nothing from the response. The cached card PNG is
 unlinked immediately: `?job=` points OpenGraph at the card, so already-posted
 share links stop unfurling the image at the same moment. A job that hasn't
 solved yet also stops being claimable, so it can't burn a solve on its way out.
+Nor does a hidden job come back when the same file is uploaded again (#120):
+the re-upload becomes a fresh job, which you hide the same way.
 
 The row and the upload stay on disk until the retention sweep collects them,
 which is what makes a mistyped id recoverable and keeps the bytes available if
@@ -265,6 +267,20 @@ The cutoff matters: featured rows outlive the window, and without it they
 would mix older days into the answer. The salt rotates at UTC midnight, so a
 person active on both sides of it counts twice in any window that spans it; a
 small overcount, in the honest direction.
+
+## The same photo twice
+
+An upload is hashed (SHA-256) as received, before the orientation bake
+re-encodes it, and the hash stays on the row (`jobs.content_hash`, indexed). A
+second send of the same bytes gets the first job back (#120): `POST /jobs`
+answers with the existing id, its status, and `"duplicate": true`, and the page
+lands on that result in whatever state it is in, with a note on the status line
+saying why it was instant. Two of one week's fourteen uploads were exact
+repeats, and each one used to spend a bake and a solve on an answer that
+already existed. Hidden rows never match, so a takedown cannot be undone by
+sending the file again. A messaging-app copy has different bytes and is a
+different photo here, on purpose: near-duplicate detection is its own feature,
+and the WCS-overlap link (#119) covers the interesting half of it.
 
 ## Quickstart
 
