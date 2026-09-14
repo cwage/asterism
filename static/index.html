@@ -799,7 +799,7 @@ function draw() {
       ctx.moveTo(hx, hy);
       ctx.lineTo(hx - head * Math.cos(a + 0.5), hy - head * Math.sin(a + 0.5));
       ctx.stroke();
-      const text = `${p.name} ${Math.round(p.deg)}°`;
+      const text = `${p.name} ${formatDeg(p.deg)}`;
       const w = ctx.measureText(text).width;
       const h = ptrPx * 1.2;
       // Text sits inside the tail, on whichever side has room.
@@ -825,6 +825,14 @@ function describeText(job) {
   return [n.caption, n.text].filter(Boolean).join('\n\n');
 }
 
+// '8°', '0.4°': whole degrees, except under one degree where a tenth is
+// the difference between "on the edge" and "just past it". Math.round is
+// half-up, and the server side formats the same way, so the page, the
+// card and the narration all quote one number.
+function formatDeg(deg) {
+  return (deg < 1 ? deg.toFixed(1) : Math.round(deg)) + '°';
+}
+
 function starListText(job) {
   const r = job.result || {};
   const labels = (r.labels || []).filter(l => l.status !== 'hidden');
@@ -839,7 +847,7 @@ function starListText(job) {
   const dsos = names(['dso']);
   const stars = names(['star']);
   const cons = (r.constellations || []).map(c => c.name);
-  const beyond = (r.beyond || []).map(p => `${p.name} (${Math.round(p.deg)}° ${p.side})`);
+  const beyond = (r.beyond || []).map(p => `${p.name} (${formatDeg(p.deg)} ${p.side})`);
   if (bodies.length) lines.push('Solar system: ' + bodies.join(', '));
   if (dsos.length) lines.push('Deep-sky: ' + dsos.join(', '));
   if (stars.length) lines.push('Stars: ' + stars.join(', '));

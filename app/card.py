@@ -8,6 +8,8 @@ right/left/above/below text placement with collision avoidance."""
 import math
 import os
 
+from . import beyond
+
 CARD_WIDTH = 1600
 FOOTER_H = 128
 FONT_DIR = "/usr/share/fonts/truetype/dejavu"
@@ -253,7 +255,7 @@ def render(image_path, result, share_host, out_path):
             draw.line([(hx, hy), (hx - 13 * math.cos(a + da),
                                   hy - 13 * math.sin(a + da))],
                       fill=color, width=3)
-        text = f"{p['name']} {round(p['deg'])}°"
+        text = f"{p['name']} {beyond.format_deg(p['deg'])}"
         tw = draw.textlength(text, font=font_ptr)
         th = 29
         spots = {

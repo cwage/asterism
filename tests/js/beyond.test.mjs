@@ -81,6 +81,14 @@ test('the star list names them with distance and side', () => {
     'Just outside the frame: Saturn (8° right), Pleiades (M45) (12° above), Sirius (3° left)'));
 });
 
+test('distances keep a tenth under one degree and round half-up above', () => {
+  const { sandbox } = loadPage();
+  assert.equal(sandbox.formatDeg(0.4), '0.4°');   // just past the edge, not "0°"
+  assert.equal(sandbox.formatDeg(8.5), '9°');     // the same rule as the server side
+  assert.equal(sandbox.formatDeg(11.6), '12°');
+  assert.equal(sandbox.formatDeg(1.0), '1°');
+});
+
 test('a result without pointers draws and reads as before', () => {
   const { sandbox, els } = loadPage();
   const j = job();

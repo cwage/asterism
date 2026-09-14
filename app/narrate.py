@@ -18,6 +18,8 @@ import os
 
 from PIL import Image
 
+from . import beyond
+
 MODEL = os.environ.get("NARRATE_MODEL", "claude-haiku-4-5")
 MAX_CAPTION_CHARS = 90  # the card footer is one line
 MAX_TOKENS = 600
@@ -164,7 +166,7 @@ def _offset_phrase(pointer):
     geometry."""
     side = pointer.get("side")
     where = {"left": "to the left", "right": "to the right"}.get(side, side)
-    return f"{pointer['name']}, {round(pointer['deg'])}° {where}"
+    return f"{pointer['name']}, {beyond.format_deg(pointer['deg'])} {where}"
 
 
 def _payload(result):

@@ -159,3 +159,14 @@ def test_real_catalog_run_is_cheap_and_sane(tmp_path):
         assert p["deg"] <= beyond.MAX_EDGE_DEG
         assert p["edge_x"] in (0.0, WIDTH) or p["edge_y"] in (0.0, HEIGHT)
         assert math.hypot(p["ux"], p["uy"]) == pytest.approx(1.0, abs=0.002)
+
+
+def test_format_deg_matches_the_page():
+    # A tenth under one degree ("just past the edge", not "0°"), whole
+    # degrees above, ties half-up like Math.round — Python's own round
+    # would send 8.5 to 8 and put the card at odds with the page.
+    assert beyond.format_deg(0.4) == "0.4°"
+    assert beyond.format_deg(8.5) == "9°"
+    assert beyond.format_deg(11.6) == "12°"
+    assert beyond.format_deg(1.0) == "1°"
+    assert round(8.5) == 8  # the trap this exists to avoid
