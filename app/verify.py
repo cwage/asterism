@@ -16,6 +16,8 @@ surrounding annulus, or resolved member stars for clusters — and a DSO
 with no measurable signal at its position is marked hidden too.
 """
 
+import math
+
 import numpy as np
 from PIL import Image
 
@@ -43,6 +45,37 @@ DSO_CLUSTER_MIN_PEAKS = 3
 # Width the pre-solve star gate works at. Its isolation test is in fixed
 # pixels, so bigger uploads are scaled down to meet it (see count_stars).
 GATE_WIDTH = 1600
+
+# Limiting magnitude (#122): the deep catalog's detection rate per
+# half-magnitude bin, read off where it falls through DEPTH_DETECT_FRAC.
+DEPTH_BIN_MAG = 0.5
+DEPTH_MIN_PER_BIN = 6       # fewer stars than this and a bin says nothing
+DEPTH_MAX_PER_BIN = 120     # more than this is cost without information
+DEPTH_DETECT_FRAC = 0.5
+DEPTH_CONTROL_MAX = 0.3     # chance hits at star-free spots above this: no estimate
+DEPTH_WINDOW_MIN_PX = 12    # detection window radius floor, in pixels
+# The depth test accepts a source far closer than the label snap does.
+# Within SNAP_RADIUS_FRAC (21px, a third of a degree, on a 3472px frame)
+# the sky itself has a catalog star to magnitude 8 more often than not:
+# a real Pixel 8a frame measured a 62% hit rate at star-free control
+# spots. At 0.002 the chance rate is a tenth of that. What the tight
+# radius costs is stars whose corrected position is off by more than a
+# few pixels, which biases the answer shallower — the honest direction.
+DEPTH_SNAP_FRAC = 0.002
+DEPTH_SNAP_MIN_PX = 4.0
+DEPTH_SNAP_RESID = 1.5      # ...or this many times the bright stars' own snap residual
+DEPTH_SNAP_MAX_FRAC = 0.005 # never wider than this, whatever the residual says
+DEPTH_STOP_MARGIN = 0.15    # raw rate this close to chance, twice running: stop walking
+# The threshold is relative to how many of the *bright* stars are found:
+# a treeline over a third of the frame, or a cloud bank, hides a third of
+# every bin alike, and must not read as the sky running out at magnitude
+# 3. Below DEPTH_BASELINE_MIN even the bright stars are mostly missing —
+# foreground, cloud, a warped field the fit didn't follow — and the
+# method has nothing honest to say. 0.45 admits the common half-sky,
+# half-garden composition (measured at 0.49-0.52 on a greenhouse scene
+# with trees across the bottom 45% of the frame).
+DEPTH_BASELINE_MAG = 4.5    # bins to this centre define the bright end
+DEPTH_BASELINE_MIN = 0.45
 
 
 def count_stars(image_path, grid=24, thr_sigma=5.0, min_amp=12.0,
@@ -226,6 +259,109 @@ def _fit_field(matches, norm, lam=1e-3):
     return field, len(m)
 
 
+def _source_within(img, x, y, snap_r, win_r):
+    """Whether a detected peak sits within snap_r of (x, y)."""
+    for px, py, _ in _peaks_near(img, x, y, win_r):
+        if (px - x) ** 2 + (py - y) ** 2 <= snap_r ** 2:
+            return True
+    return False
+
+
+def _limiting_magnitude(img, deep, field_at, resid_p90=0.0):
+    """How faint the photo reaches (#122). The deep catalog [(x, y, mag)]
+    is tested bin by bin, bright to faint, for a detected source at each
+    star's warp-corrected position; the limit is where the detection rate
+    falls through DEPTH_DETECT_FRAC of the bright-end rate, interpolated
+    between bin centres.
+
+    Every test is paired with a control at a star-free offset. The chance
+    rate that measures is taken out of every bin before anything is read,
+    and a frame where any spot has a peak nearby (noise, JPEG blocking, a
+    crowded field) reports no limit rather than a flattering one. The
+    acceptance radius follows the precision the frame's own bright stars
+    snapped with (`resid_p90`), so a warped frame whose fit is loose is
+    tested loosely, and the control still says what that costs. The walk
+    stops once two bins running detect no more than chance would."""
+    h, w = img.shape
+    snap_r = min(max(DEPTH_SNAP_MIN_PX, w * DEPTH_SNAP_FRAC,
+                     DEPTH_SNAP_RESID * resid_p90),
+                 max(DEPTH_SNAP_MIN_PX, w * DEPTH_SNAP_MAX_FRAC))
+    win_r = max(DEPTH_WINDOW_MIN_PX, 2.0 * snap_r)
+    bins = {}
+    for x, y, mag in deep:
+        bins.setdefault(math.floor(mag / DEPTH_BIN_MAG), []).append((x, y))
+    # The catalog's own cut leaves its last bin partial; a half-empty bin
+    # would misplace the "catalog ran out" edge, so it is not walked.
+    faintest = max(mag for _, _, mag in deep)
+    curve = []
+    control_hits = control_n = 0
+    quiet = 0
+    for key in sorted(bins):
+        if (key + 1) * DEPTH_BIN_MAG > faintest + 1e-9:
+            break
+        stars = bins[key]
+        if len(stars) < DEPTH_MIN_PER_BIN:
+            continue
+        step = max(1, len(stars) // DEPTH_MAX_PER_BIN)
+        hits = n = 0
+        for x, y in stars[::step][:DEPTH_MAX_PER_BIN]:
+            dx, dy = field_at(x, y)
+            cx, cy = x + dx, y + dy
+            if not (win_r <= cx < w - win_r and win_r <= cy < h - win_r):
+                continue
+            n += 1
+            hits += _source_within(img, cx, cy, snap_r, win_r)
+            ox = cx + 3 * win_r if cx + 4 * win_r < w else cx - 3 * win_r
+            control_n += 1
+            control_hits += _source_within(img, ox, cy, snap_r, win_r)
+        if n < DEPTH_MIN_PER_BIN:
+            continue
+        frac = hits / n
+        curve.append([round((key + 0.5) * DEPTH_BIN_MAG, 2), n, round(frac, 2)])
+        running_control = control_hits / control_n
+        quiet = quiet + 1 if frac - running_control <= DEPTH_STOP_MARGIN else 0
+        if quiet >= 2:
+            break
+    control_frac = control_hits / control_n if control_n else 0.0
+    out = {"limiting_mag": None, "curve": curve, "snap_px": round(snap_r, 1),
+           "control_frac": round(control_frac, 2), "baseline": None,
+           "catalog_limited": False}
+    if not curve or control_frac > DEPTH_CONTROL_MAX:
+        return out
+
+    def excess(frac):
+        # Chance hits inflate every bin alike: what a bin genuinely
+        # detected is what's left once that rate is taken out.
+        return max(0.0, (frac - control_frac) / (1.0 - control_frac))
+
+    bright = [(n, f) for c, n, f in curve if c <= DEPTH_BASELINE_MAG]
+    bright_n = sum(n for n, _ in bright)
+    if bright_n < DEPTH_MIN_PER_BIN:
+        return out
+    baseline = excess(sum(n * f for n, f in bright) / bright_n)
+    out["baseline"] = round(baseline, 2)
+    if baseline < DEPTH_BASELINE_MIN:
+        return out
+    threshold = DEPTH_DETECT_FRAC * baseline
+    fracs = [excess(f) for _, _, f in curve]
+    # The trailing run of failing bins; its first member is the crossing.
+    i = len(curve)
+    while i > 0 and fracs[i - 1] < threshold:
+        i -= 1
+    if i == len(curve):
+        # Never fell through: the catalog ran out before the photo did.
+        out["limiting_mag"] = round(curve[-1][0] + DEPTH_BIN_MAG / 2, 1)
+        out["catalog_limited"] = True
+        return out
+    if i == 0:
+        return out  # even the brightest bin fails: nothing to read
+    m1, m2 = curve[i - 1][0], curve[i][0]
+    f1, f2 = fracs[i - 1], fracs[i]
+    out["limiting_mag"] = round(
+        m1 + (f1 - threshold) / (f1 - f2) * (m2 - m1), 1)
+    return out
+
+
 def _dso_glow_visible(img, x, y, r):
     """Extended-source check: median brightness inside DSO_CORE_FRAC * r
     against the DSO_ANNULUS ring, thresholded on the annulus's own noise.
@@ -275,10 +411,14 @@ def _dso_visible(img, lab, x, y, width):
     return _dso_glow_visible(img, x, y, r)
 
 
-def apply(image_path, labels, figures):
+def apply(image_path, labels, figures, deep=None):
     """Verify and correct labels/figures against the image. Returns
     (labels, figures, meta). Never raises on a bad image: the originals
     come back with meta["verified"] = False.
+
+    `deep`, when given, is the full in-frame catalog as [(x, y, mag)]
+    (solver.project_deep); meta then carries "depth", the limiting
+    magnitude estimate (#122), measured with the same warp field.
 
     Assumes the WCS came from a star match: the displacement field is
     fitted by pairing each projected star with the nearest peak inside a
@@ -382,6 +522,15 @@ def apply(image_path, labels, figures):
         out_figures.append({**fig, "segments": segments})
 
     p90 = float(np.percentile(corrections, 90)) if corrections else 0.0
+    depth = None
+    if deep:
+        # How precisely the field put the bright stars where they were
+        # found sets how close the depth test demands a source to be.
+        residuals = [np.hypot(lab["x"] - cx, lab["y"] - cy)
+                     for lab, _, (cx, cy), _ in snaps
+                     if lab["status"] == "matched"]
+        resid_p90 = float(np.percentile(residuals, 90)) if residuals else 0.0
+        depth = _limiting_magnitude(img, deep, field_at, resid_p90)
     meta = {
         "verified": True,
         "stars_matched": matched,
@@ -393,4 +542,6 @@ def apply(image_path, labels, figures):
         "p90_correction_px": round(p90, 1),
         "warped": bool(p90 > max(6.0, width * WARP_FLAG_FRAC)),
     }
+    if depth is not None:
+        meta["depth"] = depth
     return out, out_figures, meta

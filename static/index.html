@@ -171,6 +171,14 @@
                background: var(--panel); padding: 0.75rem 1rem;
                margin: 0 0 0.75rem; font-size: 0.95rem; color: var(--ink); }
   #narration:empty { display: none; }
+  /* The night's conditions (#121, #122): one plain sentence each, dressed
+     like the narration. Empty until a solve has something to say. */
+  #night { border: 1px solid #1c2634; border-radius: 10px;
+           background: var(--panel); padding: 0.75rem 1rem;
+           margin: 0 0 0.75rem; font-size: 0.95rem; color: var(--ink); }
+  #night:empty { display: none; }
+  #night p { margin: 0; }
+  #night p + p { margin-top: 0.4rem; }
 
   /* Hidden until render() has a photo: an empty inline-block still claims a
      line box, which would gap the feed away from the upload control. */
@@ -248,6 +256,7 @@
 </div>
 <div id="actions"></div>
 <div id="narration"></div>
+<div id="night"></div>
 <div id="controls" hidden>
   <!-- Each toggle carries its layer's colour, so the controls double as
        the key to the overlay: what a blue ring, a gold ring, a coral
@@ -640,6 +649,7 @@ function clearResult() {
   document.getElementById('guess').replaceChildren();
   document.getElementById('fail-detail').textContent = '';
   document.getElementById('narration').textContent = '';
+  document.getElementById('night').replaceChildren();
   document.getElementById('controls').hidden = true;
 }
 
@@ -1127,7 +1137,14 @@ function draw() {
 // chore. Both builders are pure so the tests can read them directly.
 function describeText(job) {
   const n = (job.result && job.result.narration) || {};
-  return [n.caption, n.text].filter(Boolean).join('\n\n');
+  return [n.caption, n.text, nightLines(job).join(' ')].filter(Boolean).join('\n\n');
+}
+
+// What the night was like and how faint the photo reached (#121, #122):
+// the worker's own sentences, verbatim, so the page and the copied
+// description say the same thing.
+function nightLines(job) {
+  return ((job.result || {}).night || {}).lines || [];
 }
 
 // '8°', '0.4°': whole degrees, except under one degree where a tenth is
@@ -1238,6 +1255,11 @@ function render(id, job) {
     const narration = job.result.narration;
     document.getElementById('narration').textContent =
       (narration && narration.text) || '';
+    document.getElementById('night').replaceChildren(...nightLines(job).map(line => {
+      const p = document.createElement('p');
+      p.textContent = line;
+      return p;
+    }));
   };
   img.hidden = false;
   document.getElementById('wrap').style.display = 'inline-block';

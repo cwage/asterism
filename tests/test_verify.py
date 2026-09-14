@@ -278,3 +278,90 @@ def test_unreadable_image_returns_originals(tmp_path):
     assert meta["verified"] is False
     # no statuses invented for labels we could not check
     assert all("status" not in l for l in out_labels)
+
+
+# ---- limiting magnitude (#122) ----
+
+def _graded_field(seed=3, n=300, lo=2.0, hi=8.0):
+    """Stars at least 30px apart with magnitudes spread over [lo, hi],
+    rendered on the same 255-at-magnitude-3 scale as synth.render_starfield
+    so a 12-ADU detection floor sits at magnitude 6.3."""
+    rng = np.random.default_rng(seed)
+    pts, mags = [], []
+    while len(pts) < n:
+        x, y = rng.uniform(40, WIDTH - 40), rng.uniform(40, HEIGHT - 40)
+        if all((x - px) ** 2 + (y - py) ** 2 > 30 ** 2 for px, py in pts):
+            pts.append((x, y))
+            mags.append(float(rng.uniform(lo, hi)))
+    amps = [255.0 * 10 ** (-0.4 * (m - 3.0)) for m in mags]
+    return pts, mags, amps
+
+
+def test_limiting_magnitude_reads_where_stars_stop_being_detected(tmp_path):
+    pts, mags, amps = _graded_field()
+    path = tmp_path / "deep.jpg"
+    synth.render_points(str(path), pts, WIDTH, HEIGHT, amps=amps)
+    bright = [(x, y, m) for (x, y), m in zip(pts, mags) if m <= 3.5]
+    labels = [{"name": f"S{i}", "x": x, "y": y, "mag": m, "kind": "star"}
+              for i, (x, y, m) in enumerate(bright)]
+    deep = [(x, y, m) for (x, y), m in zip(pts, mags)]
+    _, _, meta = verify.apply(str(path), labels, [], deep=deep)
+    d = meta["depth"]
+    assert 5.8 <= d["limiting_mag"] <= 6.8
+    assert d["catalog_limited"] is False
+    assert d["control_frac"] <= 0.15
+    assert d["curve"][0][2] >= 0.9        # the bright end is all there
+    assert d["curve"][-1][2] < 0.5         # and the walk ended in failure
+    assert all(n >= verify.DEPTH_MIN_PER_BIN for _, n, _ in d["curve"])
+
+
+def test_depth_is_catalog_limited_when_every_star_shows(tmp_path):
+    pts, mags, amps = _graded_field(lo=2.0, hi=4.5)
+    path = tmp_path / "shallow.jpg"
+    synth.render_points(str(path), pts, WIDTH, HEIGHT, amps=amps)
+    deep = [(x, y, m) for (x, y), m in zip(pts, mags)]
+    _, _, meta = verify.apply(str(path), star_labels(pts[:12]), [], deep=deep)
+    d = meta["depth"]
+    assert d["catalog_limited"] is True
+    # the faint edge of the last *full* bin: the catalog's own cut leaves
+    # 4.0-4.5 partial, and a half-empty bin is not walked
+    assert d["limiting_mag"] == 4.0
+    assert d["baseline"] >= 0.9
+
+
+def test_no_limit_when_the_catalog_points_at_empty_sky(tmp_path):
+    path = tmp_path / "sparse.jpg"
+    synth.render_points(str(path), PREDICTED, WIDTH, HEIGHT)
+    rng = np.random.default_rng(5)
+    deep = [(float(rng.uniform(60, WIDTH - 60)), float(rng.uniform(60, HEIGHT - 60)), float(m))
+            for m in np.linspace(3.0, 7.9, 80)]
+    _, _, meta = verify.apply(str(path), star_labels(PREDICTED), [], deep=deep)
+    assert meta["depth"]["limiting_mag"] is None
+    assert meta["depth"]["curve"]          # it looked, and found nothing
+    assert meta["depth"]["baseline"] < verify.DEPTH_BASELINE_MIN
+
+
+def test_a_third_of_the_sky_behind_a_treeline_does_not_move_the_limit(tmp_path):
+    # Every star in the bottom third of the frame is missing, the way a
+    # foreground hides them. The bright end is found at two thirds, the
+    # threshold follows it, and the limit is still where the stars fade.
+    pts, mags, amps = _graded_field()
+    shown = [(p, a) for p, a in zip(pts, amps) if p[1] < HEIGHT * 2 / 3]
+    path = tmp_path / "treeline.jpg"
+    synth.render_points(str(path), [p for p, _ in shown], WIDTH, HEIGHT,
+                        amps=[a for _, a in shown])
+    bright = [(x, y, m) for (x, y), m in zip(pts, mags) if m <= 3.5]
+    labels = [{"name": f"S{i}", "x": x, "y": y, "mag": m, "kind": "star"}
+              for i, (x, y, m) in enumerate(bright)]
+    deep = [(x, y, m) for (x, y), m in zip(pts, mags)]
+    _, _, meta = verify.apply(str(path), labels, [], deep=deep)
+    d = meta["depth"]
+    assert 0.55 <= d["baseline"] <= 0.8
+    assert 5.8 <= d["limiting_mag"] <= 6.8
+
+
+def test_depth_is_skipped_without_a_deep_catalog(tmp_path):
+    path = tmp_path / "clean.jpg"
+    synth.render_points(str(path), PREDICTED, WIDTH, HEIGHT)
+    _, _, meta = verify.apply(str(path), star_labels(PREDICTED), [])
+    assert "depth" not in meta

@@ -6,8 +6,8 @@ import json
 
 import pytest
 
-from app import (beyond, constellations, db, ephemeris, narrate, satellites,
-                 solver, verify, worker)
+from app import (beyond, constellations, db, ephemeris, narrate, night,
+                 satellites, solver, verify, worker)
 
 JOB = {"id": "abc123", "image_path": "/photos/x.jpg", "mode": "quick",
        "exif_json": json.dumps({"width": 100, "height": 100})}
@@ -37,6 +37,10 @@ def stub_solve(tmp_path, monkeypatch):
     # The fake WCS path above would make the off-frame layer raise (and
     # log) on every test; stub it like the rest.
     monkeypatch.setattr(beyond, "annotate", lambda *a, **k: [])
+    # Same for the deep catalog projection and the night context (#121,
+    # #122): both read the WCS file, and neither is what these tests test.
+    monkeypatch.setattr(solver, "project_deep", lambda *a, **k: None)
+    monkeypatch.setattr(night, "annotate", lambda *a, **k: None)
 
 
 def test_bodies_merge_ahead_of_stars(monkeypatch):
@@ -383,3 +387,45 @@ def test_beyond_pointers_ride_along_and_never_sink_the_job(monkeypatch):
     status, result, error = worker.process(JOB)
     assert status == "done" and error is None
     assert result["beyond"] == []
+
+
+def test_night_context_is_stored_and_handed_to_the_narrator(monkeypatch):
+    lines = ["The Moon was new, so it added no light to the sky."]
+    seen = {}
+    monkeypatch.setattr(
+        night, "annotate",
+        lambda exif, wcs, labels, pointers, verification: {"lines": list(lines)})
+
+    def narrate_stub(result, image_path=None, client=None):
+        seen["night"] = result.get("night")  # built before the narration runs
+        return None
+    monkeypatch.setattr(narrate, "annotate", narrate_stub)
+    status, result, error = worker.process(JOB)
+    assert status == "done" and error is None
+    assert result["night"] == {"lines": lines}
+    assert seen["night"] == {"lines": lines}
+
+
+def test_night_context_failure_never_sinks_a_solve(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("ephemeris exploded")
+    monkeypatch.setattr(night, "annotate", boom)
+    status, result, error = worker.process(JOB)
+    assert status == "done" and error is None
+    assert result["night"] is None
+    assert result["labels"]  # the rest of the result is untouched
+
+
+def test_deep_catalog_projection_failure_still_verifies(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("no such wcs")
+    monkeypatch.setattr(solver, "project_deep", boom)
+    calls = []
+
+    def apply_stub(image_path, labels, figures, deep=None):
+        calls.append(deep)
+        return labels, figures, {"verified": True}
+    monkeypatch.setattr(verify, "apply", apply_stub)
+    status, result, _ = worker.process(JOB)
+    assert status == "done"
+    assert calls == [None]  # verification ran, just without a depth estimate
