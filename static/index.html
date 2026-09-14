@@ -221,7 +221,13 @@
 plate solving.</footer>
 
 <script>
-const status = (m) => document.getElementById('status').textContent = m;
+// Jobs handed back for a re-upload of the same bytes (#120), by id. The
+// note rides on every status write for that job, whichever path makes it
+// (the poll, the photo's load handler, a deepen), and an older poll
+// finishing late cannot pin it on a newer upload.
+const duplicates = new Set();
+const status = (m, id) => document.getElementById('status').textContent =
+  (id && duplicates.has(id) ? 'same photo as an earlier upload · ' : '') + m;
 
 // --- "What is this?" explainer (#74) ---
 // Testers took a full minute to work out what the page was, and never spotted
@@ -331,18 +337,13 @@ document.getElementById('file').addEventListener('change', async (e) => {
   const { id, duplicate } = await res.json();
   // The URL is the share link: make it bookmarkable the moment a job exists.
   history.pushState(null, '', '?job=' + encodeURIComponent(id));
-  await poll(id);
   // The same bytes as an earlier upload get that job back instead of a
-  // second solve (#120). Say so once the result is up: an answer that
-  // lands before the spinner reads as a glitch, and an instant failure
-  // reads as "it didn't even try".
-  if (duplicate) noteDuplicate();
+  // second solve (#120). Say so on its status line: an answer that lands
+  // before the spinner reads as a glitch, and an instant failure reads
+  // as "it didn't even try".
+  if (duplicate) duplicates.add(id);
+  poll(id);
 });
-
-function noteDuplicate() {
-  const s = document.getElementById('status');
-  s.textContent = 'same photo as an earlier upload · ' + s.textContent;
-}
 
 // Deep-link an existing job: /?job=<id> renders it without re-uploading.
 const jobParam = new URLSearchParams(location.search).get('job');
@@ -352,7 +353,7 @@ if (jobParam) poll(jobParam);
 window.addEventListener('popstate', () => location.reload());
 
 async function poll(id) {
-  status('solving…');
+  status('solving…', id);
   document.getElementById('actions').replaceChildren();
   document.getElementById('failbox').hidden = true;
   document.getElementById('advice').replaceChildren();
@@ -377,9 +378,9 @@ async function poll(id) {
     if (job.status === 'queued') {
       status(job.queue_position > 0
         ? `in queue — ${job.queue_position} ahead of you (${secs}s)`
-        : `up next… (${secs}s)`);
+        : `up next… (${secs}s)`, id);
     } else {
-      status(`solving… (${secs}s)`);
+      status(`solving… (${secs}s)`, id);
     }
     await new Promise(r => setTimeout(r, 2000));
   }
@@ -413,7 +414,7 @@ function renderAdvice(code) {
 
 function renderFailure(id, job) {
   const f = job.result && job.result.failure;
-  status('solve failed');
+  status('solve failed', id);
   // One explanation panel (#110), everything above the photo. The LLM's
   // note about what the photo appears to be leads when present — it
   // already folds in the advice diagnosis — with the static advice copy
@@ -456,7 +457,7 @@ function renderFailure(id, job) {
   btn.onclick = async () => {
     btn.remove();
     const res = await fetch('/jobs/' + encodeURIComponent(id) + '/deepen', { method: 'POST' });
-    if (!res.ok) { status('could not restart job: ' + await res.text()); return; }
+    if (!res.ok) { status('could not restart job: ' + await res.text(), id); return; }
     poll(id);
   };
   document.getElementById('actions').append(btn);
@@ -772,7 +773,7 @@ function render(id, job) {
       else if (eph.time_source === 'gps_longitude') notes.push('timezone estimated from GPS longitude — Moon/planet positions may be off by an hour or two');
     }
     status(`solved in ${job.solve_seconds}s — labeled ${parts.join(', ')}`
-           + (notes.length ? ` (${notes.join('; ')})` : ''));
+           + (notes.length ? ` (${notes.join('; ')})` : ''), id);
     // LLM narration (#12): the worker's "what you captured" writeup.
     const narration = job.result.narration;
     document.getElementById('narration').textContent =

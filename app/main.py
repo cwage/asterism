@@ -148,8 +148,6 @@ def index(request: Request, job: str | None = None):
 async def create_job(request: Request, image: UploadFile):
     if _rate_limited(_client_ip(request)):
         raise HTTPException(429, "rate limit: try again in a bit")
-    if _queue_depth() >= MAX_QUEUE_DEPTH:
-        raise HTTPException(503, "solve queue is full: try again in a few minutes")
 
     data = await image.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
@@ -159,14 +157,21 @@ async def create_job(request: Request, image: UploadFile):
     # re-encodes the file: a phone's second send of one frame matches its
     # first, and a messaging app's re-compressed copy does not (that is a
     # different photo to every reader downstream, and a different feature).
-    # Looked up before anything touches the disk, so the common case, the
-    # same file again minutes later, costs neither a write nor a bake.
+    # Looked up before the queue gate and before anything touches the
+    # disk: a re-upload enqueues, bakes and solves nothing, so a full
+    # queue is no reason to turn it away, and the common case, the same
+    # file again minutes later, costs neither a write nor a bake. The
+    # body read it costs a rejected upload is bounded by the rate limit.
     content_hash = await run_in_threadpool(_sha256, data)
     with db.get_conn() as conn:
         existing = _same_upload(conn, content_hash)
     if existing:
         await image.close()
         return existing
+
+    if _queue_depth() >= MAX_QUEUE_DEPTH:
+        await image.close()
+        raise HTTPException(503, "solve queue is full: try again in a few minutes")
 
     # Full 128 bits: the result URL is the only access control (#21).
     job_id = uuid.uuid4().hex

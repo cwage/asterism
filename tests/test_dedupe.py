@@ -155,6 +155,22 @@ def test_two_sends_seconds_apart_share_one_row(client, monkeypatch):
     assert os.listdir(main.UPLOAD_DIR) == []
 
 
+def test_a_full_queue_still_answers_a_duplicate(client, monkeypatch):
+    """A re-upload enqueues nothing, so the capacity gate is not its
+    business; a new upload still meets it."""
+    data = _jpeg()
+    first = _post(client, data)
+    monkeypatch.setattr(main, "MAX_QUEUE_DEPTH", 0)
+
+    again = _post(client, data)
+    assert again["id"] == first["id"] and again["duplicate"] is True
+    fresh = client.post("/jobs", files={"image": ("sky.jpg", _jpeg(shade=9),
+                                                  "image/jpeg")})
+    assert fresh.status_code == 503, fresh.text
+    with db.get_conn() as conn:
+        assert len(_rows(conn)) == 1
+
+
 def test_the_hash_is_not_served(client):
     data = _jpeg()
     job_id = _post(client, data)["id"]
