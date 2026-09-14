@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse
 
-from . import card, db, exif
+from . import card, db, exif, stats
 
 app = FastAPI(title="asterism")
 db.init_db()
@@ -195,10 +195,24 @@ async def create_job(request: Request, image: UploadFile):
                  "strip location data and re-upload"
         )
 
+    # Uploader record (#116): the camera facts the served file carries
+    # anyway, kept out of exif_json because /jobs/{id} serves that; and a
+    # hash of the client address under today's salt — never the address.
+    # Both best-effort: a job is not worth rejecting over its bookkeeping.
+    try:
+        device = exif.read_device(image_path)
+    except Exception:
+        device = None
     with db.get_conn() as conn:
+        try:
+            uploader = stats.uploader_hash(conn, _client_ip(request))
+        except Exception:
+            uploader = None
         conn.execute(
-            "INSERT INTO jobs (id, image_path, exif_json) VALUES (?, ?, ?)",
-            (job_id, image_path, json.dumps(exif_info)),
+            "INSERT INTO jobs (id, image_path, exif_json, uploader_hash, "
+            "device_json) VALUES (?, ?, ?, ?, ?)",
+            (job_id, image_path, json.dumps(exif_info), uploader,
+             json.dumps(device) if device else None),
         )
     return {"id": job_id, "status": "queued"}
 

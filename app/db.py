@@ -17,7 +17,31 @@ CREATE TABLE IF NOT EXISTS jobs (
     mode TEXT NOT NULL DEFAULT 'quick',
     orphan_recoveries INTEGER NOT NULL DEFAULT 0,
     hidden INTEGER NOT NULL DEFAULT 0,
-    featured INTEGER NOT NULL DEFAULT 0
+    featured INTEGER NOT NULL DEFAULT 0,
+    -- Uploader record (#116): a per-day HMAC of the client address, the
+    -- camera facts the served file carries anyway, and whether the row has
+    -- been folded into daily_stats yet.
+    uploader_hash TEXT,
+    device_json TEXT,
+    counted INTEGER NOT NULL DEFAULT 0
+);
+
+-- Daily history (#116), written by the retention sweep before it deletes
+-- the rows it was computed from. Keyed by the UTC day of created_at.
+CREATE TABLE IF NOT EXISTS daily_stats (
+    day TEXT PRIMARY KEY,
+    uploads INTEGER NOT NULL DEFAULT 0,
+    solved INTEGER NOT NULL DEFAULT 0,
+    failed INTEGER NOT NULL DEFAULT 0,
+    hidden INTEGER NOT NULL DEFAULT 0,
+    reasons_json TEXT NOT NULL DEFAULT '{}'
+);
+
+-- The day's distinct uploader hashes. Opaque once the day's salt is gone.
+CREATE TABLE IF NOT EXISTS daily_uploaders (
+    day TEXT NOT NULL,
+    uploader_hash TEXT NOT NULL,
+    PRIMARY KEY (day, uploader_hash)
 );
 
 -- Small key/value scratch for things that must survive the machine
@@ -51,6 +75,9 @@ def init_db():
             ("orphan_recoveries", "INTEGER NOT NULL DEFAULT 0"),
             ("hidden", "INTEGER NOT NULL DEFAULT 0"),
             ("featured", "INTEGER NOT NULL DEFAULT 0"),
+            ("uploader_hash", "TEXT"),
+            ("device_json", "TEXT"),
+            ("counted", "INTEGER NOT NULL DEFAULT 0"),
         ):
             if name not in cols:
                 try:

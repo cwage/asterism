@@ -20,6 +20,8 @@ import traceback
 import urllib.error
 import urllib.request
 
+from .stats import failure_reason
+
 def _int_env(name, default):
     """Set-but-empty counts as unset. `${NTFY_TICK_SECONDS:-}` in a compose
     file passes an empty string, and int("") at import time would take the
@@ -96,21 +98,20 @@ def _set(conn, key, value):
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
 
 
-def _reason(result_json):
-    try:
-        return ((json.loads(result_json or "{}").get("failure") or {})
-                .get("reason"))
-    except (ValueError, AttributeError):
-        return None
-
-
 def activity_counts(conn, since):
     """What the site did since `since` (a UTC 'YYYY-MM-DD HH:MM:SS' string).
 
     Undercounts by whatever the retention sweep already removed — rows are
-    the only record, so a window longer than RETENTION_HOURS cannot be
-    complete. Accepted in #69 rather than solved: the burst alert, which is
-    the one that has to be right, fires while the traffic is happening.
+    the only record this reads, so a window longer than RETENTION_HOURS
+    cannot be complete. Accepted in #69 rather than solved here: the burst
+    alert, which is the one that has to be right, fires while the traffic
+    is happening, and the daily history (#116, `stats.history`) keeps the
+    long-run counts the sweep used to take with it.
+
+    `uploaders` is distinct client hashes (#116). The hash salt rotates at
+    UTC midnight, so a window that spans it counts one person active on
+    both sides twice — a small overcount, in the honest direction for a
+    number that exists to say "was that one person or fifteen".
     """
     rows = conn.execute(
         "SELECT status, result_json, hidden FROM jobs WHERE created_at >= ?",
@@ -122,7 +123,7 @@ def activity_counts(conn, since):
             counts["solved"] += 1
         elif row["status"] == "failed":
             counts["failed"] += 1
-            reason = _reason(row["result_json"])
+            reason = failure_reason(row["result_json"])
             if reason:
                 counts["reasons"][reason] = counts["reasons"].get(reason, 0) + 1
         if row["hidden"]:
@@ -132,11 +133,19 @@ def activity_counts(conn, since):
     # the only reading of it that means anything.
     counts["featured"] = conn.execute(
         "SELECT COUNT(*) FROM jobs WHERE featured = 1").fetchone()[0]
+    counts["uploaders"] = conn.execute(
+        "SELECT COUNT(DISTINCT uploader_hash) FROM jobs "
+        "WHERE created_at >= ? AND uploader_hash IS NOT NULL",
+        (since,)).fetchone()[0]
     return counts
 
 
 def format_summary(counts):
-    parts = [f"{counts['uploads']} uploads", f"{counts['solved']} solved"]
+    uploads = f"{counts['uploads']} uploads"
+    people = counts.get("uploaders")
+    if people:
+        uploads += f" from {people} {'person' if people == 1 else 'people'}"
+    parts = [uploads, f"{counts['solved']} solved"]
     failed = f"{counts['failed']} failed"
     if counts["reasons"]:
         worst = sorted(counts["reasons"].items(), key=lambda kv: -kv[1])

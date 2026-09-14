@@ -217,13 +217,45 @@ having nothing to report — `auto_stop_machines` only stops the machine when
 nobody has uploaded — so the summary drifts to the first tick after the next
 wake, on a day when it reads `0 uploads` anyway. The burst alert is unaffected:
 it fires while the traffic is happening, which is the whole point of it. A
-wake gap longer than `RETENTION_HOURS` undercounts the summary, since the swept
-rows were the only record; the retention sweep has had the same property since
-#23.
+wake gap longer than `RETENTION_HOURS` undercounts the summary, since it reads
+live rows and the swept ones are gone; the daily history below keeps the
+long-run counts.
 
-The purpose is volume awareness, not abuse forensics. "Is that fifteen real
-people finding the site, or one person to reach for the kill switch about" is
-answered by going and looking, not by anything the notification computes.
+The purpose is volume awareness, not abuse forensics. The summary says how
+many distinct uploaders it saw (`12 uploads from 5 people`), which is enough to
+tell fifteen real people from one person to reach for the kill switch about;
+who any of them are is not recorded anywhere (see below).
+
+## Who uploaded what, without keeping who
+
+Uploads are anonymous and the client address is never stored (#116). What a
+job row keeps instead:
+
+- `uploader_hash` — an HMAC of the client address under a salt that is minted
+  on first use each UTC day (`meta` key `salt:YYYY-MM-DD`) and deleted by the
+  retention sweep once the day is over. Uploads from one address on one day
+  share a token; nothing, the database included, can turn a token back into
+  an address or join it to another day's.
+- `device_json` — camera make, model and software from the file's own EXIF.
+  The served file carries these already (#117 is about that); they are kept
+  out of `exif_json`, which `/jobs/{id}` serves, so they never reach a public
+  payload.
+
+The retention sweep folds every expiring row into `daily_stats` (uploads,
+solved, failed by reason, hidden, per UTC day of upload) and the day's distinct
+tokens into `daily_uploaders` before it deletes anything, in the same
+transaction, so a row is either counted and gone or neither. Featured rows are
+never deleted and are counted once (`jobs.counted`). Read it back with:
+
+```
+fly ssh console -C "python3 -c 'from app import db, stats; import json; conn = db.get_conn(); print(json.dumps(stats.history(conn, 30), indent=1))'"
+```
+
+Within the retention window the live rows answer the sharper question — which
+of today's uploads came from the same address — with
+`SELECT uploader_hash, COUNT(*) FROM jobs GROUP BY 1`. The salt rotates at UTC
+midnight, so a person active on both sides of it counts twice in any window
+that spans it; a small overcount, in the honest direction.
 
 ## Quickstart
 
