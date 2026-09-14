@@ -116,6 +116,8 @@ export function loadPage(options = {}) {
       addEventListener() {},
     },
     localStorage: {
+      get length() { return Object.keys(store).length; },
+      key: i => Object.keys(store)[i] ?? null,
       getItem: (k) => (k in store ? store[k] : null),
       setItem: (k, v) => { store[k] = String(v); },
       removeItem: (k) => { delete store[k]; },

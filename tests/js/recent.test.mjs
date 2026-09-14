@@ -2,10 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadPage } from './harness.mjs';
 
-const KEY = 'asterismRecentUploads';
+const PREFIX = 'asterismRecentUpload:';
 const A = 'a'.repeat(32), B = 'b'.repeat(32), C = 'c'.repeat(32);
 const entry = (id, at = Date.now(), title = 'night.jpg') => ({ id, at, title });
-const stored = page => JSON.parse(page.store[KEY] || '[]');
+const keyFor = e => PREFIX + e.id + ':' + e.at;
+const seed = entries => Object.fromEntries(entries.map(e => [keyFor(e), JSON.stringify(e)]));
+const stored = page => Object.entries(page.store).filter(([key]) => key.startsWith(PREFIX))
+  .map(([, value]) => JSON.parse(value)).sort((a, b) => b.at - a.at || a.id.localeCompare(b.id));
 const links = page => page.els['recent-list'].children.map(li => li.children[0]);
 const states = page => links(page).map(a => a.children[1].textContent);
 const settle = () => new Promise(r => setTimeout(r, 0));
@@ -21,7 +24,7 @@ test('empty history stays out of the way and makes no job requests', async () =>
 });
 
 test('reload restores bookmarks and fetches current statuses and captions', async () => {
-  const store = { [KEY]: JSON.stringify([entry(A, 100), entry(B, 200), entry(C, 300)]) };
+  const store = seed([entry(A, 100), entry(B, 200), entry(C, 300)]);
   const page = loadPage({ store, fetch: async url => {
     if (url === '/feed') return response({ jobs: [] });
     return response(url.endsWith(A) ? { status: 'done', result: { narration: { caption: 'Orion rising' } } }
@@ -50,7 +53,7 @@ test('remembering uploads deduplicates, orders by submission, and stores only bo
   assert.match(states(page)[0], /^Solved/);
   s.updateRecentJob(A, { status: 'done', result: { narration: { caption: 'Orion' }, secret: 'not stored' } });
   assert.deepEqual(Object.keys(stored(page)[0]).sort(), ['at', 'id', 'title']);
-  assert.ok(!page.store[KEY].includes('secret'));
+  assert.ok(!JSON.stringify(page.store).includes('secret'));
 });
 
 test('only the newest 24 bookmarks are retained', () => {
@@ -63,7 +66,7 @@ test('only the newest 24 bookmarks are retained', () => {
 
 test('malformed storage and invalid IDs are ignored', async () => {
   for (const raw of ['not json', '{}', 'null', JSON.stringify([null, {}, entry('../jobs/x'), entry(A, 'nope')])]) {
-    const page = loadPage({ store: { [KEY]: raw } });
+    const page = loadPage({ store: { [keyFor(entry(A, 100))]: raw } });
     await settle();
     assert.equal(page.els.recent.hidden, true);
     page.sandbox.rememberUpload(A, 'valid.jpg', 100, 'queued');
@@ -125,10 +128,10 @@ test('storage refusal preserves a tab-local list and explains its lifetime', asy
 
 test('another tab additions are preserved and storage clear updates this tab', async () => {
   const page = loadPage();
-  page.store[KEY] = JSON.stringify([entry(A, 100)]);
+  Object.assign(page.store, seed([entry(A, 100)]));
   page.sandbox.rememberUpload(B, 'other.jpg', 200, 'queued');
   assert.deepEqual(stored(page).map(e => e.id), [B, A]);
-  delete page.store[KEY];
+  for (const key of Object.keys(page.store)) delete page.store[key];
   await page.sandbox.window.dispatch('storage', { key: null });
   assert.equal(page.els.recent.hidden, true);
 });
@@ -247,3 +250,66 @@ test('a successful deepen immediately updates the saved job to queued', async ()
   assert.equal(polled, A);
   assert.match(states(page)[0], /^Queued/);
 });
+
+test('concurrent tab writes cannot replace a different tab bookmark', () => {
+  const page = loadPage();
+  const other = loadPage({ store: page.store });
+  const write = page.sandbox.localStorage.setItem;
+  let raced = false;
+  page.sandbox.localStorage.setItem = (key, value) => {
+    if (!raced) {
+      raced = true;
+      other.sandbox.rememberUpload(B, 'other-tab.jpg', 200, 'queued');
+    }
+    write(key, value);
+  };
+  page.sandbox.rememberUpload(A, 'this-tab.jpg', 100, 'queued');
+  assert.deepEqual(stored(page).map(e => e.id).sort(), [A, B]);
+});
+
+test('expiry cannot erase another tab bookmark written during removal', () => {
+  const page = loadPage();
+  page.sandbox.rememberUpload(A, 'expired.jpg', 100, 'queued');
+  const other = loadPage({ store: page.store });
+  let raced = false;
+  for (const method of ['setItem', 'removeItem']) {
+    const original = page.sandbox.localStorage[method];
+    page.sandbox.localStorage[method] = (...args) => {
+      if (!raced) {
+        raced = true;
+        other.sandbox.rememberUpload(B, 'other-tab.jpg', 200, 'queued');
+      }
+      original(...args);
+    };
+  }
+  page.sandbox.forgetRecentUpload(A);
+  assert.deepEqual(stored(page).map(e => e.id), [B]);
+});
+
+test('a full list shares one deadline instead of 24 serial timeouts', async () => {
+  const page = loadPage();
+  for (let i = 1; i <= 24; i++) page.sandbox.rememberUpload(i.toString(16).padStart(32, '0'), 'night.jpg', i, 'queued');
+  let requests = 0, timers = 0;
+  page.sandbox.setTimeout = callback => { timers++; return setTimeout(callback, 0); };
+  page.sandbox.fetch = (url, { signal }) => {
+    requests++;
+    return new Promise((resolve, reject) => signal.addEventListener('abort', () => reject(new Error('aborted'))));
+  };
+  await page.sandbox.refreshRecentUploads();
+  assert.equal(timers, 1);
+  assert.equal(requests, 1);
+  assert.equal(stored(page).length, 24);
+  assert.equal(page.els['recent-refresh'].disabled, false);
+});
+
+for (const status of [404, 410, 503]) {
+  test(`deepen HTTP ${status} removes only confirmed-missing bookmarks`, async () => {
+    const page = loadPage();
+    page.sandbox.rememberUpload(A, 'night.jpg', 100, 'failed');
+    page.sandbox.renderFailure(A, { ...failed, result: { failure: { can_deepen: true } } });
+    page.sandbox.fetch = async () => ({ ok: false, status, text: async () => 'unavailable' });
+    await page.els.actions.children[0].onclick();
+    assert.equal(stored(page).length, status === 503 ? 1 : 0);
+    assert.match(page.els.status.textContent, /could not restart job/);
+  });
+}

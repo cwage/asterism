@@ -196,11 +196,15 @@ design; a few dozen phone JPEGs and their cards is nothing against the volume.
 ## Following new solves
 
 "Your recent uploads" (#105) bookmarks this browser's last 24 submissions in
-`localStorage`: job IDs, filenames, and submission times only. It is not tied
-to the daily uploader hash, and opening someone else's result doesn't add it
+`localStorage`: job IDs, filenames, and submission times only. Each submission
+has its own storage key rather than a shared read/modify/write array,
+so uploads and expiry in different tabs cannot overwrite unrelated bookmarks.
+The list is not tied to the daily uploader hash, and opening someone else's result doesn't add it
 to the list. Status and captions are fetched on page load, when the window
 regains focus, or with "Refresh status"; ongoing uploads also update their
 entry as they are polled. Failed and deeper solves remain easy to return to.
+Each refresh has a single ten-second deadline, including response bodies, so
+an unreachable API cannot lock the refresh button for minutes.
 Only a confirmed 404/410 removes an unavailable result, not a network error
 or a guessed expiry time, so featured results can outlive the usual window.
 This does not change server retention. Clearing site data clears the list;
