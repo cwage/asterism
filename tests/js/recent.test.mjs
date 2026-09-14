@@ -207,28 +207,40 @@ test('opening a shared result never creates a personal bookmark', async () => {
   assert.equal(page.els.recent.hidden, true);
 });
 
-test('accepted superseded uploads are remembered without replacing the current photo', async () => {
-  const page = loadPage();
-  const { sandbox: s, els } = page;
-  s.FormData = class { append() {} };
-  let releaseFirst, posts = 0;
-  s.fetch = async (url, opts) => {
-    if (opts?.method === 'POST') {
-      if (++posts === 1) return new Promise(r => { releaseFirst = r; });
-      return response({ id: B, status: 'queued' });
-    }
-    return response(failed);
-  };
-  const first = els.file.dispatch('change', { target: { files: [{ name: 'first.jpg' }] } });
-  await settle();
-  await els.file.dispatch('change', { target: { files: [{ name: 'second.jpg' }] } });
-  await settle();
-  releaseFirst(response({ id: A, status: 'queued' }));
-  await first;
-  assert.deepEqual(stored(page).map(e => e.id), [B, A]);
-  assert.equal(els.photo.src, '/jobs/' + B + '/image');
-  assert.match(states(page)[0], /^Unsolved/);
-});
+for (const [timing, secondAt, order] of [
+  ['distinct timestamps', 1001, [B, A]],
+  ['tied timestamps', 1000, [A, B]],
+]) {
+  test(`superseded uploads survive without replacing the current photo: ${timing}`, async () => {
+    const page = loadPage();
+    const { sandbox: s, els } = page;
+    // An event-loop turn does not guarantee Date.now() advances. Control
+    // time explicitly, and check the job-ID tie-break separately.
+    let now = 1000;
+    s.Date = class extends Date { static now() { return now; } };
+    s.FormData = class { append() {} };
+    let releaseFirst, posts = 0;
+    s.fetch = async (url, opts) => {
+      if (opts?.method === 'POST') {
+        if (++posts === 1) return new Promise(r => { releaseFirst = r; });
+        return response({ id: B, status: 'queued' });
+      }
+      return response(failed);
+    };
+    const first = els.file.dispatch('change', { target: { files: [{ name: 'first.jpg' }] } });
+    await settle();
+    now = secondAt;
+    await els.file.dispatch('change', { target: { files: [{ name: 'second.jpg' }] } });
+    await settle();
+    releaseFirst(response({ id: A, status: 'queued' }));
+    await first;
+    assert.deepEqual(stored(page).map(e => e.id), order);
+    assert.deepEqual(links(page).map(a => a.href), order.map(id => '/?job=' + id));
+    assert.equal(els.photo.src, '/jobs/' + B + '/image');
+    const current = links(page).find(a => a.href === '/?job=' + B);
+    assert.match(current.children[1].textContent, /^Unsolved/);
+  });
+}
 
 test('refused uploads never enter the list', async () => {
   const page = loadPage();
