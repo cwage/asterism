@@ -108,6 +108,7 @@ export function loadPage() {
   const els = {};
   const store = {};
   const clipboard = [];  // everything the page wrote, in order
+  const revoked = [];    // object URLs the page released, in order
   const sandbox = {
     document: {
       getElementById: (id) => (els[id] ??= makeEl()),
@@ -124,6 +125,10 @@ export function loadPage() {
     history: { pushState() {} },
     fetch: async () => { throw new Error('unexpected fetch in test'); },
     navigator: { clipboard: { writeText: async (text) => { clipboard.push(text); } } },
+    // Object URLs are named after the file so a test can see which
+    // preview is showing and which one was released.
+    URL: { createObjectURL: (file) => 'blob:' + file.name,
+           revokeObjectURL: (url) => { revoked.push(url); } },
     URLSearchParams,
     setTimeout,
     clearTimeout,
@@ -134,5 +139,5 @@ export function loadPage() {
   // `html` so a test can assert on the stylesheet: some of this page's
   // behaviour is CSS (whether the overlay swallows taps), and that is not
   // reachable from the script alone.
-  return { sandbox, els, store, html, clipboard };
+  return { sandbox, els, store, html, clipboard, revoked };
 }

@@ -362,6 +362,7 @@ document.getElementById('file').addEventListener('change', async (e) => {
   const fd = new FormData();
   fd.append('image', f);
   status('uploading…');
+  showPending(f);
   const res = await fetch('/jobs', { method: 'POST', body: fd });
   if (!res.ok) { status('upload failed: ' + await res.text()); return; }
   const { id, duplicate } = await res.json();
@@ -382,8 +383,9 @@ if (jobParam) poll(jobParam);
 // pushState above means back/forward move between results: re-render.
 window.addEventListener('popstate', () => location.reload());
 
-async function poll(id) {
-  status('solving…', id);
+// Everything a result put on the page except the photo itself: cleared
+// the moment a new upload starts (#133) and again when a poll begins.
+function clearResult() {
   document.getElementById('actions').replaceChildren();
   document.getElementById('failbox').hidden = true;
   document.getElementById('advice').replaceChildren();
@@ -391,6 +393,49 @@ async function poll(id) {
   document.getElementById('fail-detail').textContent = '';
   document.getElementById('narration').textContent = '';
   document.getElementById('controls').hidden = true;
+}
+
+// A new upload takes the previous solve off the screen at once and shows
+// the chosen photo, un-annotated, while it solves (#133). Before this the
+// old photo kept its labels up under "solving…", which read as the old
+// photo being solved again. The failure path already shows the bare frame
+// beside its guess, so the waiting state now matches it.
+let pendingPreview = null;
+
+function showPending(file) {
+  clearResult();
+  clearPreview();
+  shownJob = null;  // a layer toggle during the wait must not redraw old labels
+  const img = document.getElementById('photo');
+  const canvas = document.getElementById('overlay');
+  canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+  img.onload = () => {
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+  };
+  // A format the browser can't show (HEIC outside Safari) gets no broken
+  // icon: the frame hides until the served, baked copy arrives.
+  img.onerror = () => { img.hidden = true; };
+  pendingPreview = URL.createObjectURL(file);
+  img.hidden = false;
+  document.getElementById('wrap').style.display = 'inline-block';
+  img.src = pendingPreview;
+}
+
+// Called as the served copy takes over. An image already showing the
+// preview keeps its pixels after the URL is revoked, so this is safe
+// before the served load completes.
+function clearPreview() {
+  if (!pendingPreview) return;
+  URL.revokeObjectURL(pendingPreview);
+  pendingPreview = null;
+  document.getElementById('photo').onerror = null;
+}
+
+async function poll(id) {
+  status('solving…', id);
+  clearResult();
   const t0 = Date.now();
   while (true) {
     const res = await fetch('/jobs/' + encodeURIComponent(id));
@@ -474,6 +519,7 @@ function renderFailure(id, job) {
   };
   img.hidden = false;
   document.getElementById('wrap').style.display = 'inline-block';
+  clearPreview();
   img.src = '/jobs/' + encodeURIComponent(id) + '/image';
 
   if (!f || !f.can_deepen) return;
@@ -936,6 +982,7 @@ function render(id, job) {
   };
   img.hidden = false;
   document.getElementById('wrap').style.display = 'inline-block';
+  clearPreview();
   img.src = '/jobs/' + encodeURIComponent(id) + '/image';
   // The failure path may have shown this exact URL already (a deepen that
   // came good); a same-src assignment can satisfy from cache without ever
