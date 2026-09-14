@@ -21,6 +21,9 @@ TAG_EXPOSURE_TIME = 33434
 TAG_GPS_IMG_DIRECTION_REF = 16  # 'M' magnetic / 'T' true
 TAG_GPS_IMG_DIRECTION = 17
 TAG_ORIENTATION = 274
+TAG_MAKE = 271
+TAG_MODEL = 272
+TAG_SOFTWARE = 305
 TAG_PIXEL_Y_DIMENSION = 40963
 
 # Fallback when EXIF gives us nothing: generous phone-plausible field widths.
@@ -259,6 +262,26 @@ def read_exif(path):
                 info["heading_ref"] = (str(ref).strip() or None) if ref else None
 
     return info
+
+
+def read_device(path):
+    """Camera make, model and software from IFD0, for the uploader record
+    (#116). Kept out of read_exif on purpose: exif_json is what /jobs/{id}
+    serves, and these are for the operator's counts, not the public page.
+    Every value is None when absent."""
+    out = {"make": None, "model": None, "software": None}
+    with Image.open(path) as img:
+        ex = img.getexif()
+    for key, tag in (("make", TAG_MAKE), ("model", TAG_MODEL),
+                     ("software", TAG_SOFTWARE)):
+        value = ex.get(tag)
+        if value is None:
+            continue
+        if isinstance(value, bytes):
+            value = value.decode("utf-8", "replace")
+        value = str(value).strip("\x00 \t\r\n")[:64]
+        out[key] = value or None
+    return out
 
 
 # EXIF Orientation value -> the transpose that lays the pixels out the way a

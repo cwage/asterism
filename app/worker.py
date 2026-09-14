@@ -8,7 +8,7 @@ import time
 import traceback
 
 from . import (constellations, db, dso, ephemeris, narrate, notify,
-               satellites, solver, verify)
+               satellites, solver, stats, verify)
 
 # Below this many detected star-like sources, a quick job fails fast
 # instead of burning cpulimit tiers on daylight/food/pitch-black uploads.
@@ -53,6 +53,14 @@ def sweep_expired():
     nothing can be both invisible and immortal."""
     removed = 0
     with db.get_conn() as conn:
+        # Fold the expiring rows into the daily history first (#116): the
+        # DELETEs below remove the only other record of them. Same
+        # transaction, so a crash leaves them either counted and gone or
+        # neither. Yesterday's salt goes with them: no hash for a past day
+        # is ever computed again, and keeping it is the only way one could
+        # be reversed.
+        stats.roll_up(conn, f"-{RETENTION_HOURS} hours")
+        stats.retire_salts(conn)
         rows = conn.execute(
             "SELECT id, image_path FROM jobs "
             "WHERE created_at < datetime('now', ?) AND featured = 0",
