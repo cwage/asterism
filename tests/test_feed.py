@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from app import db, main
 
@@ -69,6 +70,14 @@ def _atom(base_url="http://testserver"):
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("application/atom+xml")
     return ET.fromstring(resp.content)
+
+
+def test_atom_feed_is_declared_as_atom(fresh_db):
+    """The route's declared response class is what /openapi.json shows to
+    clients; left at the JSON default it would advertise the wrong type."""
+    spec = TestClient(main.app).get("/openapi.json").json()
+    content = spec["paths"]["/feed.atom"]["get"]["responses"]["200"]["content"]
+    assert list(content) == ["application/atom+xml"]
 
 
 def test_atom_feed_mirrors_the_strip(fresh_db):
@@ -137,7 +146,7 @@ def test_atom_feed_empty_is_still_a_feed(fresh_db):
     assert feed.find("a:author/a:name", ATOM).text == "asterism"
 
 
-def test_get_routes_answer_head(fresh_db):
+def test_get_routes_answer_head(fresh_db, tmp_path):
     """Readers HEAD an enclosure for its size and link checkers HEAD result
     pages; FastAPI's default is a 405 for every one of them."""
     client = TestClient(main.app)
@@ -147,6 +156,26 @@ def test_get_routes_answer_head(fresh_db):
         # Same headers as the GET. The body itself is dropped by uvicorn,
         # not by the app, so the test client still sees one here.
         assert head.headers["content-length"] == client.get(path).headers["content-length"]
+
+    # The enclosure itself: a done job with a real photo, so the card
+    # renders and its HEAD reports the size a reader is asking for.
+    photo = tmp_path / "shot.jpg"
+    Image.new("RGB", (640, 480), (5, 8, 16)).save(photo, "JPEG")
+    with db.get_conn() as conn:
+        conn.execute(
+            "INSERT INTO jobs (id, image_path, status, result_json) "
+            "VALUES ('solved', ?, 'done', ?)",
+            (str(photo), json.dumps({"labels": []})),
+        )
+    got = client.get("/jobs/solved/card")
+    assert got.status_code == 200
+    assert got.headers["content-type"] == "image/png"
+    head = client.head("/jobs/solved/card")
+    assert head.status_code == 200
+    assert head.headers["content-type"] == "image/png"
+    assert head.headers["content-length"] == got.headers["content-length"]
+    assert head.content == b""  # FileResponse drops the body itself
+
     # the route matches, so it is the job that is missing, not the method
     assert client.head("/jobs/nope/card").status_code == 404
     assert client.head("/jobs/nope").status_code == 404

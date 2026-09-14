@@ -437,7 +437,14 @@ def _rfc3339(created_at):
     return created_at.replace(" ", "T") + "Z"
 
 
-@app.get("/feed.atom")
+class AtomResponse(Response):
+    # Declared on the route as well as returned from it, so /openapi.json
+    # advertises the type the endpoint actually serves rather than the
+    # JSON default. The XML prolog carries the encoding.
+    media_type = "application/atom+xml"
+
+
+@app.get("/feed.atom", response_class=AtomResponse)
 def feed_atom(request: Request):
     """The strip as an Atom feed (#127): the one way to follow new solves
     that asks nothing of the reader — no account to notify, nothing to
@@ -484,10 +491,8 @@ def feed_atom(request: Request):
         if solve["text"]:
             body += f"<p>{html.escape(solve['text'])}</p>"
         ET.SubElement(entry, "content", type="html").text = body
-    return Response(
-        '<?xml version="1.0" encoding="utf-8"?>\n'
-        + ET.tostring(root, encoding="unicode"),
-        media_type="application/atom+xml; charset=utf-8")
+    return AtomResponse('<?xml version="1.0" encoding="utf-8"?>\n'
+                        + ET.tostring(root, encoding="unicode"))
 
 
 def _public_exif(exif_info):
