@@ -61,6 +61,8 @@ Final home: `asterism.quietlife.net`.
   Claude Haiku over the label list — never the photo): a writeup on the
   results page and a one-line caption that replaces the deterministic one
   on the share card. Best-effort: no key or a failed call just skips it.
+  The results page puts the caption and narration on the clipboard in one
+  tap for a post or alt text, and the label list in another (#124).
 - Jobs/results live in `data/` (SQLite + uploaded images), bind-mounted into
   both containers.
 - The queue is deliberately single-worker: solve-field is CPU-bound and the

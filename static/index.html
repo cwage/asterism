@@ -115,6 +115,7 @@
   /* The solver's own account — kept for the curious, styled as a footnote. */
   #fail-detail { color: var(--faint); font-size: 0.8rem; margin: 0; }
   #fail-detail:empty { display: none; }
+  #actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
   #actions button { width: 100%; background: #1a2230; color: var(--ink);
                     border: 1px solid var(--line); border-radius: 10px;
                     padding: 0.9rem 1rem; font-size: 1rem; cursor: pointer; }
@@ -124,6 +125,11 @@
                         background: var(--panel); color: var(--accent);
                         text-decoration: none; font-size: 0.95rem; }
   #actions a.cardlink:hover { background: #1a2230; }
+  /* The copy buttons (#124) sit beside the card link and dress like it. */
+  #actions button.copy { width: auto; padding: 0.6rem 1.1rem; font: inherit;
+                         font-size: 0.95rem; background: var(--panel);
+                         color: var(--accent); }
+  #actions button.copy:hover { background: #1a2230; }
 
   #narration { border: 1px solid #1c2634; border-radius: 10px;
                background: var(--panel); padding: 0.75rem 1rem;
@@ -741,6 +747,61 @@ function draw() {
   ctx.globalAlpha = 1;
 }
 
+// The words to go with the photo (#124). Uploads come back through
+// Instagram often enough that the narration is what people want for a
+// caption or alt text, and selecting it out of the page on a phone is a
+// chore. Both builders are pure so the tests can read them directly.
+function describeText(job) {
+  const n = (job.result && job.result.narration) || {};
+  return [n.caption, n.text].filter(Boolean).join('\n\n');
+}
+
+function starListText(job) {
+  const r = job.result || {};
+  const labels = (r.labels || []).filter(l => l.status !== 'hidden');
+  // Brightest first within each group. The worker already sorts stars
+  // that way, but bodies arrive in a fixed Moon-then-planets order; the
+  // Moon's magnitude is null and it stays in front.
+  const byMag = (a, b) => (a.mag ?? -Infinity) - (b.mag ?? -Infinity);
+  const names = kinds => labels.filter(l => kinds.includes(l.kind || 'star'))
+    .sort(byMag).map(l => l.name);
+  const lines = [];
+  const bodies = names(['moon', 'planet']);
+  const dsos = names(['dso']);
+  const stars = names(['star']);
+  const cons = (r.constellations || []).map(c => c.name);
+  if (bodies.length) lines.push('Solar system: ' + bodies.join(', '));
+  if (dsos.length) lines.push('Deep-sky: ' + dsos.join(', '));
+  if (stars.length) lines.push('Stars: ' + stars.join(', '));
+  if (cons.length) lines.push('Constellations: ' + cons.join(', '));
+  return lines.join('\n');
+}
+
+// A button that puts text on the clipboard and says so for a moment. The
+// clipboard API wants a secure context and a user gesture, and both hold
+// here; a browser that refuses anyway is told, rather than left with a
+// button that did nothing.
+function copyButton(label, text) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'copy';
+  btn.textContent = label;
+  let reset;  // a second tap inside the moment restarts it, not cuts it short
+  btn.addEventListener('click', async () => {
+    let said;
+    try {
+      await navigator.clipboard.writeText(text());
+      said = 'copied';
+    } catch {
+      said = 'copy failed';
+    }
+    btn.textContent = said;
+    clearTimeout(reset);
+    reset = setTimeout(() => { btn.textContent = label; }, 1500);
+  });
+  return btn;
+}
+
 function render(id, job) {
   renderFeed();  // a fresh solve (maybe this one) belongs in the strip
   shownJob = job;
@@ -756,7 +817,12 @@ function render(id, job) {
     cardLink.href = '/jobs/' + encodeURIComponent(id) + '/card';
     cardLink.textContent = '✦ download share card';
     cardLink.className = 'cardlink';
-    document.getElementById('actions').replaceChildren(cardLink);
+    // The words to go with it (#124): the description for a post or alt
+    // text, and the label list for anyone who wants the names.
+    const actions = [cardLink];
+    if (describeText(job)) actions.push(copyButton('copy description', () => describeText(job)));
+    if (starListText(job)) actions.push(copyButton('copy star list', () => starListText(job)));
+    document.getElementById('actions').replaceChildren(...actions);
     // The status line reflects the full result, not the current layer state.
     const labels = job.result.labels;
     const bodies = labels.filter(l => l.kind && l.kind !== 'star' && l.kind !== 'dso').length;

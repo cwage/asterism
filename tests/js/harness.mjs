@@ -107,6 +107,7 @@ export function loadPage() {
   if (!match) throw new Error('no inline <script> found in index.html');
   const els = {};
   const store = {};
+  const clipboard = [];  // everything the page wrote, in order
   const sandbox = {
     document: {
       getElementById: (id) => (els[id] ??= makeEl()),
@@ -122,8 +123,10 @@ export function loadPage() {
     window: { addEventListener() {} },
     history: { pushState() {} },
     fetch: async () => { throw new Error('unexpected fetch in test'); },
+    navigator: { clipboard: { writeText: async (text) => { clipboard.push(text); } } },
     URLSearchParams,
     setTimeout,
+    clearTimeout,
     console,
   };
   vm.createContext(sandbox);
@@ -131,5 +134,5 @@ export function loadPage() {
   // `html` so a test can assert on the stylesheet: some of this page's
   // behaviour is CSS (whether the overlay swallows taps), and that is not
   // reachable from the script alone.
-  return { sandbox, els, store, html };
+  return { sandbox, els, store, html, clipboard };
 }
