@@ -413,7 +413,10 @@ _deep_cache = None
 def load_deep_catalog(max_mag=DEEP_MAG_LIMIT):
     """Every HYG star to `max_mag` as parallel (ra, dec, mag) arrays, no
     name filter: the depth estimate needs the faint end the labelled
-    catalog deliberately stops short of. Read once per process."""
+    catalog deliberately stops short of. Unnamed secondary components are
+    dropped as load_catalog drops them: they sit on their primary's pixel,
+    and one peak must not count as two detections. Read once per
+    process."""
     global _deep_cache
     if _deep_cache is not None and _deep_cache[0] == max_mag:
         return _deep_cache[1]
@@ -422,6 +425,9 @@ def load_deep_catalog(max_mag=DEEP_MAG_LIMIT):
     with open(path, newline="") as f:
         for row in csv.DictReader(f):
             if (row.get("proper") or "").strip() == "Sol":
+                continue
+            if not (row.get("proper") or "").strip() \
+                    and (row.get("comp") or "1").strip() not in ("", "1"):
                 continue
             try:
                 mag = float(row["mag"])

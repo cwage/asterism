@@ -267,6 +267,41 @@ def _source_within(img, x, y, snap_r, win_r):
     return False
 
 
+def _occupancy(deep, cell):
+    """Catalog positions bucketed by `cell`-sized square, for a fast
+    "is any known star near here" test."""
+    grid = {}
+    for x, y, _ in deep:
+        grid.setdefault((int(x // cell), int(y // cell)), []).append((x, y))
+    return grid
+
+
+def _near_catalog_star(grid, cell, x, y, radius):
+    cx, cy = int(x // cell), int(y // cell)
+    r2 = radius * radius
+    for gx in (cx - 1, cx, cx + 1):
+        for gy in (cy - 1, cy, cy + 1):
+            for sx, sy in grid.get((gx, gy), ()):
+                if (sx - x) ** 2 + (sy - y) ** 2 <= r2:
+                    return True
+    return False
+
+
+def _control_spot(cx, cy, w, h, win_r, snap_r, grid, cell):
+    """A star-free spot beside (cx, cy) to test for chance hits: the
+    first of four offsets that is in frame and has no catalog star within
+    twice the acceptance radius. None when all four are taken, which in a
+    field that crowded is itself the answer."""
+    step = 3.0 * win_r
+    for ox, oy in ((cx + step, cy), (cx - step, cy), (cx, cy + step), (cx, cy - step)):
+        if not (win_r <= ox < w - win_r and win_r <= oy < h - win_r):
+            continue
+        if _near_catalog_star(grid, cell, ox, oy, 2.0 * snap_r):
+            continue
+        return ox, oy
+    return None
+
+
 def _limiting_magnitude(img, deep, field_at, resid_p90=0.0):
     """How faint the photo reaches (#122). The deep catalog [(x, y, mag)]
     is tested bin by bin, bright to faint, for a detected source at each
@@ -274,8 +309,11 @@ def _limiting_magnitude(img, deep, field_at, resid_p90=0.0):
     falls through DEPTH_DETECT_FRAC of the bright-end rate, interpolated
     between bin centres.
 
-    Every test is paired with a control at a star-free offset. The chance
-    rate that measures is taken out of every bin before anything is read,
+    Every test is paired with a control at a star-free offset: beside the
+    star, in frame, and clear of every catalog star to the catalog's own
+    limit, so what it counts is noise, JPEG texture and stars fainter than
+    the catalog, which is what a false detection is. The chance rate that
+    measures is taken out of every bin before anything is read,
     and a frame where any spot has a peak nearby (noise, JPEG blocking, a
     crowded field) reports no limit rather than a flattering one. The
     acceptance radius follows the precision the frame's own bright stars
@@ -290,15 +328,17 @@ def _limiting_magnitude(img, deep, field_at, resid_p90=0.0):
     bins = {}
     for x, y, mag in deep:
         bins.setdefault(math.floor(mag / DEPTH_BIN_MAG), []).append((x, y))
+    cell = 2.0 * snap_r
+    grid = _occupancy(deep, cell)
     # The catalog's own cut leaves its last bin partial; a half-empty bin
     # would misplace the "catalog ran out" edge, so it is not walked.
     faintest = max(mag for _, _, mag in deep)
+    full = [k for k in sorted(bins) if (k + 1) * DEPTH_BIN_MAG <= faintest + 1e-9]
     curve = []
+    walked = []  # bin keys that made it into the curve
     control_hits = control_n = 0
     quiet = 0
-    for key in sorted(bins):
-        if (key + 1) * DEPTH_BIN_MAG > faintest + 1e-9:
-            break
+    for key in full:
         stars = bins[key]
         if len(stars) < DEPTH_MIN_PER_BIN:
             continue
@@ -311,22 +351,27 @@ def _limiting_magnitude(img, deep, field_at, resid_p90=0.0):
                 continue
             n += 1
             hits += _source_within(img, cx, cy, snap_r, win_r)
-            ox = cx + 3 * win_r if cx + 4 * win_r < w else cx - 3 * win_r
-            control_n += 1
-            control_hits += _source_within(img, ox, cy, snap_r, win_r)
+            spot = _control_spot(cx, cy, w, h, win_r, snap_r, grid, cell)
+            if spot is not None:
+                control_n += 1
+                control_hits += _source_within(img, spot[0], spot[1], snap_r, win_r)
         if n < DEPTH_MIN_PER_BIN:
             continue
         frac = hits / n
         curve.append([round((key + 0.5) * DEPTH_BIN_MAG, 2), n, round(frac, 2)])
-        running_control = control_hits / control_n
+        walked.append(key)
+        running_control = control_hits / control_n if control_n else 0.0
         quiet = quiet + 1 if frac - running_control <= DEPTH_STOP_MARGIN else 0
         if quiet >= 2:
             break
     control_frac = control_hits / control_n if control_n else 0.0
     out = {"limiting_mag": None, "curve": curve, "snap_px": round(snap_r, 1),
            "control_frac": round(control_frac, 2), "baseline": None,
-           "catalog_limited": False}
-    if not curve or control_frac > DEPTH_CONTROL_MAX:
+           "catalog_limited": False, "faint_bins_sparse": False}
+    # Fewer controls than tests means the field was too crowded to find
+    # star-free spots for some of them; below half, the rate is not a
+    # measurement of chance any more.
+    if not curve or control_n < DEPTH_MIN_PER_BIN or control_frac > DEPTH_CONTROL_MAX:
         return out
 
     def excess(frac):
@@ -349,9 +394,13 @@ def _limiting_magnitude(img, deep, field_at, resid_p90=0.0):
     while i > 0 and fracs[i - 1] < threshold:
         i -= 1
     if i == len(curve):
-        # Never fell through: the catalog ran out before the photo did.
+        # Never fell through: a floor, not a limit. Either the catalog ran
+        # out before the photo did, or the fainter bins were too sparse to
+        # test (a narrow field); the flag says which, and the floor is the
+        # faint edge of the last bin that was actually tested.
         out["limiting_mag"] = round(curve[-1][0] + DEPTH_BIN_MAG / 2, 1)
         out["catalog_limited"] = True
+        out["faint_bins_sparse"] = walked[-1] != full[-1]
         return out
     if i == 0:
         return out  # even the brightest bin fails: nothing to read

@@ -365,3 +365,44 @@ def test_depth_is_skipped_without_a_deep_catalog(tmp_path):
     synth.render_points(str(path), PREDICTED, WIDTH, HEIGHT)
     _, _, meta = verify.apply(str(path), star_labels(PREDICTED), [])
     assert "depth" not in meta
+
+
+def test_controls_step_around_catalog_stars(tmp_path):
+    # Every tested star has a bright catalog neighbour exactly where the
+    # first control offset would fall. A control that ignored the catalog
+    # would count each neighbour as a chance hit and refuse to answer.
+    pts, mags, amps = _graded_field(n=150)
+    win_r = max(verify.DEPTH_WINDOW_MIN_PX,
+                2 * max(verify.DEPTH_SNAP_MIN_PX, WIDTH * verify.DEPTH_SNAP_FRAC))
+    partners = [(x + 3 * win_r, y) for x, y in pts if x + 3 * win_r < WIDTH - 40]
+    all_pts = pts + partners
+    all_mags = mags + [2.0] * len(partners)
+    all_amps = amps + [255.0] * len(partners)
+    path = tmp_path / "partnered.jpg"
+    synth.render_points(str(path), all_pts, WIDTH, HEIGHT, amps=all_amps)
+    bright = [(x, y, m) for (x, y), m in zip(all_pts, all_mags) if m <= 3.5]
+    labels = [{"name": f"S{i}", "x": x, "y": y, "mag": m, "kind": "star"}
+              for i, (x, y, m) in enumerate(bright)]
+    deep = [(x, y, m) for (x, y), m in zip(all_pts, all_mags)]
+    _, _, meta = verify.apply(str(path), labels, [], deep=deep)
+    d = meta["depth"]
+    assert d["control_frac"] <= 0.15
+    assert 5.8 <= d["limiting_mag"] <= 6.8
+
+
+def test_sparse_faint_bins_make_a_floor_and_say_so(tmp_path):
+    # Plenty of stars to magnitude 5, three lonely ones at 6.4 and the
+    # catalog's last star at 7.3: the 6.0-6.5 bin is full but too sparse
+    # to test, so the answer is a floor at 5.0, flagged as sparse rather
+    # than as the catalog running out.
+    pts, mags, amps = _graded_field(n=200, lo=2.0, hi=5.0)
+    extra = [(100.0, 100.0), (500.0, 500.0), (900.0, 700.0), (300.0, 800.0)]
+    all_pts, all_mags = pts + extra, mags + [6.4, 6.4, 6.4, 7.3]
+    all_amps = amps + [255.0 * 10 ** (-0.4 * (m - 3.0)) for m in (6.4, 6.4, 6.4, 7.3)]
+    path = tmp_path / "sparse-faint.jpg"
+    synth.render_points(str(path), all_pts, WIDTH, HEIGHT, amps=all_amps)
+    deep = [(x, y, m) for (x, y), m in zip(all_pts, all_mags)]
+    _, _, meta = verify.apply(str(path), star_labels(pts[:12]), [], deep=deep)
+    d = meta["depth"]
+    assert d["catalog_limited"] is True and d["faint_bins_sparse"] is True
+    assert d["limiting_mag"] == 5.0
