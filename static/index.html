@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>asterism</title>
+<link rel="alternate" type="application/atom+xml" title="asterism — recently solved" href="/feed.atom">
 <style>
   :root {
     --bg: #0b0e14; --ink: #cdd6e0; --dim: #8fa1b3; --faint: #6b7a8d;
@@ -77,10 +78,12 @@
 
   #feed { margin: 0.9rem 0 0; }
   #feed .title { font-size: 0.8rem; color: var(--faint); margin: 0 0 0.4rem; }
+  #feed .title a { float: right; color: var(--faint); }
+  #feed .title a:hover { color: var(--accent); }
   #feed .thumbs { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-  #feed a { display: block; width: 72px; height: 72px; border-radius: 8px;
-               overflow: hidden; border: 1px solid var(--line); }
-  #feed img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  #feed .thumbs a { display: block; width: 72px; height: 72px; border-radius: 8px;
+                    overflow: hidden; border: 1px solid var(--line); }
+  #feed .thumbs img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
   #status { margin: 1rem 0 0.5rem; color: var(--dim); min-height: 1.5em; }
   /* Before the first solve the whole result block sits above the feed, so
@@ -285,6 +288,11 @@ async function renderFeed() {
   const title = document.createElement('p');
   title.className = 'title';
   title.textContent = 'Recently solved by everyone (links live for 24 hours):';
+  // The same strip as an Atom feed (#127), for following without visiting.
+  const atom = document.createElement('a');
+  atom.href = '/feed.atom';
+  atom.textContent = 'Atom feed';
+  title.append(atom);
   const row = document.createElement('div');
   row.className = 'thumbs';
   for (const j of jobs) {

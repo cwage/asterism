@@ -184,6 +184,19 @@ sinks out of the strip once 24 newer solves exist. On a quiet site that never
 happens, which is the case this exists for. Storage grows monotonically by
 design; a few dozen phone JPEGs and their cards is nothing against the volume.
 
+## Following new solves
+
+`/feed.atom` is the homepage strip as an Atom feed (#127): the same 24 newest
+successful solves, caption as the entry title, the share card inline and as an
+enclosure, and a link to the result page. It is the one way to follow the site
+that asks nothing of the reader — there is no account system to hang
+notifications on — and the homepage advertises it with a `<link
+rel="alternate">`, so a feed reader finds it from the site URL alone.
+
+Entries expire with retention like everything else. A reader keeps what it
+fetched, but the card and result links behind an expired entry 404 like any
+other expired link; a featured solve simply stays valid.
+
 ## Activity notifications
 
 Nothing else reports what the site did today: counts exist only as rows the
