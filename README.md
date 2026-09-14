@@ -234,8 +234,11 @@ job row keeps instead:
 - `uploader_hash` — an HMAC of the client address under a salt that is minted
   on first use each UTC day (`meta` key `salt:YYYY-MM-DD`) and deleted by the
   retention sweep once the day is over. Uploads from one address on one day
-  share a token; nothing, the database included, can turn a token back into
-  an address or join it to another day's.
+  share a token. Once the day's salt is gone nothing, the database included,
+  can turn a token back into an address or join it to another day's; while
+  the day is live the salt is in the database beside the tokens, so a copy
+  taken that day could test candidate addresses against them. The promise is
+  that yesterday is unrecoverable, not that today is.
 - `device_json` — camera make, model and software from the file's own EXIF.
   The served file carries these already (#117 is about that); they are kept
   out of `exif_json`, which `/jobs/{id}` serves, so they never reach a public
@@ -252,10 +255,16 @@ fly ssh console -C "python3 -c 'from app import db, stats; import json; conn = d
 ```
 
 Within the retention window the live rows answer the sharper question — which
-of today's uploads came from the same address — with
-`SELECT uploader_hash, COUNT(*) FROM jobs GROUP BY 1`. The salt rotates at UTC
-midnight, so a person active on both sides of it counts twice in any window
-that spans it; a small overcount, in the honest direction.
+of the last day's uploads came from the same address:
+
+```
+SELECT uploader_hash, COUNT(*) FROM jobs WHERE created_at > datetime('now', '-24 hours') GROUP BY 1
+```
+
+The cutoff matters: featured rows outlive the window, and without it they
+would mix older days into the answer. The salt rotates at UTC midnight, so a
+person active on both sides of it counts twice in any window that spans it; a
+small overcount, in the honest direction.
 
 ## Quickstart
 

@@ -135,7 +135,14 @@ def test_an_upload_records_the_hash_and_device_but_serves_neither(
 
     with db.get_conn() as conn:
         rows = {r["id"]: r for r in conn.execute(
-            "SELECT id, uploader_hash, device_json FROM jobs")}
+            "SELECT id, uploader_hash, device_json, created_at FROM jobs")}
+        # The token was made under the salt of the day the row is filed
+        # under, so an upload straddling UTC midnight still matches its
+        # own day's tokens.
+        for r in rows.values():
+            assert r["uploader_hash"] == stats.uploader_hash(
+                conn, "203.0.113.7" if r["id"] != other.json()["id"]
+                else "203.0.113.8", r["created_at"])
     a, b, c = (rows[first.json()["id"]], rows[second.json()["id"]],
                rows[other.json()["id"]])
     assert a["uploader_hash"] == b["uploader_hash"]

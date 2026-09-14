@@ -4,8 +4,11 @@ The client address is the only thing that ties one upload to another, and
 it is also the one thing this site should never become a record of. So it
 is never stored. What is stored is an HMAC of it under a salt that rotates
 at UTC midnight and is destroyed once its day is over: uploads from one
-address on one day share a hash, and nothing — not even the database — can
-turn that hash back into an address or join it across days. That answers
+address on one day share a hash, and once the day's salt is gone nothing —
+the database included — can turn that hash back into an address or join it
+to another day's. The guarantee is about yesterday, not today: while a day
+is live its salt sits in `meta` beside the tokens, so a copy of the database
+taken that day could test candidate addresses against them. That answers
 "was that burst one person?" and "how many different people used the site
 yesterday?", which the bare counts never could.
 

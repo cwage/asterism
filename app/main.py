@@ -204,14 +204,18 @@ async def create_job(request: Request, image: UploadFile):
     except Exception:
         device = None
     with db.get_conn() as conn:
+        # One clock read for both the salt day and created_at: an upload
+        # straddling UTC midnight must not be hashed under one day and
+        # filed under the next, or its token would match nothing.
+        now = conn.execute("SELECT datetime('now')").fetchone()[0]
         try:
-            uploader = stats.uploader_hash(conn, _client_ip(request))
+            uploader = stats.uploader_hash(conn, _client_ip(request), now)
         except Exception:
             uploader = None
         conn.execute(
-            "INSERT INTO jobs (id, image_path, exif_json, uploader_hash, "
-            "device_json) VALUES (?, ?, ?, ?, ?)",
-            (job_id, image_path, json.dumps(exif_info), uploader,
+            "INSERT INTO jobs (id, image_path, exif_json, created_at, "
+            "uploader_hash, device_json) VALUES (?, ?, ?, ?, ?, ?)",
+            (job_id, image_path, json.dumps(exif_info), now, uploader,
              json.dumps(device) if device else None),
         )
     return {"id": job_id, "status": "queued"}

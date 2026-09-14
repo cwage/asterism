@@ -24,7 +24,16 @@ def test_init_db_adds_mode_column_to_old_schema(tmp_path, monkeypatch):
 
     with db.get_conn() as conn:
         row = conn.execute(
-            "SELECT mode, orphan_recoveries FROM jobs WHERE id = 'old1'"
+            "SELECT mode, orphan_recoveries, uploader_hash, device_json, "
+            "counted FROM jobs WHERE id = 'old1'"
         ).fetchone()
         assert row["mode"] == "quick"
         assert row["orphan_recoveries"] == 0
+        # Uploader record (#116): nullable facts, and an existing row has
+        # not been folded into the daily history yet.
+        assert row["uploader_hash"] is None
+        assert row["device_json"] is None
+        assert row["counted"] == 0
+        tables = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'")}
+        assert {"meta", "daily_stats", "daily_uploaders"} <= tables
