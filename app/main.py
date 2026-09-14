@@ -1,17 +1,20 @@
 import asyncio
 import hashlib
 import hmac
+import html
 import json
 import math
 import os
 import re
 import time
 import uuid
+import xml.etree.ElementTree as ET
 from collections import defaultdict, deque
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.routing import APIRoute
 
 from . import card, db, exif, stats
 
@@ -131,7 +134,7 @@ def index(request: Request, job: str | None = None):
     # hex; anything else is served untouched (the frontend handles bad ids).
     if job and re.fullmatch(r"[0-9a-f]{32}", job):
         with open("static/index.html") as f:
-            html = f.read()
+            page = f.read()
         base = str(request.base_url).rstrip("/")
         meta = (
             '<meta property="og:title" content="asterism — what you saw">\n'
@@ -140,7 +143,7 @@ def index(request: Request, job: str | None = None):
             f'<meta property="og:image" content="{base}/jobs/{job}/card">\n'
             '<meta name="twitter:card" content="summary_large_image">\n'
         )
-        return HTMLResponse(html.replace("</head>", meta + "</head>"))
+        return HTMLResponse(page.replace("</head>", meta + "</head>"))
     return FileResponse("static/index.html")
 
 
@@ -386,14 +389,11 @@ def unfeature_job(job_id: str, request: Request):
 FEED_LIMIT = 24
 
 
-@app.get("/feed")
-def feed():
-    """The homepage's public "recently solved" strip: successful solves
-    across everyone, newest first, for as long as retention keeps them.
-    This deliberately makes recent solves discoverable — job links used
-    to be unlisted — and the upload-page disclosure says so before anyone
-    uploads. The narration caption (#12) rides along as alt text when the
-    worker produced one. Hidden jobs (#60) never appear."""
+def _recent_solves():
+    """The public "recently solved" list behind /feed and /feed.atom:
+    successful solves across everyone, newest first, capped, for as long
+    as retention keeps them. Hidden jobs (#60) never appear. The narration
+    (#12) rides along when the worker produced one."""
     with db.get_conn() as conn:
         rows = conn.execute(
             "SELECT id, created_at, result_json FROM jobs "
@@ -401,15 +401,93 @@ def feed():
             "ORDER BY created_at DESC, id DESC LIMIT ?",
             (FEED_LIMIT,),
         ).fetchall()
-    jobs = []
+    solves = []
     for row in rows:
         result = json.loads(row["result_json"]) if row["result_json"] else {}
-        entry = {"id": row["id"], "created_at": row["created_at"]}
-        caption = (result.get("narration") or {}).get("caption")
-        if caption:
-            entry["caption"] = caption
+        narration = result.get("narration") or {}
+        solves.append({"id": row["id"], "created_at": row["created_at"],
+                       "caption": narration.get("caption"),
+                       "text": narration.get("text")})
+    return solves
+
+
+@app.get("/feed")
+def feed():
+    """The homepage's public "recently solved" strip. This deliberately
+    makes recent solves discoverable — job links used to be unlisted —
+    and the upload-page disclosure says so before anyone uploads. The
+    caption is the thumbnail's alt text, sent only when there is one."""
+    jobs = []
+    for solve in _recent_solves():
+        entry = {"id": solve["id"], "created_at": solve["created_at"]}
+        if solve["caption"]:
+            entry["caption"] = solve["caption"]
         jobs.append(entry)
     return {"jobs": jobs}
+
+
+ATOM_NS = "http://www.w3.org/2005/Atom"
+ATOM_TITLE = "asterism — recently solved"
+ATOM_UNTITLED = "A solved night-sky photo"
+
+
+def _rfc3339(created_at):
+    # SQLite datetime('now') is "YYYY-MM-DD HH:MM:SS" UTC; Atom wants
+    # RFC 3339. The same rewrite the homepage does before new Date().
+    return created_at.replace(" ", "T") + "Z"
+
+
+@app.get("/feed.atom")
+def feed_atom(request: Request):
+    """The strip as an Atom feed (#127): the one way to follow new solves
+    that asks nothing of the reader — no account to notify, nothing to
+    install. Same list and cap as /feed; the caption is the title, the
+    share card (#13) rides inline and as an enclosure, and the entry
+    links to the result page. Entries expire with retention, which is
+    fine: a reader keeps what it fetched, and a featured solve simply
+    stays valid. Built with ElementTree so captions and narration are
+    escaped by something that knows XML, not by hand."""
+    base = str(request.base_url).rstrip("/")
+    solves = _recent_solves()
+    root = ET.Element("feed", xmlns=ATOM_NS)
+    ET.SubElement(root, "title").text = ATOM_TITLE
+    ET.SubElement(root, "subtitle").text = (
+        "Night-sky photos, plate-solved and labeled from their star patterns.")
+    ET.SubElement(root, "id").text = f"{base}/feed.atom"
+    ET.SubElement(root, "link", rel="self", type="application/atom+xml",
+                  href=f"{base}/feed.atom")
+    ET.SubElement(root, "link", rel="alternate", type="text/html",
+                  href=f"{base}/")
+    ET.SubElement(ET.SubElement(root, "author"), "name").text = "asterism"
+    # Atom requires a feed-level <updated>; with nothing in the feed there
+    # is nothing to date it by but now.
+    ET.SubElement(root, "updated").text = (
+        _rfc3339(solves[0]["created_at"]) if solves
+        else time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+    for solve in solves:
+        page = f"{base}/?job={solve['id']}"
+        card_url = f"{base}/jobs/{solve['id']}/card"
+        title = solve["caption"] or ATOM_UNTITLED
+        when = _rfc3339(solve["created_at"])
+        entry = ET.SubElement(root, "entry")
+        ET.SubElement(entry, "id").text = page
+        ET.SubElement(entry, "title").text = title
+        ET.SubElement(entry, "link", rel="alternate", type="text/html",
+                      href=page)
+        ET.SubElement(entry, "link", rel="enclosure", type="image/png",
+                      href=card_url)
+        ET.SubElement(entry, "published").text = when
+        ET.SubElement(entry, "updated").text = when
+        # type="html": readers that ignore enclosures still show the card.
+        body = (f'<p><img src="{html.escape(card_url)}" '
+                f'alt="{html.escape(title)}"></p>')
+        if solve["text"]:
+            body += f"<p>{html.escape(solve['text'])}</p>"
+        ET.SubElement(entry, "content", type="html").text = body
+    return Response(
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        + ET.tostring(root, encoding="unicode"),
+        media_type="application/atom+xml; charset=utf-8")
 
 
 def _public_exif(exif_info):
@@ -501,3 +579,13 @@ def get_job_card(job_id: str, request: Request):
                     request.url.hostname or "asterism", card_path)
     return FileResponse(card_path, media_type="image/png",
                         filename=f"asterism-{job_id[:8]}.png")
+
+
+# FastAPI registers only the method named on the decorator, so every GET
+# route above answered HEAD with 405 (plain Starlette routes add HEAD for
+# free). Feed readers HEAD an enclosure to learn its size before fetching
+# it (#127), and a link checker HEADs a result page; nothing here is any
+# different for HEAD, and the body is dropped downstream on its own.
+for _route in app.routes:
+    if isinstance(_route, APIRoute) and "GET" in _route.methods:
+        _route.methods.add("HEAD")

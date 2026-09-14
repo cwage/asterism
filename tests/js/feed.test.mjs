@@ -21,6 +21,9 @@ test('feed renders server order with captioned alt text', async () => {
 
   const [title, row] = els.feed.children;
   assert.ok(title.textContent.includes('Recently solved'));
+  // the strip advertises its Atom twin (#127)
+  assert.equal(title.children.length, 1);
+  assert.equal(title.children[0].href, '/feed.atom');
   assert.equal(row.children.length, 2);
   assert.ok(row.children[0].href.includes('bbb'), 'server order preserved');
   assert.ok(row.children[0].children[0].src.includes('/jobs/bbb/image'));
