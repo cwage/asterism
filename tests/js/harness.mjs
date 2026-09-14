@@ -101,12 +101,12 @@ export function makeEl() {
   return el;
 }
 
-export function loadPage() {
+export function loadPage(options = {}) {
   const html = readFileSync(new URL('../../static/index.html', import.meta.url), 'utf8');
   const match = html.match(/<script>([\s\S]*)<\/script>/);
   if (!match) throw new Error('no inline <script> found in index.html');
   const els = {};
-  const store = {};
+  const store = options.store || {};
   const clipboard = [];  // everything the page wrote, in order
   const revoked = [];    // object URLs the page released, in order
   const sandbox = {
@@ -116,20 +116,23 @@ export function loadPage() {
       addEventListener() {},
     },
     localStorage: {
+      get length() { return Object.keys(store).length; },
+      key: i => Object.keys(store)[i] ?? null,
       getItem: (k) => (k in store ? store[k] : null),
       setItem: (k, v) => { store[k] = String(v); },
       removeItem: (k) => { delete store[k]; },
     },
-    location: { search: '' },
-    window: { addEventListener() {} },
+    location: { search: options.search || '' },
+    window: makeEl(),
     history: { pushState() {} },
-    fetch: async () => { throw new Error('unexpected fetch in test'); },
+    fetch: options.fetch || (async () => { throw new Error('unexpected fetch in test'); }),
     navigator: { clipboard: { writeText: async (text) => { clipboard.push(text); } } },
     // Object URLs are named after the file so a test can see which
     // preview is showing and which one was released.
     URL: { createObjectURL: (file) => 'blob:' + file.name,
            revokeObjectURL: (url) => { revoked.push(url); } },
     URLSearchParams,
+    AbortController,
     setTimeout,
     clearTimeout,
     console,

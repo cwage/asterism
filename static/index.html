@@ -76,6 +76,23 @@
   .disclosure summary { cursor: pointer; }
   .disclosure p { margin: 0.5rem 0 0; }
 
+  #recent { margin: 1rem 0; border: 1px solid var(--line); border-radius: 8px;
+              padding: 0.75rem; background: var(--panel); }
+  .recent-heading { display: flex; align-items: center; justify-content: space-between;
+                      flex-wrap: wrap; gap: 0.5rem; }
+  #recent h2 { margin: 0; font-size: 0.9rem; font-weight: 500; }
+  #recent-refresh { font: inherit; font-size: 0.8rem; cursor: pointer;
+                      color: var(--accent); background: none; border: 1px solid var(--line);
+                      border-radius: 5px; padding: 0.3rem 0.5rem; }
+  #recent-refresh:disabled { cursor: wait; color: var(--dim); }
+  #recent p { margin: 0.35rem 0; color: var(--dim); font-size: 0.75rem; }
+  #recent-list { list-style: none; padding: 0; margin: 0; max-height: 18rem; overflow-y: auto; }
+  #recent-list a { display: block; padding: 0.5rem 0; color: var(--ink);
+                    text-decoration: none; overflow-wrap: anywhere; }
+  #recent-list a:hover { color: var(--accent); }
+  #recent-list li + li { border-top: 1px solid var(--line); }
+  #recent-list .recent-meta { display: block; color: var(--dim); font-size: 0.75rem; }
+
   #feed { margin: 0.9rem 0 0; }
   #feed .title { font-size: 0.8rem; color: var(--faint); margin: 0 0 0.4rem; }
   #feed .title a { float: right; color: var(--faint); }
@@ -247,6 +264,14 @@
 </div>
 <div id="wrap"><img id="photo" hidden><canvas id="overlay"></canvas></div>
 
+<section id="recent" aria-labelledby="recent-title" hidden>
+  <div class="recent-heading">
+    <h2 id="recent-title">Your recent uploads</h2>
+    <button id="recent-refresh" type="button">Refresh status</button>
+  </div>
+  <p id="recent-help">On this browser only · up to 24 uploads. Expired results leave this list.</p>
+  <ul id="recent-list"></ul>
+</section>
 <div id="feed"></div>
 
 <footer><a href="https://github.com/cwage/asterism">asterism</a> — phone-first
@@ -298,6 +323,189 @@ function closeIntro() {
 function shouldAutoOpenIntro(search) {
   return !introAlreadySeen() && !new URLSearchParams(search || '').get('job');
 }
+
+// Browser-local bookmarks for submissions (#105), not an identity or an
+// ownership check. Visiting someone else's result must never add it here.
+const RECENT_PREFIX = 'asterismRecentUpload:';
+const RECENT_LIMIT = 24;
+const RECENT_STATUS = { queued: 'Queued', solving: 'Solving', done: 'Solved', failed: 'Unsolved' };
+let recentStorageWorks = true;
+let recentUploads = [];
+const recentStates = new Map();
+const recentVersions = new Map();
+let recentRefreshing = false;
+
+function recentKey(entry) {
+  return RECENT_PREFIX + entry.id + ':' + entry.at;
+}
+
+function readRecentRecords() {
+  try {
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i));
+    const entries = [];
+    for (const key of keys) {
+      if (!key?.startsWith(RECENT_PREFIX)) continue;
+      let e;
+      const raw = localStorage.getItem(key);
+      try { e = JSON.parse(raw); } catch { continue; }
+      if (e && typeof e.id === 'string' && /^[a-f0-9]{32}$/.test(e.id)
+          && Number.isFinite(e.at) && e.at > 0 && typeof e.title === 'string'
+          && recentKey(e) === key) entries.push({ id: e.id, at: e.at, title: e.title.slice(0, 160) });
+    }
+    return entries.sort((a, b) => b.at - a.at || a.id.localeCompare(b.id));
+  } catch {
+    // Storage refusal is not allowed to break uploading. Keep a tab-local
+    // list if persistence is unavailable.
+    recentStorageWorks = false;
+    return null;
+  }
+}
+
+function latestRecentUploads(entries) {
+  const seen = new Set();
+  return entries.filter(e => !seen.has(e.id) && seen.add(e.id)).slice(0, RECENT_LIMIT);
+}
+
+function readRecentUploads() {
+  const entries = readRecentRecords();
+  return entries === null ? recentUploads : latestRecentUploads(entries);
+}
+
+function saveRecentUpload(entry) {
+  try {
+    // Each submission owns its key: concurrent tabs never replace a whole
+    // shared list. The timestamp also protects a newer repeat of the same job.
+    localStorage.setItem(recentKey(entry), JSON.stringify(entry));
+    recentStorageWorks = true;
+    const records = readRecentRecords();
+    if (records === null) return;
+    recentUploads = latestRecentUploads(records);
+    const keep = new Set(recentUploads.map(recentKey));
+    // Delete only old keys from this snapshot. A concurrent submission has
+    // its own key and cannot be erased by this pruning pass.
+    for (const record of records) {
+      if (!keep.has(recentKey(record))) localStorage.removeItem(recentKey(record));
+    }
+  } catch { recentStorageWorks = false; }
+}
+
+function renderRecentUploads() {
+  document.getElementById('recent').hidden = recentUploads.length === 0;
+  document.getElementById('recent-help').textContent = recentStorageWorks
+    ? 'On this browser only · up to 24 uploads. Expired results leave this list.'
+    : 'Browser storage is unavailable: this list lasts only in this tab.';
+  const list = document.getElementById('recent-list');
+  list.replaceChildren();
+  for (const entry of recentUploads) {
+    const state = recentStates.get(entry.id);
+    const item = document.createElement('li');
+    const link = document.createElement('a');
+    link.href = '/?job=' + encodeURIComponent(entry.id);
+    const title = document.createElement('span');
+    title.textContent = state?.caption || entry.title || 'Night-sky photo';
+    const meta = document.createElement('span');
+    meta.className = 'recent-meta';
+    meta.textContent = (state?.status || 'Not checked yet') + ' · '
+      + new Date(entry.at).toLocaleString();
+    link.append(title, meta);
+    item.append(link);
+    list.append(item);
+  }
+}
+
+function rememberUpload(id, title, at, jobStatus) {
+  if (typeof id !== 'string' || !/^[a-f0-9]{32}$/.test(id)) return;
+  // Merge for display; persistence below writes only this submission's key.
+  if (recentStorageWorks) recentUploads = readRecentUploads();
+  const existing = recentUploads.find(e => e.id === id);
+  if (existing && existing.at > at) return;
+  const entry = { id, title: (title || 'Night-sky photo').slice(0, 160), at };
+  recentUploads = [entry,
+    ...recentUploads.filter(e => e.id !== id)]
+    .sort((a, b) => b.at - a.at).slice(0, RECENT_LIMIT);
+  saveRecentUpload(entry);
+  updateRecentJob(id, { status: jobStatus });
+}
+
+function updateRecentJob(id, job) {
+  if (!recentUploads.some(e => e.id === id)) return;
+  // Invalidate background refreshes which began before this newer poll
+  // answer or deepen. They mustn't turn a requeued job back into "Unsolved".
+  recentVersions.set(id, (recentVersions.get(id) || 0) + 1);
+  const caption = job.result?.narration?.caption;
+  recentStates.set(id, {
+    status: Object.hasOwn(RECENT_STATUS, job.status) ? RECENT_STATUS[job.status] : 'Status unavailable',
+    caption: typeof caption === 'string' ? caption.slice(0, 160) : '',
+  });
+  renderRecentUploads();
+}
+
+function forgetRecentUpload(id) {
+  const records = recentStorageWorks ? readRecentRecords() : null;
+  if (records !== null) {
+    try {
+      for (const entry of records) {
+        if (entry.id === id) localStorage.removeItem(recentKey(entry));
+      }
+    } catch { recentStorageWorks = false; }
+  }
+  if (recentStorageWorks) recentUploads = readRecentUploads();
+  recentUploads = recentUploads.filter(e => e.id !== id);
+  recentStates.delete(id);
+  recentVersions.set(id, (recentVersions.get(id) || 0) + 1);
+  renderRecentUploads();
+}
+
+async function refreshRecentUploads() {
+  if (recentRefreshing) return;
+  if (recentStorageWorks) recentUploads = readRecentUploads();
+  renderRecentUploads();
+  if (!recentUploads.length) return;
+  recentRefreshing = true;
+  const button = /** @type {HTMLButtonElement} */ (document.getElementById('recent-refresh'));
+  button.disabled = true;
+  button.textContent = 'Checking…';
+  const controller = new AbortController();
+  // One deadline for the whole refresh, not ten seconds per saved job.
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    // Sequential and capped: don't fan out 24 full-result requests at once.
+    for (const entry of [...recentUploads]) {
+      if (controller.signal.aborted) break;
+      const version = recentVersions.get(entry.id) || 0;
+      const current = () => (recentVersions.get(entry.id) || 0) === version
+        && recentUploads.some(e => e.id === entry.id && e.at === entry.at);
+      try {
+        const res = await fetch('/jobs/' + encodeURIComponent(entry.id), { signal: controller.signal });
+        if (!current()) continue;
+        if (res.status === 404 || res.status === 410) {
+          forgetRecentUpload(entry.id);
+          continue;
+        }
+        if (!res.ok) throw new Error('status unavailable');
+        const job = await res.json();
+        if (current()) updateRecentJob(entry.id, job);
+      } catch {
+        if (current()) updateRecentJob(entry.id, {});
+      }
+    }
+  } finally {
+    clearTimeout(timeout);
+    recentRefreshing = false;
+    button.disabled = false;
+    button.textContent = 'Refresh status';
+  }
+}
+
+document.getElementById('recent-refresh').addEventListener('click', refreshRecentUploads);
+window.addEventListener('focus', refreshRecentUploads);
+window.addEventListener('storage', e => {
+  if (e.key !== null && !e.key?.startsWith(RECENT_PREFIX)) return;
+  recentUploads = readRecentUploads();
+  renderRecentUploads();
+});
+refreshRecentUploads();
 
 // Public feed (grew out of #43's per-browser history): the most recent
 // successful solves across everyone, straight from the server. Uploads
@@ -387,19 +595,24 @@ document.getElementById('file').addEventListener('change', async (e) => {
   const f = e.target.files[0];
   if (!f) return;
   const gen = ++uploadGen;
+  const submittedAt = Date.now();
   const fd = new FormData();
   fd.append('image', f);
   status('uploading…');
   showPending(f);
   const res = await fetch('/jobs', { method: 'POST', body: fd });
-  if (gen !== uploadGen) return;  // a newer file was chosen meanwhile
   if (!res.ok) {
+    if (gen !== uploadGen) return;
     const detail = await res.text();
     if (gen !== uploadGen) return;
     status('upload failed: ' + detail);
     return;
   }
-  const { id, duplicate } = await res.json();
+  const { id, duplicate, status: jobStatus } = await res.json();
+  // Even a superseded upload belongs in the list: choosing another photo
+  // doesn't cancel the job the server just accepted. Only the main view
+  // is guarded by the upload generation below.
+  rememberUpload(id, f.name, submittedAt, jobStatus);
   if (gen !== uploadGen) return;  // reading the body is asynchronous too
   // The URL is the share link: make it bookmarkable the moment a job exists.
   history.pushState(null, '', '?job=' + encodeURIComponent(id));
@@ -477,6 +690,7 @@ async function poll(id, gen = uploadGen) {
     const res = await fetch('/jobs/' + encodeURIComponent(id));
     if (gen !== uploadGen) return;  // superseded by a newer upload
     if (!res.ok) {
+      if (res.status === 404 || res.status === 410) forgetRecentUpload(id);
       // Expired or mistyped link: surface the API's explanation (it names
       // the retention window) instead of polling a 404 forever.
       const detail = (await res.json().catch(() => ({}))).detail;
@@ -486,6 +700,7 @@ async function poll(id, gen = uploadGen) {
     }
     const job = await res.json();
     if (gen !== uploadGen) return;
+    updateRecentJob(id, job);
     if (job.status === 'done') { render(id, job); return; }
     if (job.status === 'failed') { renderFailure(id, job); return; }
     const secs = Math.round((Date.now() - t0) / 1000);
@@ -572,7 +787,12 @@ function renderFailure(id, job) {
   btn.onclick = async () => {
     btn.remove();
     const res = await fetch('/jobs/' + encodeURIComponent(id) + '/deepen', { method: 'POST' });
-    if (!res.ok) { status('could not restart job: ' + await res.text(), id); return; }
+    if (!res.ok) {
+      if (res.status === 404 || res.status === 410) forgetRecentUpload(id);
+      status('could not restart job: ' + await res.text(), id);
+      return;
+    }
+    updateRecentJob(id, { status: 'queued' });
     poll(id);
   };
   document.getElementById('actions').append(btn);
