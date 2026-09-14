@@ -62,6 +62,9 @@ Rules:
   frame during the exposure. They were not detected in the pixels, so say
   they passed through, never that a streak is visible. Mention at most one,
   and only when the list is short enough for that to be interesting.
+- just_outside_frame lists bright objects the solve places outside the
+  photo's edges, with how far and which way. They are not in the photo:
+  you may mention one as being just off the edge, never as captured.
 - You may also be shown the photo. The labels above stay the authority on
   sky objects — never claim a sky object from the pixels alone. You may
   mention the foreground scene (a treeline, a rooftop, someone silhouetted
@@ -155,6 +158,15 @@ def _client_or_none(client):
     return anthropic.Anthropic(timeout=TIMEOUT_SECONDS, max_retries=1)
 
 
+def _offset_phrase(pointer):
+    """'Saturn, 8° to the right' — a just-outside-the-frame pointer (#118)
+    as a sentence fragment, so the model has the fact and not the
+    geometry."""
+    side = pointer.get("side")
+    where = {"left": "to the left", "right": "to the right"}.get(side, side)
+    return f"{pointer['name']}, {round(pointer['deg'])}° {where}"
+
+
 def _payload(result):
     """The trimmed, public-only view of the result the model gets to see.
 
@@ -179,6 +191,11 @@ def _payload(result):
         "satellites_crossing": [
             c["name"] for c in
             (result.get("satellites") or {}).get("crossings") or []
+        ],
+        # The model once narrated "the Pleiades just outside the frame"
+        # with nothing to go on; now it is told (#118).
+        "just_outside_frame": [
+            _offset_phrase(p) for p in result.get("beyond") or []
         ],
     }
 

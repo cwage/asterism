@@ -6,8 +6,8 @@ import json
 
 import pytest
 
-from app import (constellations, db, ephemeris, narrate, satellites, solver,
-                 verify, worker)
+from app import (beyond, constellations, db, ephemeris, narrate, satellites,
+                 solver, verify, worker)
 
 JOB = {"id": "abc123", "image_path": "/photos/x.jpg", "mode": "quick",
        "exif_json": json.dumps({"width": 100, "height": 100})}
@@ -34,6 +34,9 @@ def stub_solve(tmp_path, monkeypatch):
     # Likewise no Space-Track credentials, and never a network call.
     monkeypatch.setattr(satellites, "annotate",
                         lambda *a, **k: {"skipped": "no_credentials"})
+    # The fake WCS path above would make the off-frame layer raise (and
+    # log) on every test; stub it like the rest.
+    monkeypatch.setattr(beyond, "annotate", lambda *a, **k: [])
 
 
 def test_bodies_merge_ahead_of_stars(monkeypatch):
@@ -362,3 +365,21 @@ def test_periodic_tasks_are_due_on_the_first_pass():
     # A freshly-booted machine is exactly the case that used to fail: a
     # small monotonic reading is not evidence that the task just ran.
     assert worker.due(None, 900, now=85.9) is True
+
+
+def test_beyond_pointers_ride_along_and_never_sink_the_job(monkeypatch):
+    monkeypatch.setattr(ephemeris, "annotate_bodies",
+                        lambda *a: ([], {"time_source": None}))
+    pointer = {"name": "Saturn", "kind": "planet", "mag": 0.7,
+               "edge_x": 100.0, "edge_y": 50.0, "ux": 1.0, "uy": 0.0,
+               "deg": 8.0, "side": "right"}
+    monkeypatch.setattr(beyond, "annotate", lambda *a, **k: [pointer])
+    status, result, _ = worker.process(JOB)
+    assert status == "done" and result["beyond"] == [pointer]
+
+    def boom(*a, **k):
+        raise RuntimeError("wcs exploded")
+    monkeypatch.setattr(beyond, "annotate", boom)
+    status, result, error = worker.process(JOB)
+    assert status == "done" and error is None
+    assert result["beyond"] == []

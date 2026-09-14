@@ -7,7 +7,7 @@ import shutil
 import time
 import traceback
 
-from . import (constellations, db, dso, ephemeris, narrate, notify,
+from . import (beyond, constellations, db, dso, ephemeris, narrate, notify,
                satellites, solver, stats, verify)
 
 # Below this many detected star-like sources, a quick job fails fast
@@ -304,6 +304,18 @@ def _label_everything(result, wcs_path, image_path, exif_info, job_id):
     result["constellations"] = figures
     result["verification"] = verification
     result["satellites"] = sats
+
+    # Bright objects just outside the frame (#118), best-effort like the
+    # layers above, and before the narration so the model is told what
+    # lies off the edge instead of guessing.
+    try:
+        pointers = beyond.annotate(
+            wcs_path, exif_info["width"], exif_info["height"], exif_info
+        )
+    except Exception:
+        print(f"worker: beyond-frame pointers failed for {job_id}\n{traceback.format_exc()}")
+        pointers = []
+    result["beyond"] = pointers
 
     # LLM narration (#12), best-effort: no API key or a failed call just
     # leaves the deterministic card caption in place.
