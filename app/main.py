@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import hmac
 import json
 import math
@@ -103,6 +104,26 @@ def _queue_depth():
     return row["n"]
 
 
+def _sha256(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def _same_upload(conn, content_hash):
+    """The job already made from these exact bytes, as an upload response,
+    or None (#120). Whatever its state: a solve still running is joined, a
+    finished one is shown, a failed one fails again the same way, and the
+    deepen button is still there. Hidden rows never match — a takedown
+    must not be undone by sending the file again — so the re-upload gets a
+    fresh job, which hides the same way."""
+    row = conn.execute(
+        "SELECT id, status FROM jobs WHERE content_hash = ? AND hidden = 0 "
+        "ORDER BY created_at DESC LIMIT 1", (content_hash,),
+    ).fetchone()
+    if not row:
+        return None
+    return {"id": row["id"], "status": row["status"], "duplicate": True}
+
+
 @app.get("/")
 def index(request: Request, job: str | None = None):
     # Share links (?job=...) get OpenGraph tags pointing at the rendered
@@ -133,6 +154,19 @@ async def create_job(request: Request, image: UploadFile):
     data = await image.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(413, f"image too large (max {MAX_UPLOAD_BYTES // (1024*1024)}MB)")
+
+    # Same bytes, same answer (#120). Hashed as received, before the bake
+    # re-encodes the file: a phone's second send of one frame matches its
+    # first, and a messaging app's re-compressed copy does not (that is a
+    # different photo to every reader downstream, and a different feature).
+    # Looked up before anything touches the disk, so the common case, the
+    # same file again minutes later, costs neither a write nor a bake.
+    content_hash = await run_in_threadpool(_sha256, data)
+    with db.get_conn() as conn:
+        existing = _same_upload(conn, content_hash)
+    if existing:
+        await image.close()
+        return existing
 
     # Full 128 bits: the result URL is the only access control (#21).
     job_id = uuid.uuid4().hex
@@ -204,20 +238,33 @@ async def create_job(request: Request, image: UploadFile):
     except Exception:
         device = None
     with db.get_conn() as conn:
-        # One clock read for both the salt day and created_at: an upload
-        # straddling UTC midnight must not be hashed under one day and
-        # filed under the next, or its token would match nothing.
-        now = conn.execute("SELECT datetime('now')").fetchone()[0]
-        try:
-            uploader = stats.uploader_hash(conn, _client_ip(request), now)
-        except Exception:
-            uploader = None
-        conn.execute(
-            "INSERT INTO jobs (id, image_path, exif_json, created_at, "
-            "uploader_hash, device_json) VALUES (?, ?, ?, ?, ?, ?)",
-            (job_id, image_path, json.dumps(exif_info), now, uploader,
-             json.dumps(device) if device else None),
-        )
+        # Look for the same bytes once more, holding the write lock this
+        # time: two sends of one frame seconds apart both pass the check
+        # at the top (neither has a row until its bake is done) and would
+        # both insert. Under the lock the second sees the first's row and
+        # joins it, and only its bake was spent.
+        conn.execute("BEGIN IMMEDIATE")
+        existing = _same_upload(conn, content_hash)
+        if existing is None:
+            # One clock read for both the salt day and created_at: an
+            # upload straddling UTC midnight must not be hashed under one
+            # day and filed under the next, or its token would match
+            # nothing.
+            now = conn.execute("SELECT datetime('now')").fetchone()[0]
+            try:
+                uploader = stats.uploader_hash(conn, _client_ip(request), now)
+            except Exception:
+                uploader = None
+            conn.execute(
+                "INSERT INTO jobs (id, image_path, exif_json, created_at, "
+                "uploader_hash, device_json, content_hash) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (job_id, image_path, json.dumps(exif_info), now, uploader,
+                 json.dumps(device) if device else None, content_hash),
+            )
+    if existing:
+        _discard(image_path)
+        return existing
     return {"id": job_id, "status": "queued"}
 
 

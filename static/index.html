@@ -328,11 +328,21 @@ document.getElementById('file').addEventListener('change', async (e) => {
   status('uploading…');
   const res = await fetch('/jobs', { method: 'POST', body: fd });
   if (!res.ok) { status('upload failed: ' + await res.text()); return; }
-  const { id } = await res.json();
+  const { id, duplicate } = await res.json();
   // The URL is the share link: make it bookmarkable the moment a job exists.
   history.pushState(null, '', '?job=' + encodeURIComponent(id));
-  poll(id);
+  await poll(id);
+  // The same bytes as an earlier upload get that job back instead of a
+  // second solve (#120). Say so once the result is up: an answer that
+  // lands before the spinner reads as a glitch, and an instant failure
+  // reads as "it didn't even try".
+  if (duplicate) noteDuplicate();
 });
+
+function noteDuplicate() {
+  const s = document.getElementById('status');
+  s.textContent = 'same photo as an earlier upload · ' + s.textContent;
+}
 
 // Deep-link an existing job: /?job=<id> renders it without re-uploading.
 const jobParam = new URLSearchParams(location.search).get('job');

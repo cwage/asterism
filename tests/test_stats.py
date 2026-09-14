@@ -119,16 +119,20 @@ def test_an_upload_records_the_hash_and_device_but_serves_neither(
     ex[exif.TAG_MAKE] = "Apple"
     ex[exif.TAG_MODEL] = "iPhone 15 Plus"
     ex[exif.TAG_SOFTWARE] = "26.6"
-    buf = io.BytesIO()
-    Image.new("RGB", (64, 64)).save(buf, "JPEG", exif=ex)
+    def frame(shade):
+        # Three different frames: the same bytes twice is one job (#120).
+        buf = io.BytesIO()
+        Image.new("RGB", (64, 64), (shade, shade, shade)).save(
+            buf, "JPEG", exif=ex)
+        return buf.getvalue()
 
     client = TestClient(main.app)
     headers = {"fly-client-ip": "203.0.113.7"}
-    first = client.post("/jobs", files={"image": ("sky.jpg", buf.getvalue(),
+    first = client.post("/jobs", files={"image": ("sky.jpg", frame(0),
                                                   "image/jpeg")}, headers=headers)
-    second = client.post("/jobs", files={"image": ("sky.jpg", buf.getvalue(),
+    second = client.post("/jobs", files={"image": ("sky.jpg", frame(1),
                                                    "image/jpeg")}, headers=headers)
-    other = client.post("/jobs", files={"image": ("sky.jpg", buf.getvalue(),
+    other = client.post("/jobs", files={"image": ("sky.jpg", frame(2),
                                                   "image/jpeg")},
                         headers={"fly-client-ip": "203.0.113.8"})
     assert first.status_code == second.status_code == other.status_code == 200
