@@ -7,8 +7,8 @@ import shutil
 import time
 import traceback
 
-from . import (beyond, constellations, db, dso, ephemeris, narrate, notify,
-               satellites, solver, stats, verify)
+from . import (beyond, constellations, db, dso, ephemeris, narrate, night,
+               notify, satellites, solver, stats, verify)
 
 # Below this many detected star-like sources, a quick job fails fast
 # instead of burning cpulimit tiers on daylight/food/pitch-black uploads.
@@ -276,12 +276,23 @@ def _label_everything(result, wcs_path, image_path, exif_info, job_id):
 
     labels = bodies + labels + dsos
 
+    # How deep the photo reaches (#122) is measured against the whole
+    # catalog, not the labelled bright end, so the answer is the sky's and
+    # not the label budget's. Best-effort like the layers above.
+    try:
+        deep = solver.project_deep(
+            wcs_path, exif_info["width"], exif_info["height"]
+        )
+    except Exception:
+        print(f"worker: deep catalog projection failed for {job_id}\n{traceback.format_exc()}")
+        deep = None
+
     # Verification closes the loop against the pixels (issue #28): snap
     # labels to detected sources, flag cloud-hidden stars, correct for
     # stack warp. Best-effort like the layers above.
     try:
         labels, figures, verification = verify.apply(
-            image_path, labels, figures
+            image_path, labels, figures, deep=deep
         )
     except Exception:
         print(f"worker: verification failed for {job_id}\n{traceback.format_exc()}")
@@ -316,6 +327,17 @@ def _label_everything(result, wcs_path, image_path, exif_info, job_id):
         print(f"worker: beyond-frame pointers failed for {job_id}\n{traceback.format_exc()}")
         pointers = []
     result["beyond"] = pointers
+
+    # What the night was like (#121) and how faint the photo reached
+    # (#122): sentences built from the layers above, ahead of the
+    # narration so the model gets them as facts rather than guesses.
+    try:
+        result["night"] = night.annotate(
+            exif_info, wcs_path, labels, pointers, verification
+        )
+    except Exception:
+        print(f"worker: night context failed for {job_id}\n{traceback.format_exc()}")
+        result["night"] = None
 
     # LLM narration (#12), best-effort: no API key or a failed call just
     # leaves the deterministic card caption in place.

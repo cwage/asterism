@@ -50,3 +50,34 @@ def test_annotate_respects_max_labels(orion_wcs_file):
     path, _ = orion_wcs_file
     labels = solver.annotate(str(path), WIDTH, HEIGHT, max_labels=3)
     assert len(labels) == 3
+
+
+# ---- project_deep (#122): in-frame cut, RA wrap, ordering ----
+
+def test_project_deep_crosses_the_ra_wrap_and_drops_the_far_star(tmp_path, monkeypatch):
+    from tests.test_catalog import _deep_catalog
+    _deep_catalog(tmp_path, monkeypatch)
+    # A 20 degree field straddling RA 0: stars at 359.5 and 0.5 both land,
+    # the one at RA 180 lands nowhere near the frame.
+    wcs = synth.make_wcs(ra=0.0, dec=10.0, fov_deg=20.0, width=WIDTH, height=HEIGHT)
+    path = tmp_path / "wrap.wcs"
+    fits.PrimaryHDU(header=wcs.to_header()).writeto(path)
+    deep = solver.project_deep(str(path), WIDTH, HEIGHT, max_mag=9.0)
+    assert [m for _, _, m in deep] == [3.0, 5.5, 7.9]  # brightest first
+    for x, y, _ in deep:
+        assert 0 <= x < WIDTH and 0 <= y < HEIGHT
+    east, west = deep[0], deep[1]
+    # RA grows to the left: the RA 0.5 star sits left of the RA 359.5 one
+    assert east[0] < WIDTH / 2 < west[0]
+    ex, ey = wcs.all_world2pix(0.5, 10.0, 0)
+    assert east[0] == pytest.approx(float(ex), abs=0.01)
+    assert east[1] == pytest.approx(float(ey), abs=0.01)
+
+
+def test_project_deep_is_empty_when_the_field_is_elsewhere(tmp_path, monkeypatch):
+    from tests.test_catalog import _deep_catalog
+    _deep_catalog(tmp_path, monkeypatch)
+    wcs = synth.make_wcs(ra=90.0, dec=-60.0, fov_deg=20.0, width=WIDTH, height=HEIGHT)
+    path = tmp_path / "south.wcs"
+    fits.PrimaryHDU(header=wcs.to_header()).writeto(path)
+    assert solver.project_deep(str(path), WIDTH, HEIGHT, max_mag=9.0) == []

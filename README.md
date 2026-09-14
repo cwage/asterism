@@ -70,6 +70,22 @@ Final home: `asterism.quietlife.net`.
   the card, at most six, never displacing a label for something in the shot.
   Directions are the photo's own (left, right, above, below). The narration
   gets them as facts, so it stops guessing what lies off the edge.
+- What the night was like (#121) and how deep the photo reached (#122):
+  a sentence or two of measured context under the narration. The Sun's
+  altitude at the EXIF instant says whether the shot was in twilight and
+  about how long before full dark; the Moon's phase, and whether it was
+  up, says what lit the sky. Without GPS these are judged across every
+  plausible observer position in the clock offset's timezone band, minus
+  positions from which the solved field was below the horizon or the Sun
+  above it, and stated only when they all agree. The depth line comes
+  from the verification pass: the catalog to magnitude 9 is projected
+  through the WCS and tested bin by bin for a detected source, and the
+  limiting magnitude is where the detection rate falls through half of
+  the bright end's, with a star-free control beside every test so a noisy
+  frame reports nothing rather than something flattering, and no answer
+  at all when even the bright stars are mostly hidden. The sentences are built in the worker
+  so the page, the copied description and the narration (which gets them
+  as facts) all say the same thing.
 - Jobs/results live in `data/` (SQLite + uploaded images), bind-mounted into
   both containers.
 - The queue is deliberately single-worker: solve-field is CPU-bound and the

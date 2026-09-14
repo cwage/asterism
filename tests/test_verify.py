@@ -278,3 +278,131 @@ def test_unreadable_image_returns_originals(tmp_path):
     assert meta["verified"] is False
     # no statuses invented for labels we could not check
     assert all("status" not in l for l in out_labels)
+
+
+# ---- limiting magnitude (#122) ----
+
+def _graded_field(seed=3, n=300, lo=2.0, hi=8.0):
+    """Stars at least 30px apart with magnitudes spread over [lo, hi],
+    rendered on the same 255-at-magnitude-3 scale as synth.render_starfield
+    so a 12-ADU detection floor sits at magnitude 6.3."""
+    rng = np.random.default_rng(seed)
+    pts, mags = [], []
+    while len(pts) < n:
+        x, y = rng.uniform(40, WIDTH - 40), rng.uniform(40, HEIGHT - 40)
+        if all((x - px) ** 2 + (y - py) ** 2 > 30 ** 2 for px, py in pts):
+            pts.append((x, y))
+            mags.append(float(rng.uniform(lo, hi)))
+    amps = [255.0 * 10 ** (-0.4 * (m - 3.0)) for m in mags]
+    return pts, mags, amps
+
+
+def test_limiting_magnitude_reads_where_stars_stop_being_detected(tmp_path):
+    pts, mags, amps = _graded_field()
+    path = tmp_path / "deep.jpg"
+    synth.render_points(str(path), pts, WIDTH, HEIGHT, amps=amps)
+    bright = [(x, y, m) for (x, y), m in zip(pts, mags) if m <= 3.5]
+    labels = [{"name": f"S{i}", "x": x, "y": y, "mag": m, "kind": "star"}
+              for i, (x, y, m) in enumerate(bright)]
+    deep = [(x, y, m) for (x, y), m in zip(pts, mags)]
+    _, _, meta = verify.apply(str(path), labels, [], deep=deep)
+    d = meta["depth"]
+    assert 5.8 <= d["limiting_mag"] <= 6.8
+    assert d["catalog_limited"] is False
+    assert d["control_frac"] <= 0.15
+    assert d["curve"][0][2] >= 0.9        # the bright end is all there
+    assert d["curve"][-1][2] < 0.5         # and the walk ended in failure
+    assert all(n >= verify.DEPTH_MIN_PER_BIN for _, n, _ in d["curve"])
+
+
+def test_depth_is_catalog_limited_when_every_star_shows(tmp_path):
+    pts, mags, amps = _graded_field(lo=2.0, hi=4.5)
+    path = tmp_path / "shallow.jpg"
+    synth.render_points(str(path), pts, WIDTH, HEIGHT, amps=amps)
+    deep = [(x, y, m) for (x, y), m in zip(pts, mags)]
+    _, _, meta = verify.apply(str(path), star_labels(pts[:12]), [], deep=deep)
+    d = meta["depth"]
+    assert d["catalog_limited"] is True
+    # the faint edge of the last *full* bin: the catalog's own cut leaves
+    # 4.0-4.5 partial, and a half-empty bin is not walked
+    assert d["limiting_mag"] == 4.0
+    assert d["baseline"] >= 0.9
+
+
+def test_no_limit_when_the_catalog_points_at_empty_sky(tmp_path):
+    path = tmp_path / "sparse.jpg"
+    synth.render_points(str(path), PREDICTED, WIDTH, HEIGHT)
+    rng = np.random.default_rng(5)
+    deep = [(float(rng.uniform(60, WIDTH - 60)), float(rng.uniform(60, HEIGHT - 60)), float(m))
+            for m in np.linspace(3.0, 7.9, 80)]
+    _, _, meta = verify.apply(str(path), star_labels(PREDICTED), [], deep=deep)
+    assert meta["depth"]["limiting_mag"] is None
+    assert meta["depth"]["curve"]          # it looked, and found nothing
+    assert meta["depth"]["baseline"] < verify.DEPTH_BASELINE_MIN
+
+
+def test_a_third_of_the_sky_behind_a_treeline_does_not_move_the_limit(tmp_path):
+    # Every star in the bottom third of the frame is missing, the way a
+    # foreground hides them. The bright end is found at two thirds, the
+    # threshold follows it, and the limit is still where the stars fade.
+    pts, mags, amps = _graded_field()
+    shown = [(p, a) for p, a in zip(pts, amps) if p[1] < HEIGHT * 2 / 3]
+    path = tmp_path / "treeline.jpg"
+    synth.render_points(str(path), [p for p, _ in shown], WIDTH, HEIGHT,
+                        amps=[a for _, a in shown])
+    bright = [(x, y, m) for (x, y), m in zip(pts, mags) if m <= 3.5]
+    labels = [{"name": f"S{i}", "x": x, "y": y, "mag": m, "kind": "star"}
+              for i, (x, y, m) in enumerate(bright)]
+    deep = [(x, y, m) for (x, y), m in zip(pts, mags)]
+    _, _, meta = verify.apply(str(path), labels, [], deep=deep)
+    d = meta["depth"]
+    assert 0.55 <= d["baseline"] <= 0.8
+    assert 5.8 <= d["limiting_mag"] <= 6.8
+
+
+def test_depth_is_skipped_without_a_deep_catalog(tmp_path):
+    path = tmp_path / "clean.jpg"
+    synth.render_points(str(path), PREDICTED, WIDTH, HEIGHT)
+    _, _, meta = verify.apply(str(path), star_labels(PREDICTED), [])
+    assert "depth" not in meta
+
+
+def test_controls_step_around_catalog_stars(tmp_path):
+    # Every tested star has a bright catalog neighbour exactly where the
+    # first control offset would fall. A control that ignored the catalog
+    # would count each neighbour as a chance hit and refuse to answer.
+    pts, mags, amps = _graded_field(n=150)
+    win_r = max(verify.DEPTH_WINDOW_MIN_PX,
+                2 * max(verify.DEPTH_SNAP_MIN_PX, WIDTH * verify.DEPTH_SNAP_FRAC))
+    partners = [(x + 3 * win_r, y) for x, y in pts if x + 3 * win_r < WIDTH - 40]
+    all_pts = pts + partners
+    all_mags = mags + [2.0] * len(partners)
+    all_amps = amps + [255.0] * len(partners)
+    path = tmp_path / "partnered.jpg"
+    synth.render_points(str(path), all_pts, WIDTH, HEIGHT, amps=all_amps)
+    bright = [(x, y, m) for (x, y), m in zip(all_pts, all_mags) if m <= 3.5]
+    labels = [{"name": f"S{i}", "x": x, "y": y, "mag": m, "kind": "star"}
+              for i, (x, y, m) in enumerate(bright)]
+    deep = [(x, y, m) for (x, y), m in zip(all_pts, all_mags)]
+    _, _, meta = verify.apply(str(path), labels, [], deep=deep)
+    d = meta["depth"]
+    assert d["control_frac"] <= 0.15
+    assert 5.8 <= d["limiting_mag"] <= 6.8
+
+
+def test_sparse_faint_bins_make_a_floor_and_say_so(tmp_path):
+    # Plenty of stars to magnitude 5, three lonely ones at 6.4 and the
+    # catalog's last star at 7.3: the 6.0-6.5 bin is full but too sparse
+    # to test, so the answer is a floor at 5.0, flagged as sparse rather
+    # than as the catalog running out.
+    pts, mags, amps = _graded_field(n=200, lo=2.0, hi=5.0)
+    extra = [(100.0, 100.0), (500.0, 500.0), (900.0, 700.0), (300.0, 800.0)]
+    all_pts, all_mags = pts + extra, mags + [6.4, 6.4, 6.4, 7.3]
+    all_amps = amps + [255.0 * 10 ** (-0.4 * (m - 3.0)) for m in (6.4, 6.4, 6.4, 7.3)]
+    path = tmp_path / "sparse-faint.jpg"
+    synth.render_points(str(path), all_pts, WIDTH, HEIGHT, amps=all_amps)
+    deep = [(x, y, m) for (x, y), m in zip(all_pts, all_mags)]
+    _, _, meta = verify.apply(str(path), star_labels(pts[:12]), [], deep=deep)
+    d = meta["depth"]
+    assert d["catalog_limited"] is True and d["faint_bins_sparse"] is True
+    assert d["limiting_mag"] == 5.0

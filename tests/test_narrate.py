@@ -199,3 +199,18 @@ def test_payload_carries_just_outside_frame_as_phrases():
     # facts only: the edge geometry never leaves the app
     assert "edge_x" not in json.dumps(payload) and "ux" not in payload
     assert narrate._payload(RESULT)["just_outside_frame"] == []
+
+
+def test_night_notes_reach_the_model_as_facts():
+    client = FakeClient()
+    lines = ["Taken in twilight, about 40 minutes before the sky was fully dark.",
+             "Stars down to magnitude 4.2 show in this photo, about what the "
+             "eye picks out from the suburbs, from a 2-second exposure."]
+    narrate.annotate({**RESULT, "night": {"lines": lines}}, client=client)
+    payload = json.loads(client.calls[0]["messages"][0]["content"])
+    assert payload["night_notes"] == lines
+    assert "night_notes" in client.calls[0]["system"]
+    # a result from before the feature, or one whose night pass failed
+    client = FakeClient()
+    narrate.annotate({**RESULT, "night": None}, client=client)
+    assert json.loads(client.calls[0]["messages"][0]["content"])["night_notes"] == []

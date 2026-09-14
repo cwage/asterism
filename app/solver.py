@@ -8,6 +8,8 @@ import re
 import subprocess
 import time
 
+import numpy as np
+
 INDEX_DIR = os.environ.get("ASTROMETRY_INDEX_DIR", "./indexes")
 CATALOG_DIR = os.environ.get("CATALOG_DIR", "./catalogs")
 CPU_LIMIT = int(os.environ.get("SOLVE_CPULIMIT", "60"))
@@ -397,3 +399,81 @@ def annotate(wcs_path, width, height, max_labels=40):
         if len(labels) >= max_labels:
             break
     return labels
+
+
+# How deep to read the catalog for the limiting-magnitude estimate (#122).
+# A handheld night-mode shot reaches 4 to 6; a 16-second tripod frame at
+# a dark site was measured still detecting its catalog stars at 7.75.
+# The margin above that is what lets the estimate see the detection rate
+# fall, rather than run out of stars first.
+DEEP_MAG_LIMIT = 9.0
+_deep_cache = None
+
+
+def load_deep_catalog(max_mag=DEEP_MAG_LIMIT):
+    """Every HYG star to `max_mag` as parallel (ra, dec, mag) arrays, no
+    name filter: the depth estimate needs the faint end the labelled
+    catalog deliberately stops short of. Unnamed secondary components are
+    dropped as load_catalog drops them: they sit on their primary's pixel,
+    and one peak must not count as two detections. Read once per
+    process."""
+    global _deep_cache
+    if _deep_cache is not None and _deep_cache[0] == max_mag:
+        return _deep_cache[1]
+    path = os.path.join(CATALOG_DIR, "hyg.csv")
+    ras, decs, mags = [], [], []
+    with open(path, newline="") as f:
+        for row in csv.DictReader(f):
+            if (row.get("proper") or "").strip() == "Sol":
+                continue
+            if not (row.get("proper") or "").strip() \
+                    and (row.get("comp") or "1").strip() not in ("", "1"):
+                continue
+            try:
+                mag = float(row["mag"])
+                if mag > max_mag:
+                    continue
+                ra = float(row["ra"]) * 15.0
+                dec = float(row["dec"])
+            except (KeyError, ValueError):
+                continue
+            ras.append(ra)
+            decs.append(dec)
+            mags.append(mag)
+    arrays = (np.asarray(ras, dtype=float), np.asarray(decs, dtype=float),
+              np.asarray(mags, dtype=float))
+    _deep_cache = (max_mag, arrays)
+    return arrays
+
+
+def project_deep(wcs_path, width, height, max_mag=DEEP_MAG_LIMIT):
+    """Every catalog star to `max_mag` that lands in the frame, as
+    [(x, y, mag)] brightest first: the population the depth estimate
+    (#122) tests against the pixels. A spherical cut around the field
+    centre comes first, so the SIP inversion only ever runs on stars near
+    the field, where it converges."""
+    from astropy.io import fits
+    from astropy.wcs import WCS
+    from astropy.wcs.utils import proj_plane_pixel_scales
+
+    with fits.open(wcs_path) as hdul:
+        wcs = WCS(hdul[0].header)
+    ra0, dec0 = (math.radians(float(v)) for v in wcs.wcs.crval)
+    scale = float(max(proj_plane_pixel_scales(wcs)))  # degrees per pixel
+    radius = math.radians(scale * math.hypot(width, height) / 2.0 * 1.2)
+
+    ras, decs, mags = load_deep_catalog(max_mag)
+    ra_r, dec_r = np.radians(ras), np.radians(decs)
+    cos_sep = (math.sin(dec0) * np.sin(dec_r)
+               + math.cos(dec0) * np.cos(dec_r) * np.cos(ra_r - ra0))
+    near = cos_sep >= math.cos(min(radius, math.pi / 2))
+    if not near.any():
+        return []
+    xs, ys = wcs.all_world2pix(ras[near], decs[near], 0, quiet=True)
+    xs, ys = np.asarray(xs, dtype=float), np.asarray(ys, dtype=float)
+    ok = (np.isfinite(xs) & np.isfinite(ys)
+          & (xs >= 0) & (xs < width) & (ys >= 0) & (ys < height))
+    m = mags[near][ok]
+    order = np.argsort(m, kind="stable")
+    return [(float(x), float(y), float(g))
+            for x, y, g in zip(xs[ok][order], ys[ok][order], m[order])]

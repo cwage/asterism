@@ -1,6 +1,8 @@
 """load_catalog filtering and Bayer-designation fallback.
 Self-contained: uses the mini catalog fixture, not catalogs/hyg.csv."""
 
+import pytest
+
 from app import solver
 
 
@@ -52,3 +54,35 @@ def test_bayer_name_parsing():
     assert solver._bayer_name({"bayer": "Alp", "con": ""}) is None
     assert solver._bayer_name({"bayer": "Xyz", "con": "Ori"}) is None
     assert solver._bayer_name({}) is None
+
+
+# ---- the deep catalog behind the depth estimate (#122) ----
+
+DEEP_HYG = """id,proper,ra,dec,mag,bayer,con,comp
+1,Sol,0.0,0.0,-26.7,,,
+2,Wrap East,0.033333,10.0,3.0,,,1
+3,Wrap West,23.966667,10.0,5.5,,,1
+4,,0.05,12.0,7.9,,,1
+5,Too Faint,0.02,10.5,9.5,,,1
+6,Far Away,12.0,10.0,2.0,,,1
+7,,0.04,11.0,6.0,Zet,UMa,2
+"""
+
+
+def _deep_catalog(tmp_path, monkeypatch):
+    (tmp_path / "hyg.csv").write_text(DEEP_HYG)
+    monkeypatch.setattr(solver, "CATALOG_DIR", str(tmp_path))
+    monkeypatch.setattr(solver, "_deep_cache", None)
+
+
+def test_deep_catalog_keeps_the_faint_and_unnamed_but_not_sol_or_secondaries(
+        tmp_path, monkeypatch):
+    _deep_catalog(tmp_path, monkeypatch)
+    ras, decs, mags = solver.load_deep_catalog(max_mag=9.0)
+    assert sorted(mags.tolist()) == [2.0, 3.0, 5.5, 7.9]
+    # RA comes back in degrees, like load_catalog
+    assert min(ras) == pytest.approx(0.5, abs=1e-4)
+    assert max(ras) == pytest.approx(359.5, abs=1e-4)
+    # a second call is the cache, a different limit is not
+    assert solver.load_deep_catalog(max_mag=9.0) is solver.load_deep_catalog(max_mag=9.0)
+    assert len(solver.load_deep_catalog(max_mag=4.0)[2]) == 2

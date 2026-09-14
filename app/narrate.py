@@ -67,6 +67,10 @@ Rules:
 - just_outside_frame lists bright objects the solve places outside the
   photo's edges, with how far and which way. They are not in the photo:
   you may mention one as being just off the edge, never as captured.
+- night_notes are measured facts about the conditions: twilight or full
+  dark, the Moon's phase and whether it was up, how faint a star the photo
+  recorded. You may weave one into the text, keeping its numbers as
+  given, and must never contradict them.
 - You may also be shown the photo. The labels above stay the authority on
   sky objects — never claim a sky object from the pixels alone. You may
   mention the foreground scene (a treeline, a rooftop, someone silhouetted
@@ -199,6 +203,9 @@ def _payload(result):
         "just_outside_frame": [
             _offset_phrase(p) for p in result.get("beyond") or []
         ],
+        # The conditions (#121, #122) as the sentences the page shows, so
+        # the model can echo them and never has to derive them.
+        "night_notes": list((result.get("night") or {}).get("lines") or []),
     }
 
 
