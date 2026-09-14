@@ -356,16 +356,30 @@ document.addEventListener('keydown', (e) => {
 });
 if (shouldAutoOpenIntro(location.search)) openIntro();
 
+// Selections are numbered so an upload or poll that answers after a newer
+// file was chosen changes nothing (#133): the file input stays live during
+// a solve, and without this the earlier one's result would land on top of
+// the later photo and release its preview.
+let uploadGen = 0;
+
 document.getElementById('file').addEventListener('change', async (e) => {
   const f = e.target.files[0];
   if (!f) return;
+  const gen = ++uploadGen;
   const fd = new FormData();
   fd.append('image', f);
   status('uploading…');
   showPending(f);
   const res = await fetch('/jobs', { method: 'POST', body: fd });
-  if (!res.ok) { status('upload failed: ' + await res.text()); return; }
+  if (gen !== uploadGen) return;  // a newer file was chosen meanwhile
+  if (!res.ok) {
+    const detail = await res.text();
+    if (gen !== uploadGen) return;
+    status('upload failed: ' + detail);
+    return;
+  }
   const { id, duplicate } = await res.json();
+  if (gen !== uploadGen) return;  // reading the body is asynchronous too
   // The URL is the share link: make it bookmarkable the moment a job exists.
   history.pushState(null, '', '?job=' + encodeURIComponent(id));
   // The same bytes as an earlier upload get that job back instead of a
@@ -373,7 +387,7 @@ document.getElementById('file').addEventListener('change', async (e) => {
   // before the spinner reads as a glitch, and an instant failure reads
   // as "it didn't even try".
   if (duplicate) duplicates.add(id);
-  poll(id);
+  poll(id, gen);
 });
 
 // Deep-link an existing job: /?job=<id> renders it without re-uploading.
@@ -433,20 +447,24 @@ function clearPreview() {
   document.getElementById('photo').onerror = null;
 }
 
-async function poll(id) {
+async function poll(id, gen = uploadGen) {
+  if (gen !== uploadGen) return;
   status('solving…', id);
   clearResult();
   const t0 = Date.now();
-  while (true) {
+  while (gen === uploadGen) {
     const res = await fetch('/jobs/' + encodeURIComponent(id));
+    if (gen !== uploadGen) return;  // superseded by a newer upload
     if (!res.ok) {
       // Expired or mistyped link: surface the API's explanation (it names
       // the retention window) instead of polling a 404 forever.
       const detail = (await res.json().catch(() => ({}))).detail;
+      if (gen !== uploadGen) return;
       status(detail || `error ${res.status}`);
       return;
     }
     const job = await res.json();
+    if (gen !== uploadGen) return;
     if (job.status === 'done') { render(id, job); return; }
     if (job.status === 'failed') { renderFailure(id, job); return; }
     const secs = Math.round((Date.now() - t0) / 1000);

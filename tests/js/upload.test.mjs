@@ -110,14 +110,133 @@ test('a preview the browser cannot decode hides the frame until the served copy'
   assert.equal(els.photo.onerror, null, 'the preview handler does not outlive it');
 });
 
-test('choosing a second file while the first is still uploading swaps the preview', async () => {
+test('a second file chosen mid-flight wins when the earlier poll finishes', async () => {
   const { sandbox, els, revoked } = loadPage();
-  const { release, done } = showThenUpload(sandbox, els, DONE_B);
+  sandbox.render('a', DONE_A);
+  els.photo.onload();
+  const ctx = els.overlay.ctx;
+  // Every request is held on its own cue so the two uploads can be
+  // answered in whatever order the test wants.
+  const cues = {};
+  const hold = (key) => new Promise(r => { cues[key] = r; });
+  let posts = 0;
+  sandbox.FormData = class { append() {} };
+  sandbox.fetch = (url, opts) => {
+    if (url === '/jobs' && opts && opts.method === 'POST') return hold(`post${++posts}`);
+    if (url === '/feed') return Promise.resolve({ ok: true, json: async () => ({ jobs: [] }) });
+    return hold(url);
+  };
+  const first = els.file.dispatch('change', { target: { files: [{ name: 'first.jpg' }] } });
   await settle();
-  const again = els.file.dispatch('change', { target: { files: [{ name: 'newer.jpg' }] } });
+  // the first upload is accepted and its poll is in flight...
+  cues.post1({ ok: true, json: async () => ({ id: 'b', status: 'queued' }) });
   await settle();
-  assert.equal(els.photo.src, 'blob:newer.jpg');
-  assert.deepEqual(revoked, ['blob:new.jpg'], 'the superseded preview is released');
-  release({ ok: true, json: async () => ({ id: 'b', status: 'queued' }) });
-  await Promise.all([done, again]);
+  assert.ok('/jobs/b' in cues, 'first upload is polling');
+  // ...when a second file is chosen
+  const second = els.file.dispatch('change', { target: { files: [{ name: 'second.jpg' }] } });
+  await settle();
+  assert.equal(els.photo.src, 'blob:second.jpg');
+  assert.deepEqual(revoked, ['blob:first.jpg'], 'the superseded preview is released');
+  cues.post2({ ok: true, json: async () => ({ id: 'c', status: 'queued' }) });
+  await settle();
+  assert.equal(els.status.textContent, 'solving…');
+
+  // the stale poll answers with a finished solve: nothing may change
+  cues['/jobs/b']({ ok: true, json: async () => DONE_B });
+  await first;
+  await settle();
+  assert.equal(els.photo.src, 'blob:second.jpg', 'the first result never lands');
+  assert.equal(els.status.textContent, 'solving…');
+  assert.deepEqual(revoked, ['blob:first.jpg'], 'the second preview is not released');
+  assert.equal(ctx.ops.length, 0);
+
+  // the live poll answers: the second photo gets its labels
+  const DONE_C = { status: 'done', solve_seconds: 1.9,
+    result: { labels: [{ name: 'Altair', x: 400, y: 400, mag: 0.76, kind: 'star' }] } };
+  cues['/jobs/c']({ ok: true, json: async () => DONE_C });
+  await second;
+  await settle();
+  assert.equal(els.photo.src, '/jobs/c/image');
+  assert.deepEqual(revoked, ['blob:first.jpg', 'blob:second.jpg']);
+  els.photo.onload();
+  assert.ok(drew(ctx, 'Altair'));
+  assert.ok(!drew(ctx, 'Deneb'));
+  assert.ok(els.status.textContent.includes('solved in 1.9s'));
 });
+
+test('a stale upload answer never starts a poll or moves the URL', async () => {
+  const { sandbox, els } = loadPage();
+  const cues = {};
+  const hold = (key) => new Promise(r => { cues[key] = r; });
+  let posts = 0;
+  const pushed = [];
+  sandbox.history = { pushState: (s, t, url) => pushed.push(url) };
+  sandbox.FormData = class { append() {} };
+  sandbox.fetch = (url, opts) => {
+    if (url === '/jobs' && opts && opts.method === 'POST') return hold(`post${++posts}`);
+    if (url === '/feed') return Promise.resolve({ ok: true, json: async () => ({ jobs: [] }) });
+    return hold(url);
+  };
+  const first = els.file.dispatch('change', { target: { files: [{ name: 'first.jpg' }] } });
+  await settle();
+  const second = els.file.dispatch('change', { target: { files: [{ name: 'second.jpg' }] } });
+  await settle();
+  // the first POST answers only now, after it was superseded
+  cues.post1({ ok: true, json: async () => ({ id: 'b', status: 'queued' }) });
+  await first;
+  await settle();
+  assert.ok(!('/jobs/b' in cues), 'no poll for the stale job');
+  assert.deepEqual(pushed, [], 'the URL still belongs to the live upload');
+  cues.post2({ ok: true, json: async () => ({ id: 'c', status: 'queued' }) });
+  await settle();
+  assert.deepEqual(pushed, ['?job=c']);
+  assert.ok('/jobs/c' in cues);
+  cues['/jobs/c']({ ok: true, json: async () => DONE_B });
+  await second;
+});
+
+for (const [stage, ok, body] of [
+  ['upload accepted', true, { id: 'b', duplicate: true }],
+  ['upload refused', false, 'image too large'],
+  ['poll done', true, DONE_B],
+  ['poll failed', true, FAILED_B],
+  ['poll queued', true, { status: 'queued', queue_position: 2 }],
+  ['poll error', false, { detail: 'job expired' }],
+]) {
+  test(`a delayed ${stage} body cannot overwrite a newer selection`, async () => {
+    const { sandbox, els, revoked } = loadPage();
+    const pushed = [];
+    const requests = [];
+    let releaseBody, releaseUpload;
+    const oldBody = new Promise(r => { releaseBody = r; });
+    const newUpload = new Promise(r => { releaseUpload = r; });
+    sandbox.history = { pushState: (s, t, url) => pushed.push(url) };
+    sandbox.FormData = class { append() {} };
+    sandbox.fetch = async (url) => {
+      requests.push(url);
+      if (requests.length === 1) return { ok, json: () => oldBody, text: () => oldBody };
+      assert.equal(url, '/jobs', 'only the new upload may start another request');
+      return newUpload;
+    };
+    const first = stage.startsWith('upload')
+      ? els.file.dispatch('change', { target: { files: [{ name: 'first.jpg' }] } })
+      : sandbox.poll('b');
+    await settle(); // headers have arrived; the old response body is still pending
+    const second = els.file.dispatch('change', { target: { files: [{ name: 'second.jpg' }] } });
+    await settle();
+    const revokedBefore = [...revoked];
+    releaseBody(body);
+    await settle();
+    assert.equal(els.status.textContent, 'uploading…');
+    assert.equal(els.photo.src, 'blob:second.jpg');
+    assert.deepEqual(revoked, revokedBefore, 'the current preview remains in use');
+    assert.deepEqual(pushed, [], 'the stale job never changes the share URL');
+    assert.equal(els.overlay.ctx.ops.length, 0);
+    assert.equal(els.failbox.hidden, true);
+    assert.equal(requests.length, 2, 'no stale poll starts or continues');
+    await first;
+    releaseUpload({ ok: false, text: async () => 'new upload refused' });
+    await second;
+    assert.equal(els.status.textContent, 'upload failed: new upload refused');
+  });
+}
