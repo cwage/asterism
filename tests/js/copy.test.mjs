@@ -13,7 +13,10 @@ const JOB = {
       { name: 'Vega', x: 200, y: 200, mag: 0.03, kind: 'star', status: 'matched' },
       { name: 'Albireo', x: 500, y: 300, mag: 3.05, kind: 'star', status: 'hidden' },
       { name: 'Sulafat', x: 300, y: 250, mag: 3.25, kind: 'star', status: 'matched' },
+      // bodies arrive in the worker's fixed order, not by brightness
       { name: 'Saturn', x: 400, y: 350, mag: 0.7, kind: 'planet' },
+      { name: 'Jupiter', x: 450, y: 380, mag: -2.5, kind: 'planet' },
+      { name: 'Moon', x: 150, y: 150, mag: null, kind: 'moon', phase: 0.4 },
       { name: 'Ring Nebula (M57)', x: 650, y: 350, mag: 8.8, kind: 'dso' },
     ],
     constellations: [
@@ -40,17 +43,19 @@ test('describeText is the caption and the narration, blank line between', () => 
   assert.equal(sandbox.describeText({ result: { labels: [] } }), '');
 });
 
-test('starListText groups by kind, skips cloud-hidden labels, ends with constellations', () => {
+test('starListText groups by kind, brightest first, skips cloud-hidden labels', () => {
   const { sandbox } = loadPage();
   assert.equal(sandbox.starListText(JOB), [
-    'Solar system: Saturn',
+    'Solar system: Moon, Jupiter, Saturn',
     'Deep-sky: Ring Nebula (M57)',
     'Stars: Vega, Sulafat',
     'Constellations: Lyra, Cygnus',
   ].join('\n'));
-  // labels without a kind are stars, the way the card treats them
-  assert.equal(sandbox.starListText({ result: { labels: [{ name: 'Deneb' }] } }),
-               'Stars: Deneb');
+  // labels without a kind are stars, the way the card treats them, and
+  // sorting is on a copy: the page's own label list keeps its order
+  const job = { result: { labels: [{ name: 'Deneb', mag: 1.25 }, { name: 'Vega', mag: 0.03 }] } };
+  assert.equal(sandbox.starListText(job), 'Stars: Vega, Deneb');
+  assert.equal(job.result.labels[0].name, 'Deneb');
   assert.equal(sandbox.starListText({ result: { labels: [] } }), '');
 });
 
@@ -73,6 +78,21 @@ test('a solved result gets both copy buttons beside the card link', async () => 
   await new Promise(r => setTimeout(r, 1600));
   assert.equal(describe.textContent, 'copy description');
   assert.equal(stars.textContent, 'copy star list');
+});
+
+test('a second tap inside the moment restarts it rather than cutting it short', async () => {
+  const { sandbox, els, clipboard } = loadPage();
+  const [, describe] = show(sandbox, els);
+  await describe.dispatch('click');
+  await new Promise(r => setTimeout(r, 1000));
+  await describe.dispatch('click');
+  assert.equal(clipboard.length, 2);
+  // 1.8s after the first tap its own reset would have fired; the second
+  // tap's moment is still running
+  await new Promise(r => setTimeout(r, 800));
+  assert.equal(describe.textContent, 'copied');
+  await new Promise(r => setTimeout(r, 800));
+  assert.equal(describe.textContent, 'copy description');
 });
 
 test('no narration means no description button, the star list stays', () => {

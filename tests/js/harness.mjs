@@ -126,6 +126,7 @@ export function loadPage() {
     navigator: { clipboard: { writeText: async (text) => { clipboard.push(text); } } },
     URLSearchParams,
     setTimeout,
+    clearTimeout,
     console,
   };
   vm.createContext(sandbox);

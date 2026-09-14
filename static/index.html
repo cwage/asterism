@@ -759,7 +759,12 @@ function describeText(job) {
 function starListText(job) {
   const r = job.result || {};
   const labels = (r.labels || []).filter(l => l.status !== 'hidden');
-  const names = kinds => labels.filter(l => kinds.includes(l.kind || 'star')).map(l => l.name);
+  // Brightest first within each group. The worker already sorts stars
+  // that way, but bodies arrive in a fixed Moon-then-planets order; the
+  // Moon's magnitude is null and it stays in front.
+  const byMag = (a, b) => (a.mag ?? -Infinity) - (b.mag ?? -Infinity);
+  const names = kinds => labels.filter(l => kinds.includes(l.kind || 'star'))
+    .sort(byMag).map(l => l.name);
   const lines = [];
   const bodies = names(['moon', 'planet']);
   const dsos = names(['dso']);
@@ -781,14 +786,18 @@ function copyButton(label, text) {
   btn.type = 'button';
   btn.className = 'copy';
   btn.textContent = label;
+  let reset;  // a second tap inside the moment restarts it, not cuts it short
   btn.addEventListener('click', async () => {
+    let said;
     try {
       await navigator.clipboard.writeText(text());
-      btn.textContent = 'copied';
+      said = 'copied';
     } catch {
-      btn.textContent = 'copy failed';
+      said = 'copy failed';
     }
-    setTimeout(() => { btn.textContent = label; }, 1500);
+    btn.textContent = said;
+    clearTimeout(reset);
+    reset = setTimeout(() => { btn.textContent = label; }, 1500);
   });
   return btn;
 }
