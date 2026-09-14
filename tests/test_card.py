@@ -150,3 +150,27 @@ def test_priority_matches_frontend_semantics():
     ]
     order = [l["name"] for l in sorted(labels, key=card._priority)]
     assert order == ["Moon", "Mars", "M31", "Vega", "faint"]
+
+
+def test_beyond_pointers_draw_at_the_edge_and_yield_to_labels(tmp_path, photo):
+    # photo is 1200x900, so the card's photo area is 1600x1200: a pointer
+    # off the right edge at y=450 puts its arrow along y=600 on the card,
+    # shaft from x=1566 to the edge.
+    saturn = {"name": "Saturn", "kind": "planet", "mag": 0.7,
+              "edge_x": 1200.0, "edge_y": 450.0, "ux": 1.0, "uy": 0.0,
+              "deg": 8.3, "side": "right"}
+    # Compared against a render without the pointer rather than against a
+    # colour: the photo is a JPEG, so its "flat" pixels are not quite flat.
+    def shaft_pixel(result):
+        out = tmp_path / "card.png"
+        card.render(str(photo), result, "host", str(out))
+        return Image.open(out).convert("RGB").getpixel((1570, 600))
+
+    plain = shaft_pixel({"labels": []})
+    assert shaft_pixel({"labels": [], "beyond": [saturn]}) != plain
+
+    # A big DSO circle already claims that edge: the pointer is dropped
+    # whole, and the pixel inside the circle stays photo.
+    m31 = {"name": "Andromeda Galaxy (M31)", "x": 1100, "y": 450, "mag": 3.6,
+           "kind": "dso", "radius_px": 100}
+    assert shaft_pixel({"labels": [m31], "beyond": [saturn]}) == plain

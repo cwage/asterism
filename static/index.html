@@ -100,6 +100,18 @@
                     cursor: pointer; user-select: none; }
   #controls input[type="range"] { width: 110px; accent-color: var(--accent); }
   #controls input[type="checkbox"] { accent-color: var(--accent); }
+  /* The key: a ring for point markers, a line for figures and tracks, an
+     arrow for pointers, each in the colour the overlay draws it. */
+  .swatch { display: inline-block; width: 0.7em; height: 0.7em; margin-right: 0.3em;
+            border: 2px solid var(--c); border-radius: 50%; vertical-align: -0.05em; }
+  .swatch.line { height: 0; border-radius: 0; border-width: 2px 0 0; width: 1em;
+                 vertical-align: 0.25em; }
+  .swatch.dashed { border-top-style: dashed; }
+  .swatch.arrow { width: 1em; height: 0; border-radius: 0; border-width: 2px 0 0;
+                  vertical-align: 0.25em; position: relative; }
+  .swatch.arrow::after { content: ""; position: absolute; right: -1px; top: -5px;
+                         width: 0.45em; height: 0.45em; border: solid var(--c);
+                         border-width: 2px 2px 0 0; transform: rotate(45deg); }
   #mag-val { min-width: 2.2em; color: var(--ink); }
   /* One panel for everything a failed solve has to say (#110), tinted a
      quiet red so the page reads "this ain't it" before a word lands. */
@@ -213,11 +225,15 @@
 <div id="actions"></div>
 <div id="narration"></div>
 <div id="controls" hidden>
-  <label><input type="checkbox" id="lay-stars" checked> stars</label>
-  <label><input type="checkbox" id="lay-solar" checked> moon &amp; planets</label>
-  <label><input type="checkbox" id="lay-dso" checked> deep-sky</label>
-  <label><input type="checkbox" id="lay-con" checked> constellations</label>
-  <label><input type="checkbox" id="lay-sat" checked> satellites</label>
+  <!-- Each toggle carries its layer's colour, so the controls double as
+       the key to the overlay: what a blue ring, a gold ring, a coral
+       arrow mean, without a separate legend block. -->
+  <label><input type="checkbox" id="lay-stars" checked> <i class="swatch" style="--c: rgb(120, 200, 255)"></i>stars</label>
+  <label><input type="checkbox" id="lay-solar" checked> <i class="swatch" style="--c: rgb(255, 200, 90)"></i>moon &amp; planets</label>
+  <label><input type="checkbox" id="lay-dso" checked> <i class="swatch" style="--c: rgb(200, 160, 255)"></i>deep-sky</label>
+  <label><input type="checkbox" id="lay-con" checked> <i class="swatch line" style="--c: rgb(150, 170, 210)"></i>constellations</label>
+  <label><input type="checkbox" id="lay-sat" checked> <i class="swatch line dashed" style="--c: rgb(140, 230, 190)"></i>satellites</label>
+  <label><input type="checkbox" id="lay-beyond" checked> <i class="swatch arrow" style="--c: rgb(255, 140, 110)"></i>beyond the frame</label>
   <label class="mag">faintest star: mag
     <input type="range" id="mag-limit" min="1" max="4.5" step="0.25" value="4.5">
     <span id="mag-val">4.5</span></label>
@@ -610,6 +626,7 @@ function controlState() {
     dso: document.getElementById('lay-dso').checked,
     constellations: document.getElementById('lay-con').checked,
     satellites: document.getElementById('lay-sat').checked,
+    beyond: document.getElementById('lay-beyond').checked,
     magLimit: parseFloat(document.getElementById('mag-limit').value),
   };
 }
@@ -626,7 +643,11 @@ function draw() {
   const colors = { star: 'rgba(120, 200, 255, 0.9)',
                    planet: 'rgba(255, 200, 90, 0.95)',
                    moon: 'rgba(255, 235, 170, 0.95)',
-                   dso: 'rgba(200, 160, 255, 0.9)' };
+                   dso: 'rgba(200, 160, 255, 0.9)',
+                   // Pointers (#118) share one colour whatever their kind:
+                   // "this is outside the shot" is the fact that matters,
+                   // and a kind-coloured pointer read as one more label.
+                   beyond: 'rgba(255, 140, 110, 0.95)' };
   const placed = [];  // rects text must keep clear of
 
   // Constellation figures go down first, under everything; their names wait
@@ -744,6 +765,54 @@ function draw() {
     ], w, h, W, H);
     if (spot) ctx.fillText(s.name, spot.x, spot.y + satPx * 0.85);
   }
+
+  // Bright objects just outside the frame (#118): an arrow where the line
+  // from frame centre leaves the edge, pointing out, with the name and how
+  // far. Last in line for space, so a pointer never displaces a label for
+  // something actually in the shot; one whose arrow would sit on a marker
+  // or a label at the edge is dropped whole.
+  if (state.beyond) {
+    // A step larger than the star labels and in their own colour: the
+    // pointers are the one thing on the overlay that is not in the photo.
+    const ptrPx = Math.max(15, 18 * scale);
+    ctx.font = `${ptrPx}px system-ui`;
+    ctx.lineWidth = Math.max(1.5, 2 * scale);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = colors.beyond;
+    ctx.fillStyle = colors.beyond;
+    const len = Math.max(22, 30 * scale);
+    const head = Math.max(7, 9 * scale);
+    for (const p of shownJob.result.beyond || []) {
+      if (!labelVisible(p, state)) continue;
+      const hx = p.edge_x, hy = p.edge_y;
+      const tx = hx - p.ux * len, ty = hy - p.uy * len;
+      const arrow = { x: Math.min(hx, tx) - gap, y: Math.min(hy, ty) - gap,
+                      w: Math.abs(hx - tx) + 2 * gap, h: Math.abs(hy - ty) + 2 * gap };
+      if (placed.some(r => rectsOverlap(r, arrow))) continue;
+      placed.push(arrow);
+      const a = Math.atan2(p.uy, p.ux);
+      ctx.beginPath();
+      ctx.moveTo(tx, ty);
+      ctx.lineTo(hx, hy);
+      ctx.moveTo(hx, hy);
+      ctx.lineTo(hx - head * Math.cos(a - 0.5), hy - head * Math.sin(a - 0.5));
+      ctx.moveTo(hx, hy);
+      ctx.lineTo(hx - head * Math.cos(a + 0.5), hy - head * Math.sin(a + 0.5));
+      ctx.stroke();
+      const text = `${p.name} ${formatDeg(p.deg)}`;
+      const w = ctx.measureText(text).width;
+      const h = ptrPx * 1.2;
+      // Text sits inside the tail, on whichever side has room.
+      const spots = {
+        right: [{ x: tx - gap - w, y: ty - h / 2 }, { x: tx - w, y: ty + gap }, { x: tx - w, y: ty - gap - h }],
+        left: [{ x: tx + gap, y: ty - h / 2 }, { x: tx, y: ty + gap }, { x: tx, y: ty - gap - h }],
+        above: [{ x: tx - w / 2, y: ty + gap }, { x: tx + gap, y: ty }, { x: tx - gap - w, y: ty }],
+        below: [{ x: tx - w / 2, y: ty - gap - h }, { x: tx + gap, y: ty - h }, { x: tx - gap - w, y: ty - h }],
+      };
+      const spot = placeText(placed, spots[p.side] || spots.right, w, h, W, H);
+      if (spot) ctx.fillText(text, spot.x, spot.y + ptrPx * 0.85);
+    }
+  }
   ctx.globalAlpha = 1;
 }
 
@@ -754,6 +823,14 @@ function draw() {
 function describeText(job) {
   const n = (job.result && job.result.narration) || {};
   return [n.caption, n.text].filter(Boolean).join('\n\n');
+}
+
+// '8°', '0.4°': whole degrees, except under one degree where a tenth is
+// the difference between "on the edge" and "just past it". Math.round is
+// half-up, and the server side formats the same way, so the page, the
+// card and the narration all quote one number.
+function formatDeg(deg) {
+  return (deg < 1 ? deg.toFixed(1) : Math.round(deg)) + '°';
 }
 
 function starListText(job) {
@@ -770,10 +847,12 @@ function starListText(job) {
   const dsos = names(['dso']);
   const stars = names(['star']);
   const cons = (r.constellations || []).map(c => c.name);
+  const beyond = (r.beyond || []).map(p => `${p.name} (${formatDeg(p.deg)} ${p.side})`);
   if (bodies.length) lines.push('Solar system: ' + bodies.join(', '));
   if (dsos.length) lines.push('Deep-sky: ' + dsos.join(', '));
   if (stars.length) lines.push('Stars: ' + stars.join(', '));
   if (cons.length) lines.push('Constellations: ' + cons.join(', '));
+  if (beyond.length) lines.push('Just outside the frame: ' + beyond.join(', '));
   return lines.join('\n');
 }
 
@@ -835,6 +914,8 @@ function render(id, job) {
     if (figures.length) parts.push(`${figures.length} constellation${figures.length === 1 ? '' : 's'}`);
     const crossings = ((job.result.satellites || {}).crossings || []).length;
     if (crossings) parts.push(`${crossings} satellite crossing${crossings === 1 ? '' : 's'}`);
+    const beyond = (job.result.beyond || []).length;
+    if (beyond) parts.push(`${beyond} just outside the frame`);
     const notes = [];
     if (hidden) notes.push(`${hidden} hidden by cloud`);
     const v = job.result.verification;
@@ -866,7 +947,7 @@ function render(id, job) {
 // One entry per checkbox controlState() reads: a layer missing here still
 // gates draw() correctly but never triggers one, so its checkbox silently
 // does nothing. That is how the satellite toggle shipped inert.
-for (const layId of ['lay-stars', 'lay-solar', 'lay-dso', 'lay-con', 'lay-sat'])
+for (const layId of ['lay-stars', 'lay-solar', 'lay-dso', 'lay-con', 'lay-sat', 'lay-beyond'])
   document.getElementById(layId).addEventListener('change', draw);
 document.getElementById('mag-limit').addEventListener('input', () => {
   document.getElementById('mag-val').textContent =

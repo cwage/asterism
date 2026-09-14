@@ -5,6 +5,7 @@ when GPS is present) and projects them through the solved WCS, same as the
 star catalog. Positions come from the JPL DE421 ephemeris via skyfield.
 """
 
+import functools
 import os
 import re
 from datetime import datetime, timedelta, timezone
@@ -114,7 +115,12 @@ def resolve_utc(exif_info):
     return naive.replace(tzinfo=timezone.utc), "assumed_utc"
 
 
+@functools.lru_cache(maxsize=8)
 def compute_bodies(when_utc, lat=None, lon=None):
+    # Memoised on the exact instant and observer: the in-frame body layer
+    # and the just-outside-the-frame layer (#118) both need this for the
+    # same photo, and the second call should not redo the Skyfield work.
+    # Callers read the returned list; none may mutate it.
     """ICRS positions (and Moon illumination) for the naked-eye bodies.
 
     Topocentric when lat/lon are given — parallax shifts the Moon by up to

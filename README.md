@@ -63,6 +63,13 @@ Final home: `asterism.quietlife.net`.
   on the share card. Best-effort: no key or a failed call just skips it.
   The results page puts the caption and narration on the clipboard in one
   tap for a post or alt text, and the label list in another (#124).
+- Bright objects just outside the frame (#118): stars to magnitude 2, the
+  Moon and planets, and the showpiece deep-sky objects are projected through
+  the same WCS and, when one lands within 15° of an edge, drawn as a coral
+  arrow at the edge with the name and how far off it lies — on the page and
+  the card, at most six, never displacing a label for something in the shot.
+  Directions are the photo's own (left, right, above, below). The narration
+  gets them as facts, so it stops guessing what lies off the edge.
 - Jobs/results live in `data/` (SQLite + uploaded images), bind-mounted into
   both containers.
 - The queue is deliberately single-worker: solve-field is CPU-bound and the

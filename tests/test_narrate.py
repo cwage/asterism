@@ -184,3 +184,18 @@ def test_failure_narration_missing_api_key(monkeypatch, tmp_path):
     path = str(tmp_path / "x.jpg")
     Image.new("RGB", (64, 64)).save(path)
     assert narrate.annotate_failure(FAILED, path) is None
+
+
+def test_payload_carries_just_outside_frame_as_phrases():
+    result = dict(RESULT, beyond=[
+        {"name": "Saturn", "kind": "planet", "mag": 0.7, "edge_x": 1000.0,
+         "edge_y": 400.0, "ux": 1.0, "uy": 0.0, "deg": 8.3, "side": "right"},
+        {"name": "Pleiades (M45)", "kind": "dso", "mag": 1.6, "edge_x": 500.0,
+         "edge_y": 0.0, "ux": 0.0, "uy": -1.0, "deg": 11.6, "side": "above"},
+    ])
+    payload = narrate._payload(result)
+    assert payload["just_outside_frame"] == [
+        "Saturn, 8° to the right", "Pleiades (M45), 12° above"]
+    # facts only: the edge geometry never leaves the app
+    assert "edge_x" not in json.dumps(payload) and "ux" not in payload
+    assert narrate._payload(RESULT)["just_outside_frame"] == []
