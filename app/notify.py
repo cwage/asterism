@@ -45,6 +45,10 @@ BURST_WINDOW_MINUTES = _int_env("NTFY_BURST_WINDOW_MINUTES", 60)
 # is "roughly nightly" regardless (see the wake-gap note in #69).
 SUMMARY_HOUR_UTC = _int_env("NTFY_SUMMARY_HOUR_UTC", 7)
 SUMMARY_WINDOW_HOURS = 24
+# The summary lists the day's solves (#114) so a good one can be featured
+# before the sweep; past this many the burst alert has already said so.
+SUMMARY_SOLVES = 8
+PUBLIC_URL = os.environ.get("PUBLIC_URL", "https://asterism.quietlife.net").rstrip("/")
 
 TICK_INTERVAL_SECONDS = _int_env("NTFY_TICK_SECONDS", 600)
 TIMEOUT_SECONDS = 10.0
@@ -60,8 +64,11 @@ def enabled():
     return bool(TOPIC_URL)
 
 
-def post(message, title=None, tags=None, priority=None):
+def post(message, title=None, tags=None, priority=None, click=None):
     """Publish one notification. Returns True if ntfy accepted it.
+
+    `click` is the URL a tap on the notification opens (#114): one tap
+    from the phone to the solve worth looking at.
 
     Never raises: every caller is on a path whose actual job is solving
     photos, and a notification is not worth failing that for.
@@ -75,6 +82,8 @@ def post(message, title=None, tags=None, priority=None):
         headers["Tags"] = ",".join(tags)
     if priority:
         headers["Priority"] = str(priority)
+    if click:
+        headers["Click"] = click
     request = urllib.request.Request(
         TOPIC_URL, data=message.encode("utf-8"), headers=headers, method="POST")
     try:
@@ -197,18 +206,65 @@ def check_burst(conn, now):
     return message
 
 
+def recent_solves(conn, since, limit=SUMMARY_SOLVES):
+    """The window's successful, visible solves, newest first: caption, link,
+    and whether anyone has already kept it (#114). The caption is the
+    card's, so the digest and the feed name a solve the same way."""
+    from . import card
+
+    rows = conn.execute(
+        "SELECT id, result_json, featured, kept FROM jobs "
+        "WHERE created_at >= ? AND status = 'done' AND hidden = 0 "
+        "ORDER BY created_at DESC, id DESC LIMIT ?", (since, limit)).fetchall()
+    out = []
+    for row in rows:
+        try:
+            result = json.loads(row["result_json"]) if row["result_json"] else {}
+        except (TypeError, ValueError):
+            result = {}
+        caption = ""
+        try:
+            caption = card._caption(result) or ""
+        except Exception:
+            pass
+        out.append({"id": row["id"], "caption": caption or "a solve",
+                    "url": f"{PUBLIC_URL}/?job={row['id']}",
+                    "kept": bool(row["kept"]), "featured": bool(row["featured"])})
+    return out
+
+
+def format_solves(solves):
+    """The digest's second half: one line per solve, the ones nobody has
+    kept first in reading order because those are the ones to act on
+    before the sweep."""
+    if not solves:
+        return ""
+    lines = ["The day's solves, newest first:"]
+    for s in solves:
+        mark = " (featured)" if s["featured"] else (" (kept by uploader)" if s["kept"] else "")
+        lines.append(f"• {s['caption']}{mark} {s['url']}")
+    return "\n\n" + "\n".join(lines)
+
+
 def check_summary(conn, now):
     """Send one summary per UTC day, on the first tick at or after the
     configured hour. Drifts later if the machine was asleep — which only
-    happens on a day quiet enough for the summary to read `0 uploads`."""
+    happens on a day quiet enough for the summary to read `0 uploads`.
+
+    The counts say how much happened; the list under them says which
+    solves were worth keeping (#114), with a link each and the newest as
+    the notification's tap target, so the decision to feature one can be
+    made from the phone before the sweep collects it."""
     today, clock = now.split(" ")
     if int(clock[:2]) < SUMMARY_HOUR_UTC:
         return None
     if _get(conn, LAST_SUMMARY_KEY) == today:
         return None
     since = _shift(conn, now, f"-{SUMMARY_WINDOW_HOURS} hours")
-    message = format_summary(activity_counts(conn, since))
-    if post(message, title="asterism: yesterday", tags=["bar_chart"]):
+    solves = recent_solves(conn, since)
+    message = format_summary(activity_counts(conn, since)) + format_solves(solves)
+    click = solves[0]["url"] if solves else None
+    if post(message, title="asterism: yesterday", tags=["bar_chart"], click=click):
         _set(conn, LAST_SUMMARY_KEY, today)
     return message
 

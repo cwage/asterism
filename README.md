@@ -319,6 +319,11 @@ happens to look at the homepage. Set `NTFY_TOPIC_URL` to an
 
 - a roughly-nightly summary —
   `47 uploads · 39 solved · 8 failed (6 no_stars, 2 no_match) · 2 hidden · 10 featured`
+  — followed by the day's solves, newest first, up to eight, each with
+  its caption, a result link, and whether it is already featured or kept
+  by its uploader (#114). A tap on the notification opens the newest.
+  The counts say how much happened; the list says which ones to feature
+  before the sweep collects them.
 - a burst alert when solves outpace what this site normally sees —
   `9 solves in the last 60 minutes`
 
