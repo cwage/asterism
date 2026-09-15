@@ -66,6 +66,20 @@ def test_featured_is_a_running_total_not_a_window_count(fresh_db):
     assert counts["featured"] == 1  # but still featured
 
 
+def test_kept_is_counted_the_same_way_and_named_in_the_summary(fresh_db):
+    """Uploader keeps (#113) outlive the window like featured jobs, and the
+    digest says how many there are, since those need no action."""
+    with db.get_conn() as conn:
+        _insert(conn, "old", status="done", created_at="2020-01-01 00:00:00")
+        conn.execute("UPDATE jobs SET kept = 1 WHERE id = 'old'")
+        counts = notify.activity_counts(conn, _at(conn, "-24 hours"))
+    assert counts["uploads"] == 0
+    assert counts["kept"] == 1
+    assert notify.format_summary(counts).endswith("0 featured · 1 kept by uploaders")
+    # nothing kept: the line stays as it was
+    assert notify.format_summary({**counts, "kept": 0}).endswith("0 featured")
+
+
 def test_a_malformed_result_does_not_break_the_count(fresh_db):
     with db.get_conn() as conn:
         recent = _at(conn, "-1 hours")

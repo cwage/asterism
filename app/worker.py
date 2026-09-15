@@ -48,9 +48,10 @@ def sweep_expired():
     window. Returns how many were removed.
 
     Featured jobs (#67) are exempt: a handful of good solves are kept as
-    permanent examples so the homepage feed isn't empty on a quiet day.
-    Hiding a job clears the flag, so the kill switch (#60) always wins and
-    nothing can be both invisible and immortal."""
+    permanent examples so the homepage feed isn't empty on a quiet day. So
+    are jobs their uploader chose to keep (#113). Hiding a job clears both
+    flags, so the kill switch (#60) always wins and nothing can be both
+    invisible and immortal."""
     removed = 0
     with db.get_conn() as conn:
         # Fold the expiring rows into the daily history first (#116): the
@@ -63,11 +64,11 @@ def sweep_expired():
         stats.retire_salts(conn)
         rows = conn.execute(
             "SELECT id, image_path FROM jobs "
-            "WHERE created_at < datetime('now', ?) AND featured = 0",
+            "WHERE created_at < datetime('now', ?) AND featured = 0 AND kept = 0",
             (f"-{RETENTION_HOURS} hours",),
         ).fetchall()
         for row in rows:
-            # Delete first, re-checking featured, and only touch the bytes if
+            # Delete first, re-checking the flags, and only touch the bytes if
             # the row was actually ours to take. sqlite3 opens no transaction
             # for the SELECT above, so /feature can commit in the gap — and
             # unlink() has no transaction to roll back, so unlinking first
@@ -76,7 +77,8 @@ def sweep_expired():
             # can interleave; a crash mid-loop rolls the deletes back and
             # leaves rows whose files are gone, which the next sweep collects.
             if not conn.execute(
-                "DELETE FROM jobs WHERE id = ? AND featured = 0", (row["id"],)
+                "DELETE FROM jobs WHERE id = ? AND featured = 0 AND kept = 0",
+                (row["id"],)
             ).rowcount:
                 continue
             removed += 1

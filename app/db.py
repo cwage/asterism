@@ -18,6 +18,10 @@ CREATE TABLE IF NOT EXISTS jobs (
     orphan_recoveries INTEGER NOT NULL DEFAULT 0,
     hidden INTEGER NOT NULL DEFAULT 0,
     featured INTEGER NOT NULL DEFAULT 0,
+    -- Kept by its uploader (#113): exempt from the sweep like featured, but
+    -- set from the result page by whoever holds the link, and never by the
+    -- operator, so the two can be told apart and undone separately.
+    kept INTEGER NOT NULL DEFAULT 0,
     -- Uploader record (#116): a per-day HMAC of the client address, the
     -- camera facts the served file carries anyway, and whether the row has
     -- been folded into daily_stats yet.
@@ -78,6 +82,7 @@ def init_db():
             ("orphan_recoveries", "INTEGER NOT NULL DEFAULT 0"),
             ("hidden", "INTEGER NOT NULL DEFAULT 0"),
             ("featured", "INTEGER NOT NULL DEFAULT 0"),
+            ("kept", "INTEGER NOT NULL DEFAULT 0"),
             ("uploader_hash", "TEXT"),
             ("device_json", "TEXT"),
             ("counted", "INTEGER NOT NULL DEFAULT 0"),

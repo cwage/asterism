@@ -6,6 +6,7 @@ import json
 import math
 import os
 import re
+import threading
 import time
 import uuid
 import xml.etree.ElementTree as ET
@@ -34,6 +35,10 @@ MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(20 * 1024 * 1024))
 # flat frame or a decompression bomb, never a sky.
 MAX_IMAGE_PIXELS = int(os.environ.get("MAX_IMAGE_PIXELS", str(100 * 1000 * 1000)))
 UPLOADS_PER_HOUR = int(os.environ.get("UPLOADS_PER_HOUR", "12"))
+# Keeps (#113) are open to anyone holding a result link, so one person
+# must not be able to pin fifty frames: a per-address daily ceiling, in
+# the upload limiter's shape.
+KEEPS_PER_DAY = int(os.environ.get("KEEPS_PER_DAY", "6"))
 MAX_QUEUE_DEPTH = int(os.environ.get("MAX_QUEUE_DEPTH", "20"))
 
 # Expired links 404 identically to typos; say why that might be (#23).
@@ -47,6 +52,10 @@ _GONE = f"no such job (results expire after {RETENTION_HOURS} hours)"
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
 _upload_log = defaultdict(deque)  # client ip -> recent upload monotonic times
+_keep_log = defaultdict(deque)    # client ip -> recent keep monotonic times
+# The sync handlers run in a thread pool, so two requests from one address
+# can race the check-then-append; the ceilings are meant to be hard.
+_limiter_lock = threading.Lock()
 
 # The orientation bake holds a decoded frame (and its transposed copy) in
 # memory and runs in the threadpool that also serves the sync handlers. One
@@ -82,20 +91,31 @@ def _client_ip(request):
             or (request.client.host if request.client else "unknown"))
 
 
-def _rate_limited(ip, now=None):
-    """Sliding one-hour window per client IP. Counts attempts, not successes,
-    so a rejected upload isn't a free retry."""
+def _window_limited(logs, ip, limit, window, now=None):
+    """Sliding window per client IP. Counts attempts, not successes, so a
+    rejected request isn't a free retry."""
     now = time.monotonic() if now is None else now
-    log = _upload_log[ip]
-    while log and log[0] <= now - 3600:
-        log.popleft()
-    if len(log) >= UPLOADS_PER_HOUR:
-        return True
-    log.append(now)
-    if len(_upload_log) > 10000:  # shed empty entries under IP churn
-        for key in [k for k, v in _upload_log.items() if not v][:5000]:
-            del _upload_log[key]
+    with _limiter_lock:
+        log = logs[ip]
+        while log and log[0] <= now - window:
+            log.popleft()
+        if len(log) >= limit:
+            return True
+        log.append(now)
+        if len(logs) > 10000:  # shed empty entries under IP churn
+            for key in [k for k, v in logs.items() if not v][:5000]:
+                del logs[key]
     return False
+
+
+def _rate_limited(ip, now=None):
+    """Uploads: UPLOADS_PER_HOUR in a sliding hour."""
+    return _window_limited(_upload_log, ip, UPLOADS_PER_HOUR, 3600, now)
+
+
+def _keep_limited(ip, now=None):
+    """Keeps (#113): KEEPS_PER_DAY in a sliding day."""
+    return _window_limited(_keep_log, ip, KEEPS_PER_DAY, 86400, now)
 
 
 def _queue_depth():
@@ -310,11 +330,13 @@ def hide_job(job_id: str, request: Request):
         ).fetchone()
         if not row:
             raise HTTPException(404, _GONE)
-        # featured = 0 as well: the kill switch outranks the showcase (#67).
-        # Leaving both set would strand a job that is invisible *and* exempt
-        # from the sweep, so its bytes would never leave the disk.
+        # featured = 0 as well: the kill switch outranks the showcase (#67),
+        # and kept = 0 for the same reason (#113). Leaving either set would
+        # strand a job that is invisible *and* exempt from the sweep, so its
+        # bytes would never leave the disk.
         if not conn.execute(
-            "UPDATE jobs SET hidden = 1, featured = 0 WHERE id = ?", (job_id,)
+            "UPDATE jobs SET hidden = 1, featured = 0, kept = 0 WHERE id = ?",
+            (job_id,)
         ).rowcount:
             raise HTTPException(404, _GONE)  # swept between the two statements
     # The cached card is the amplification path — share links unfurl it (#13)
@@ -384,6 +406,54 @@ def unfeature_job(job_id: str, request: Request):
         ).rowcount:
             raise HTTPException(404, _GONE)
     return {"id": job_id, "featured": False}
+
+
+@app.post("/jobs/{job_id}/keep")
+def keep_job(job_id: str, request: Request):
+    """Let the uploader keep a solve past the retention window (#113).
+
+    Featuring is operator-only, so the solves that survived the sweep were
+    the ones the operator happened to notice in time; a set of six good
+    frames from one traveler came in overnight and the best were gone
+    before anyone looked. The person with the strongest claim on whether a
+    photo stays up is the one who took it, and the result page is where
+    they are when the decision is fresh. No account: the job id is the
+    only access control there is (#21), and it is already the link.
+
+    Same shape as /feature: every precondition rides in the UPDATE, so a
+    concurrent /hide can't leave the job hidden *and* kept. Only inside
+    the window, only a solved job, never a hidden one. Rate-limited per
+    address so one person can't pin the whole feed."""
+    if _keep_limited(_client_ip(request)):
+        raise HTTPException(429, "that's enough kept for one day; try tomorrow")
+    with db.get_conn() as conn:
+        if not conn.execute(
+            "UPDATE jobs SET kept = 1 WHERE id = ? AND hidden = 0 "
+            "AND status = 'done' AND created_at >= datetime('now', ?)",
+            (job_id, f"-{RETENTION_HOURS} hours"),
+        ).rowcount:
+            row = conn.execute(
+                "SELECT status, hidden FROM jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+            if not row or row["hidden"]:  # swept, never existed, or taken down
+                raise HTTPException(404, _GONE)
+            if row["status"] != "done":
+                raise HTTPException(409, "only a solved photo can be kept")
+            raise HTTPException(409, "the window to keep this solve has closed")
+    return {"id": job_id, "kept": True}
+
+
+@app.post("/jobs/{job_id}/unkeep")
+def unkeep_job(job_id: str):
+    """Withdraw a keep (#113). Past the window, the next sweep collects
+    the job, which is what withdrawing means. Operator-featured jobs are
+    untouched: `featured` is a separate flag."""
+    with db.get_conn() as conn:
+        if not conn.execute(
+            "UPDATE jobs SET kept = 0 WHERE id = ? AND hidden = 0", (job_id,)
+        ).rowcount:
+            raise HTTPException(404, _GONE)
+    return {"id": job_id, "kept": False}
 
 
 FEED_LIMIT = 24
@@ -541,7 +611,11 @@ def _queue_position(conn, row):
 @app.get("/jobs/{job_id}")
 def get_job(job_id: str):
     with db.get_conn() as conn:
-        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        row = conn.execute(
+            "SELECT *, created_at >= datetime('now', ?) AS in_window "
+            "FROM jobs WHERE id = ?",
+            (f"-{RETENTION_HOURS} hours", job_id),
+        ).fetchone()
         position = _queue_position(conn, row) if row and row["status"] == "queued" else None
     if not row or row["hidden"]:
         raise HTTPException(404, _GONE)
@@ -552,6 +626,10 @@ def get_job(job_id: str):
         "solve_seconds": row["solve_seconds"],
         "exif": _public_exif(json.loads(row["exif_json"]) if row["exif_json"] else None),
         "result": json.loads(row["result_json"]) if row["result_json"] else None,
+        # Keep control (#113): whether this solve is kept, and whether the
+        # page should offer to keep it (solved, and still inside the window).
+        "kept": bool(row["kept"]),
+        "keep_open": bool(row["status"] == "done" and row["in_window"]),
     }
     if position is not None:
         out["queue_position"] = position

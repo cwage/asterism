@@ -209,6 +209,26 @@ sinks out of the strip once 24 newer solves exist. On a quiet site that never
 happens, which is the case this exists for. Storage grows monotonically by
 design; a few dozen phone JPEGs and their cards is nothing against the volume.
 
+### Kept by the uploader
+
+Featuring is operator-only, so the solves that survived the sweep used to be
+the ones the operator happened to notice in time; a set of six good frames
+from one traveler came in overnight and the best were gone before anyone
+looked. The person with the strongest claim on whether a photo stays up is
+the one who took it, so the result page offers "keep this solve on the site"
+(#113) while the window is open. It sets a separate `kept` flag through
+`POST /jobs/{id}/keep`, with no token: the job id is the only access control
+there is (#21), and it is already the link. "kept on the site — undo" calls
+`/unkeep`, after which the next sweep collects the job if it is past the
+window. Only a solved, un-hidden job inside the window can be kept, and
+hiding clears the flag like it clears `featured`, so nothing is both
+invisible and immortal. `KEEPS_PER_DAY` (6) caps keeps per client address
+in a sliding day, so one person can't pin the whole feed; `/unfeature` does
+not touch `kept` and `/unkeep` does not touch `featured`, so an operator's
+showcase and an uploader's keep can each be undone without the other.
+The nightly digest counts kept solves separately, since they need no
+action.
+
 ## Following new solves
 
 "Your recent uploads" (#105) bookmarks this browser's last 24 submissions in
