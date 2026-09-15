@@ -133,7 +133,7 @@
   #status:empty { margin: 0; min-height: 0; }
   #controls { display: flex; flex-wrap: wrap; gap: 0.4rem 1.1rem; align-items: center;
               border: 1px solid #1c2634; border-radius: 10px; background: var(--panel);
-              padding: 0.55rem 0.9rem; margin: 0 0 0.5rem; font-size: 0.9rem;
+              padding: 0.55rem 0.9rem; margin: 0.5rem 0 0; font-size: 0.9rem;
               color: var(--dim); }
   /* display:flex outranks the UA's [hidden]{display:none}, so the layer
      toggles were showing on the landing page with nothing to toggle. */
@@ -169,11 +169,19 @@
   /* The solver's own account — kept for the curious, styled as a footnote. */
   #fail-detail { color: var(--faint); font-size: 0.8rem; margin: 0; }
   #fail-detail:empty { display: none; }
-  #actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-  #actions button { width: 100%; background: #1a2230; color: var(--ink);
+  /* The "dig deeper" offer stays in the panel that explains the failure,
+     so the photo below never separates the diagnosis from the remedy. */
+  #fail-actions { margin-top: 0.75rem; }
+  #fail-actions:empty { display: none; }
+  /* Share and keep come last: they are what you do after looking and
+     reading, not the second thing on the page. */
+  #actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.9rem 0 0; }
+  #actions:empty { display: none; }
+  #actions button, #fail-actions button {
+                    width: 100%; background: #1a2230; color: var(--ink);
                     border: 1px solid var(--line); border-radius: 10px;
                     padding: 0.9rem 1rem; font-size: 1rem; cursor: pointer; }
-  #actions button:hover { background: #243044; }
+  #actions button:hover, #fail-actions button:hover { background: #243044; }
   #actions a.cardlink { display: inline-block; padding: 0.6rem 1.1rem;
                         border: 1px solid var(--line); border-radius: 10px;
                         background: var(--panel); color: var(--accent);
@@ -185,36 +193,51 @@
                          color: var(--accent); }
   #actions button.copy:hover { background: #1a2230; }
 
-  #narration { border: 1px solid #1c2634; border-radius: 10px;
-               background: var(--panel); padding: 0.75rem 1rem;
-               margin: 0 0 0.75rem; font-size: 0.95rem; color: var(--ink); }
+  /* The words under the photo read as one caption, not a stack of panels:
+     a headline (the share card's caption), the narration, then the night's
+     conditions and the constellation lore each a step quieter. Nothing
+     here has a box, so the photo stays the one framed thing on the page.
+     Every part is empty before a solve and takes no room. */
+  #caption { max-width: 70ch; }
+  #headline { margin: 0.9rem 0 0.3rem; font-size: 1.15rem; font-weight: 600;
+              line-height: 1.3; color: var(--ink); }
+  #headline:empty { display: none; }
+  #narration { margin: 0.9rem 0 0; font-size: 0.95rem; line-height: 1.5;
+               color: var(--ink); }
+  #headline:not(:empty) + #narration { margin-top: 0; }
   #narration:empty { display: none; }
-  /* The night's conditions (#121, #122): one plain sentence each, dressed
-     like the narration. Empty until a solve has something to say. */
-  #night { border: 1px solid #1c2634; border-radius: 10px;
-           background: var(--panel); padding: 0.75rem 1rem;
-           margin: 0 0 0.75rem; font-size: 0.95rem; color: var(--ink); }
+  /* The night's conditions (#121, #122): one plain sentence each. */
+  #night { margin: 0.6rem 0 0; font-size: 0.9rem; line-height: 1.45;
+           color: var(--dim); }
   #night:empty { display: none; }
   #night p { margin: 0; }
-  #night p + p { margin-top: 0.4rem; }
-  /* Constellation lore (#123): same panel, a quieter voice. */
-  #lore { border: 1px solid #1c2634; border-radius: 10px;
-          background: var(--panel); padding: 0.75rem 1rem;
-          margin: 0 0 0.75rem; font-size: 0.95rem; color: var(--dim); }
+  #night p + p { margin-top: 0.25rem; }
+  /* Constellation lore (#123): the quietest voice, names kept in ink. */
+  #lore { margin: 0.6rem 0 0; font-size: 0.85rem; line-height: 1.45;
+          color: var(--dim); }
   #lore:empty { display: none; }
   #lore p { margin: 0; }
-  #lore p + p { margin-top: 0.4rem; }
+  #lore p + p { margin-top: 0.25rem; }
   #lore b { color: var(--ink); font-weight: 500; }
 
-  /* Hidden until render() has a photo: an empty inline-block still claims a
-     line box, which would gap the feed away from the upload control. */
-  #wrap { position: relative; display: none; max-width: 100%;
-          margin-top: 0.75rem; border-radius: 6px; overflow: hidden; }
+  /* Hidden until render() has a photo: an empty block would still gap the
+     feed away from the upload control. Shown, on a phone its height is
+     capped at a share of the viewport so the caption always peeks below
+     the photo — the reason the words can sit under it without being
+     missed. The frame takes the width that cap allows for the photo's
+     aspect ratio (set on the load event) and the photo fills the frame,
+     so the overlay's inset: 0 still lands exactly on the pixels. Wide
+     screens lift the cap below: there the photo has room to spare and a
+     shrunken one reads as a thumbnail. */
+  #wrap { --ar: 1; position: relative; display: none;
+          width: min(100%, calc(72vh * var(--ar)));
+          width: min(100%, calc(72svh * var(--ar)));
+          margin: 0.75rem auto 0; border-radius: 6px; overflow: hidden; }
   /* pointer-events: none because the overlay is decorative and covers the
      whole photo: anything interactive underneath would never be reachable. */
   #wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%;
                  pointer-events: none; }
-  #wrap img { display: block; max-width: 100%; }
+  #wrap img { display: block; width: 100%; }
 
   footer { margin-top: 2rem; font-size: 0.8rem; color: var(--faint); }
   footer a { color: var(--faint); }
@@ -223,7 +246,8 @@
     body { padding-top: 3rem; }
     h1 { font-size: 2rem; }
     .upload { width: auto; padding: 1rem 2.5rem; }
-    #actions button { width: auto; }
+    #actions button, #fail-actions button { width: auto; }
+    #wrap { width: 100%; }
   }
 </style>
 </head>
@@ -274,17 +298,17 @@
 
 <!-- The result is the point of the page: it sits directly under the upload
      control, above the feed and the explainer. Everything here collapses to
-     nothing before the first solve. -->
+     nothing before the first solve. The photo leads and the words caption
+     it; a failure's explanation is the one thing that goes above the photo,
+     since without labels the photo explains nothing on its own. -->
 <div id="status"></div>
 <div id="failbox" hidden>
   <div id="advice"></div>
   <div id="guess"></div>
   <p id="fail-detail"></p>
+  <div id="fail-actions"></div>
 </div>
-<div id="actions"></div>
-<div id="narration"></div>
-<div id="night"></div>
-<div id="lore"></div>
+<div id="wrap"><img id="photo" hidden><canvas id="overlay"></canvas></div>
 <div id="controls" hidden>
   <!-- Each toggle carries its layer's colour, so the controls double as
        the key to the overlay: what a blue ring, a gold ring, a coral
@@ -299,7 +323,13 @@
     <input type="range" id="mag-limit" min="1" max="4.5" step="0.25" value="4.5">
     <span id="mag-val">4.5</span></label>
 </div>
-<div id="wrap"><img id="photo" hidden><canvas id="overlay"></canvas></div>
+<div id="caption">
+  <p id="headline"></p>
+  <div id="narration"></div>
+  <div id="night"></div>
+  <div id="lore"></div>
+</div>
+<div id="actions"></div>
 
 <section id="recent" aria-labelledby="recent-title" hidden>
   <div class="recent-heading">
@@ -696,6 +726,8 @@ function clearResult() {
   document.getElementById('advice').replaceChildren();
   document.getElementById('guess').replaceChildren();
   document.getElementById('fail-detail').textContent = '';
+  document.getElementById('fail-actions').replaceChildren();
+  document.getElementById('headline').textContent = '';
   document.getElementById('narration').textContent = '';
   document.getElementById('night').replaceChildren();
   document.getElementById('lore').replaceChildren();
@@ -726,7 +758,7 @@ function showPending(file) {
   img.onerror = () => { img.hidden = true; };
   pendingPreview = URL.createObjectURL(file);
   img.hidden = false;
-  document.getElementById('wrap').style.display = 'inline-block';
+  document.getElementById('wrap').style.display = 'block';
   img.src = pendingPreview;
 }
 
@@ -831,7 +863,7 @@ function renderFailure(id, job) {
     canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
   };
   img.hidden = false;
-  document.getElementById('wrap').style.display = 'inline-block';
+  document.getElementById('wrap').style.display = 'block';
   clearPreview();
   img.src = '/jobs/' + encodeURIComponent(id) + '/image';
 
@@ -854,7 +886,7 @@ function renderFailure(id, job) {
     updateRecentJob(id, { status: 'queued' });
     poll(id);
   };
-  document.getElementById('actions').append(btn);
+  document.getElementById('fail-actions').append(btn);
 }
 
 // Not even a guess. Say which missing piece of EXIF is responsible rather
@@ -1361,6 +1393,10 @@ function render(id, job) {
     const narration = job.result.narration;
     document.getElementById('narration').textContent =
       (narration && narration.text) || '';
+    // The share card's caption (#13) doubles as the headline under the
+    // photo: the line that pulls the eye from the picture into the words.
+    document.getElementById('headline').textContent =
+      (narration && narration.caption) || '';
     document.getElementById('night').replaceChildren(...nightLines(job).map(line => {
       const p = document.createElement('p');
       p.textContent = line;
@@ -1376,7 +1412,7 @@ function render(id, job) {
     }));
   };
   img.hidden = false;
-  document.getElementById('wrap').style.display = 'inline-block';
+  document.getElementById('wrap').style.display = 'block';
   clearPreview();
   img.src = '/jobs/' + encodeURIComponent(id) + '/image';
   // The failure path may have shown this exact URL already (a deepen that
@@ -1391,6 +1427,15 @@ function render(id, job) {
 // does nothing. That is how the satellite toggle shipped inert.
 for (const layId of ['lay-stars', 'lay-solar', 'lay-dso', 'lay-con', 'lay-sat', 'lay-beyond'])
   document.getElementById(layId).addEventListener('change', draw);
+
+// The photo's frame takes its width from the viewport-height cap and the
+// photo's aspect ratio (see #wrap in the stylesheet), so the ratio goes on
+// the frame as each photo arrives. One listener beside the per-path onload
+// handlers; the same-src reload that never fires load (see render) leaves
+// a ratio that is still right, since it is the same photo.
+document.getElementById('photo').addEventListener('load', function () {
+  document.getElementById('wrap').style.setProperty('--ar', this.naturalWidth / this.naturalHeight);
+});
 
 // Feedback (#137): a report or a suggestion, filed as a GitHub issue with
 // the context we would otherwise have to ask for. The context is shown
