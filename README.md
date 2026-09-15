@@ -280,6 +280,30 @@ Entries expire with retention like everything else. A reader keeps what it
 fetched, but the card and result links behind an expired entry 404 like any
 other expired link; a featured solve simply stays valid.
 
+## Feedback
+
+A visitor who hits a problem, or has a suggestion, can say so without
+leaving the site: "Found a problem or have a suggestion?" in the footer
+opens a dialog, and what they write is filed as an issue on this
+repository (#137), labelled `bug-report`, with the context we would
+otherwise have to ask for: the job id and its state as the server sees
+it, the solve's match and field bounds, the page URL, and the browser.
+The dialog shows that context before anything is sent, and says the
+report is public.
+
+```
+fly secrets set GITHUB_TOKEN=... GITHUB_REPO=cwage/asterism
+```
+
+`GITHUB_TOKEN` is a fine-grained token with issues write on this
+repository and nothing else. Unset means the endpoint does not exist,
+like `ADMIN_TOKEN`; it is never logged, not even on failure. The
+endpoint is unauthenticated and writes to a public repository, so it is
+bounded: text capped at 2000 characters and context at 5000, one report
+per address per minute, `FEEDBACK_PER_DAY` (20) across everyone, every
+`@` in the visitor's words made harmless, and a GitHub failure reported
+as a generic 502 with the reason in the log.
+
 ## Activity notifications
 
 Nothing else reports what the site did today: counts exist only as rows the

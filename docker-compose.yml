@@ -25,6 +25,10 @@ services:
       # stop a calibration batch at twelve.
       - UPLOADS_PER_HOUR=${UPLOADS_PER_HOUR:-12}
       - MAX_QUEUE_DEPTH=${MAX_QUEUE_DEPTH:-20}
+      # Visitor feedback as GitHub issues (#137): unset means the endpoint
+      # does not exist, so local dev files nothing by accident.
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_REPO=${GITHUB_REPO:-}
 
   worker:
     # LLM narration (#12) needs ANTHROPIC_API_KEY and satellite crossings
