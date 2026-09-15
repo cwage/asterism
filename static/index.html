@@ -228,10 +228,14 @@
      aspect ratio (set on the load event) and the photo fills the frame,
      so the overlay's inset: 0 still lands exactly on the pixels. Wide
      screens lift the cap below: there the photo has room to spare and a
-     shrunken one reads as a thumbnail. */
-  #wrap { --ar: 1; position: relative; display: none;
+     shrunken one reads as a thumbnail. The frame never outgrows the
+     photo's own pixels either (also set on load): a small upload shows at
+     its real size, as max-width: 100% used to do, rather than blown up to
+     the column with its labels blown up alongside. */
+  #wrap { --ar: 1; --nw: 100000; position: relative; display: none;
           width: min(100%, calc(72vh * var(--ar)));
           width: min(100%, calc(72svh * var(--ar)));
+          max-width: calc(var(--nw) * 1px);
           margin: 0.75rem auto 0; border-radius: 6px; overflow: hidden; }
   /* pointer-events: none because the overlay is decorative and covers the
      whole photo: anything interactive underneath would never be reachable. */
@@ -1428,14 +1432,17 @@ function render(id, job) {
 for (const layId of ['lay-stars', 'lay-solar', 'lay-dso', 'lay-con', 'lay-sat', 'lay-beyond'])
   document.getElementById(layId).addEventListener('change', draw);
 
-// The photo's frame takes its width from the viewport-height cap and the
-// photo's aspect ratio (see #wrap in the stylesheet), so the ratio goes on
-// the frame as each photo arrives. One listener beside the per-path onload
-// handlers; the same-src reload that never fires load (see render) leaves
-// a ratio that is still right, since it is the same photo.
+// The photo's frame takes its width from the viewport-height cap, the
+// photo's aspect ratio and the photo's own pixel width (see #wrap in the
+// stylesheet), so both go on the frame as each photo arrives. One listener
+// beside the per-path onload handlers; the same-src reload that never
+// fires load (see render) leaves values that are still right, since it is
+// the same photo.
 document.getElementById('photo').addEventListener('load', () => {
   const photo = document.getElementById('photo');
-  document.getElementById('wrap').style.setProperty('--ar', photo.naturalWidth / photo.naturalHeight);
+  const frame = document.getElementById('wrap').style;
+  frame.setProperty('--ar', photo.naturalWidth / photo.naturalHeight);
+  frame.setProperty('--nw', photo.naturalWidth);
 });
 
 // Feedback (#137): a report or a suggestion, filed as a GitHub issue with
