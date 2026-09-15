@@ -214,3 +214,12 @@ def test_night_notes_reach_the_model_as_facts():
     client = FakeClient()
     narrate.annotate({**RESULT, "night": None}, client=client)
     assert json.loads(client.calls[0]["messages"][0]["content"])["night_notes"] == []
+
+
+def test_the_place_line_rides_with_the_night_notes():
+    client = FakeClient()
+    line = "The phone recorded its tilt, so sky geometry puts this near 36°N, 74°E: northern Pakistan."
+    narrate.annotate({**RESULT, "night": {"lines": ["The Moon was new, so it added no light to the sky."]},
+                      "place": {"source": "tilt", "line": line}}, client=client)
+    payload = json.loads(client.calls[0]["messages"][0]["content"])
+    assert payload["night_notes"] == ["The Moon was new, so it added no light to the sky.", line]

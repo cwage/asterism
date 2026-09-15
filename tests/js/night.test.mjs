@@ -51,3 +51,15 @@ test('no night context leaves the panel empty; a new upload clears it', () => {
   show(sandbox, els, { ...JOB, result: { ...JOB.result, night: undefined } });
   assert.equal(els.night.children.length, 0);
 });
+
+test('the place line reads as one more night line, on the page and in the copy', () => {
+  const { sandbox, els } = loadPage();
+  const line = 'The phone recorded its tilt, so sky geometry puts this near 36°N, 74°E: northern Pakistan.';
+  const job = { ...JOB, result: { ...JOB.result, place: { source: 'tilt', line } } };
+  show(sandbox, els, job);
+  assert.deepEqual(els.night.children.map(p => p.textContent), [...LINES, line]);
+  assert.equal(sandbox.describeText(job), [...LINES, line].join(' '));
+  // a place without a line, or none at all, adds nothing
+  show(sandbox, els, { ...JOB, result: { ...JOB.result, place: { source: 'tilt', line: null } } });
+  assert.equal(els.night.children.length, LINES.length);
+});

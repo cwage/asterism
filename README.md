@@ -86,6 +86,20 @@ Final home: `asterism.quietlife.net`.
   at all when even the bright stars are mostly hidden. The sentences are built in the worker
   so the page, the copied description and the narration (which gets them
   as facts) all say the same thing.
+- Roughly where on Earth (#115), without GPS: iPhones record the gravity
+  vector at capture in the MakerNote, which says where the zenith sits
+  relative to the frame; the WCS turns that into the zenith's sky
+  coordinates, which are the latitude and the local sidereal time by
+  definition, and the EXIF clock turns sidereal time into longitude. The
+  answer is good to a couple of hundred kilometres and is named from a
+  vendored Natural Earth map: a country and a compass half of it, or a
+  state or province where the map has them. The timezone at the estimate
+  must have the photo's UTC offset at that instant or nothing is said.
+  Android phones checked (Pixel, Samsung) record no tilt, and the horizon
+  in the pixels turned out not to be a substitute: measured against GPS
+  truth, a treeline or ridge sat 11 to 31 degrees above the true horizon
+  with nothing in the frame to say which, so that path is not shipped.
+  With GPS the same map just names the place.
 - Jobs/results live in `data/` (SQLite + uploaded images), bind-mounted into
   both containers.
 - The queue is deliberately single-worker: solve-field is CPU-bound and the

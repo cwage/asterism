@@ -7,3 +7,5 @@ photos/
 __pycache__/
 *.pyc
 .env
+catalogs/countries.geojson
+catalogs/admin1.geojson

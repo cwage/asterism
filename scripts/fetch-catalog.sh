@@ -11,6 +11,11 @@ URL="https://raw.githubusercontent.com/astronexus/HYG-Database/main/hyg/CURRENT/
 DSO_URL="https://raw.githubusercontent.com/astronexus/HYG-Database/main/misc/dso.csv"
 EPH_URL="https://ssd.jpl.nasa.gov/ftp/eph/planets/bsp/de421.bsp"
 CON_URL="https://raw.githubusercontent.com/Stellarium/stellarium/v23.4/skycultures/modern/constellationship.fab"
+# Natural Earth 1:110m country polygons (public domain), for naming the
+# region a solve's sky geometry points at (#115). Pinned commit so the
+# cache key stays honest.
+COUNTRIES_URL="https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_110m_admin_0_countries.geojson"
+ADMIN1_URL="https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_50m_admin_1_states_provinces.geojson"
 
 if [ -f hyg.csv ]; then
   echo "have hyg.csv"
@@ -38,4 +43,18 @@ if [ -f constellations.fab ]; then
 else
   echo "fetching constellations.fab"
   curl -fL -o constellations.fab "$CON_URL"
+fi
+
+if [ -f countries.geojson ]; then
+  echo "have countries.geojson"
+else
+  echo "fetching countries.geojson"
+  curl -fL -o countries.geojson "$COUNTRIES_URL"
+fi
+
+if [ -f admin1.geojson ]; then
+  echo "have admin1.geojson"
+else
+  echo "fetching admin1.geojson"
+  curl -fL -o admin1.geojson "$ADMIN1_URL"
 fi
