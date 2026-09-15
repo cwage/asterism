@@ -40,7 +40,10 @@ export function makeEl() {
   const el = {
     children: [], parent: null, className: '', textContent: '', title: '',
     href: '', src: '', alt: '', loading: '', hidden: false, checked: true,
-    value: '4.5', onerror: null, onload: null, style: {},
+    value: '4.5', onerror: null, onload: null,
+    // A plain bag the page writes to, by property (display) or through
+    // setProperty (the --ar custom property); tests read it straight back.
+    style: { setProperty(name, value) { this[name] = value; } },
     naturalWidth: 1000, naturalHeight: 800, width: 0, height: 0,
     rect: { left: 0, top: 0, width: 1000, height: 800 },
     getBoundingClientRect() { return el.rect; },

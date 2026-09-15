@@ -1433,8 +1433,9 @@ for (const layId of ['lay-stars', 'lay-solar', 'lay-dso', 'lay-con', 'lay-sat', 
 // the frame as each photo arrives. One listener beside the per-path onload
 // handlers; the same-src reload that never fires load (see render) leaves
 // a ratio that is still right, since it is the same photo.
-document.getElementById('photo').addEventListener('load', function () {
-  document.getElementById('wrap').style.setProperty('--ar', this.naturalWidth / this.naturalHeight);
+document.getElementById('photo').addEventListener('load', () => {
+  const photo = document.getElementById('photo');
+  document.getElementById('wrap').style.setProperty('--ar', photo.naturalWidth / photo.naturalHeight);
 });
 
 // Feedback (#137): a report or a suggestion, filed as a GitHub issue with
