@@ -51,6 +51,38 @@ CREATE TABLE IF NOT EXISTS daily_uploaders (
     PRIMARY KEY (day, uploader_hash)
 );
 
+-- The numbers behind every finished solve (#99), one row per job and no
+-- image data, outside the retention sweep: thresholds come from a
+-- distribution instead of a memory. Written when a job finishes; a
+-- deepen overwrites its row.
+CREATE TABLE IF NOT EXISTS solve_stats (
+    job_id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    finished_at TEXT NOT NULL DEFAULT (datetime('now')),
+    status TEXT NOT NULL,
+    mode TEXT,
+    reason TEXT,
+    logodds REAL,
+    nmatch INTEGER,
+    ndistract INTEGER,
+    stars_detected INTEGER,
+    attempts INTEGER,
+    thorough_attempts INTEGER,
+    timed_out INTEGER,
+    tier_lo REAL,
+    tier_hi REAL,
+    seconds REAL,
+    exif_fov_deg REAL,
+    fitted_fov_deg REAL,
+    stars_matched INTEGER,
+    stars_hidden INTEGER,
+    warped INTEGER,
+    limiting_mag REAL,
+    time_source TEXT,
+    has_tilt INTEGER,
+    make TEXT
+);
+
 -- Small key/value scratch for things that must survive the machine
 -- stopping (auto_stop_machines): currently the notification watermarks
 -- (#69), which are needed exactly when the process didn't stay up.

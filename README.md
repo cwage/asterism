@@ -86,6 +86,12 @@ Final home: `asterism.quietlife.net`.
   at all when even the bright stars are mostly hidden. The sentences are built in the worker
   so the page, the copied description and the narration (which gets them
   as facts) all say the same thing.
+- A sentence of lore for the constellations in frame (#123): one
+  reliable sentence per constellation, from a table in `app/lore.py`
+  (original prose from the standard mythology and naming history, so no
+  licence rides along), shown for the two constellations whose brightest
+  confirmed star is brightest. The narration gets them as facts it may
+  draw on and must not contradict.
 - Roughly where on Earth (#115), without GPS: iPhones record the gravity
   vector at capture in the MakerNote, which says where the zenith sits
   relative to the frame; the WCS turns that into the zenith's sky
@@ -313,6 +319,11 @@ happens to look at the homepage. Set `NTFY_TOPIC_URL` to an
 
 - a roughly-nightly summary —
   `47 uploads · 39 solved · 8 failed (6 no_stars, 2 no_match) · 2 hidden · 10 featured`
+  — followed by the day's solves, newest first, up to eight, each with
+  its caption, a result link, and whether it is already featured or kept
+  by its uploader (#114). A tap on the notification opens the newest.
+  The counts say how much happened; the list says which ones to feature
+  before the sweep collects them.
 - a burst alert when solves outpace what this site normally sees —
   `9 solves in the last 60 minutes`
 
@@ -361,10 +372,13 @@ job row keeps instead:
   the day is live the salt is in the database beside the tokens, so a copy
   taken that day could test candidate addresses against them. The promise is
   that yesterday is unrecoverable, not that today is.
-- `device_json` — camera make, model and software from the file's own EXIF.
-  The served file carries these already (#117 is about that); they are kept
-  out of `exif_json`, which `/jobs/{id}` serves, so they never reach a public
-  payload.
+- `device_json` — camera make, model and software from the file's own EXIF,
+  kept out of `exif_json`, which `/jobs/{id}` serves, so they never reach a
+  public payload. The served file no longer carries them either (#117):
+  once the upload path has read what it wants, the whole EXIF block is
+  dropped from the stored file, phone model, software, MakerNote and clock
+  included, leaving the pixels and their colour profile. Lossless segment
+  surgery for JPEGs; a file that resists it is re-encoded without EXIF.
 
 The retention sweep folds every expiring row into `daily_stats` (uploads,
 solved, failed by reason, hidden, per UTC day of upload) and the day's distinct
@@ -374,6 +388,19 @@ never deleted and are counted once (`jobs.counted`). Read it back with:
 
 ```
 fly ssh console -C "python3 -c 'from app import db, stats; import json; conn = db.get_conn(); print(json.dumps(stats.history(conn, 30), indent=1))'"
+```
+
+The numbers behind every finished solve survive the sweep too (#99):
+`solve_stats` keeps one row per job with no image data — log-odds and match
+count, the pre-solve star count, which scale tier won and how many were
+tried, wall seconds, the EXIF field against the fitted one, how many labels
+verified and how many hid, the limiting magnitude, the time source, whether
+the phone recorded its tilt, and the camera make. Every threshold in the
+solver was set from a handful of photos; this is where the distribution to
+set them from accumulates. Read it back with:
+
+```
+fly ssh console -C "python3 -c 'from app import db, stats; import json; conn = db.get_conn(); print(json.dumps(stats.solve_history(conn, 30), indent=1))'"
 ```
 
 Within the retention window the live rows answer the sharper question — which

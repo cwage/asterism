@@ -63,3 +63,17 @@ test('the place line reads as one more night line, on the page and in the copy',
   show(sandbox, els, { ...JOB, result: { ...JOB.result, place: { source: 'tilt', line: null } } });
   assert.equal(els.night.children.length, LINES.length);
 });
+
+test('lore renders one paragraph per constellation, name in bold, and clears', () => {
+  const { sandbox, els } = loadPage();
+  const lore = [{ abbr: 'Aql', name: 'Aquila', line: "Aquila is the eagle that carried Zeus's thunderbolts; Altair is its eye." }];
+  show(sandbox, els, { ...JOB, result: { ...JOB.result, lore } });
+  assert.equal(els.lore.children.length, 1);
+  const [b, rest] = els.lore.children[0].children;
+  assert.equal(b.textContent, 'Aquila');
+  assert.equal(rest, " — is the eagle that carried Zeus's thunderbolts; Altair is its eye.");
+  sandbox.clearResult();
+  assert.equal(els.lore.children.length, 0);
+  show(sandbox, els, JOB);
+  assert.equal(els.lore.children.length, 0);
+});

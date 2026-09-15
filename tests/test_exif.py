@@ -624,3 +624,54 @@ def test_public_exif_keeps_the_tilt_to_itself():
                              "orientation": 6, "exposure_seconds": 2.0})
     assert "gravity" not in out and "orientation" not in out
     assert out["exposure_seconds"] == 2.0
+
+
+# ---- the served file keeps nothing but pixels and colour (#117) ----
+
+def test_strip_metadata_drops_the_whole_exif_block_losslessly(tmp_path):
+    path = str(tmp_path / "phone.jpg")
+    ex = synth.build_exif(f35mm=26, datetime_original="2026:09:09 22:17:22",
+                          offset_time_original="+05:00")
+    ex[exif.TAG_MAKE] = "Apple"
+    ex[exif.TAG_MODEL] = "iPhone 15 Plus"
+    ex[exif.TAG_SOFTWARE] = "18.6"
+    ex.get_ifd(exif.EXIF_IFD)[exif.TAG_MAKERNOTE] = _apple_makernote([0.0172, -0.9001, 0.4273])
+    Image.new("RGB", (64, 64), (30, 40, 50)).save(path, exif=ex, quality=92)
+    with Image.open(path) as img:
+        before = np.asarray(img).copy()
+    # the pipeline reads first...
+    assert exif.read_device(path)["model"] == "iPhone 15 Plus"
+    assert exif.read_exif(path)["gravity"] is not None
+
+    assert exif.strip_metadata(path) is True
+
+    # ...and the served file has none of it, with the pixels untouched
+    with Image.open(path) as img:
+        assert dict(img.getexif()) == {}
+        after = np.asarray(img).copy()
+    assert np.array_equal(before, after)
+    info = exif.read_exif(path)
+    assert info["gravity"] is None and info["datetime_original"] is None
+    assert exif.read_device(path) == {"make": None, "model": None, "software": None}
+
+
+def test_strip_metadata_keeps_the_colour_profile_and_survives_a_png(tmp_path):
+    from PIL import ImageCms
+    path = str(tmp_path / "p3.jpg")
+    icc = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+    Image.new("RGB", (64, 64)).save(path, exif=synth.build_exif(f35mm=27), quality=92,
+                                    icc_profile=icc)
+    assert exif.strip_metadata(path) is True
+    with Image.open(path) as img:
+        assert img.info.get("icc_profile") == icc
+        assert dict(img.getexif()) == {}
+    # piexif knows no PNG: Pillow finishes the job, or finds nothing to do
+    png = str(tmp_path / "p.png")
+    Image.new("RGB", (64, 64)).save(png, exif=synth.build_exif(f35mm=27))
+    exif.strip_metadata(png)
+    with Image.open(png) as img:
+        assert dict(img.getexif()) == {}
+    # and junk is not a reason to raise
+    junk = str(tmp_path / "junk.jpg")
+    open(junk, "wb").write(b"not a jpeg")
+    assert exif.strip_metadata(junk) is False

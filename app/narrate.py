@@ -67,6 +67,9 @@ Rules:
 - just_outside_frame lists bright objects the solve places outside the
   photo's edges, with how far and which way. They are not in the photo:
   you may mention one as being just off the edge, never as captured.
+- lore is the site's own sentence about each of the main constellations
+  in frame. You may draw on its facts; never contradict them, and don't
+  repeat a sentence word for word, since it is shown beside your text.
 - night_notes are measured facts about the conditions: twilight or full
   dark, the Moon's phase and whether it was up, how faint a star the photo
   recorded, and where on Earth the phone's tilt and the sky geometry place
@@ -208,6 +211,7 @@ def _payload(result):
         # the model can echo them and never has to derive them.
         "night_notes": list((result.get("night") or {}).get("lines") or [])
         + [line for line in [(result.get("place") or {}).get("line")] if line],
+        "lore": [entry["line"] for entry in result.get("lore") or []],
     }
 
 

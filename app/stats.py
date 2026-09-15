@@ -131,6 +131,83 @@ def roll_up(conn, cutoff_modifier):
     return len(rows)
 
 
+SOLVE_COLUMNS = ("job_id", "created_at", "status", "mode", "reason", "logodds",
+                 "nmatch", "ndistract", "stars_detected", "attempts",
+                 "thorough_attempts", "timed_out", "tier_lo", "tier_hi", "seconds",
+                 "exif_fov_deg", "fitted_fov_deg", "stars_matched", "stars_hidden",
+                 "warped", "limiting_mag", "time_source", "has_tilt", "make")
+
+
+def solve_record(job, status, result, exif_info=None, device=None):
+    """The numbers a finished job leaves behind (#99), as a dict in
+    SOLVE_COLUMNS order. Everything is optional: a job that crashed before
+    solving still gets a row with its status and reason."""
+    result = result or {}
+    exif_info = exif_info or {}
+    device = device or {}
+    match = result.get("match") or {}
+    attempts = result.get("attempts") or []
+    won = next((a for a in attempts if a.get("success")), None)
+    verification = result.get("verification") or {}
+    depth = verification.get("depth") or {}
+    pointing = result.get("pointing") or {}
+    fitted = (pointing.get("fov_deg") or [None])[0]
+    return {
+        "job_id": job["id"],
+        "created_at": job["created_at"] if "created_at" in job.keys() else None,
+        "status": status,
+        "mode": job["mode"] if "mode" in job.keys() else None,
+        "reason": (result.get("failure") or {}).get("reason"),
+        "logodds": match.get("logodds"),
+        "nmatch": match.get("nmatch"),
+        "ndistract": match.get("ndistract"),
+        "stars_detected": result.get("stars_detected",
+                                     (result.get("failure") or {}).get("stars_detected")),
+        "attempts": len(attempts),
+        "thorough_attempts": sum(1 for a in attempts if a.get("thorough", True)),
+        "timed_out": sum(1 for a in attempts if a.get("timed_out")),
+        "tier_lo": (won or {}).get("fov_bounds", [None, None])[0],
+        "tier_hi": (won or {}).get("fov_bounds", [None, None])[1],
+        "seconds": result.get("total_seconds"),
+        "exif_fov_deg": exif_info.get("fov_deg"),
+        "fitted_fov_deg": fitted,
+        "stars_matched": verification.get("stars_matched"),
+        "stars_hidden": verification.get("stars_hidden"),
+        "warped": None if "warped" not in verification else int(bool(verification["warped"])),
+        "limiting_mag": depth.get("limiting_mag"),
+        "time_source": (result.get("ephemeris") or {}).get("time_source"),
+        "has_tilt": int(bool(exif_info.get("gravity"))),
+        "make": device.get("make"),
+    }
+
+
+def record_solve(conn, job, status, result, exif_info=None, device=None):
+    """Write (or overwrite: a deepen finishes the same job twice) the
+    job's row in solve_stats."""
+    rec = solve_record(job, status, result, exif_info, device)
+    cols = ", ".join(SOLVE_COLUMNS)
+    marks = ", ".join("?" for _ in SOLVE_COLUMNS)
+    updates = ", ".join(f"{c} = excluded.{c}" for c in SOLVE_COLUMNS if c != "job_id")
+    conn.execute(
+        f"INSERT INTO solve_stats ({cols}, finished_at) VALUES ({marks}, datetime('now')) "
+        f"ON CONFLICT(job_id) DO UPDATE SET {updates}, finished_at = datetime('now')",
+        tuple(rec[c] for c in SOLVE_COLUMNS))
+    return rec
+
+
+def solve_history(conn, days=None):
+    """Every finished solve's numbers, newest first, as dicts; `days`
+    limits how far back. The distribution the thresholds should come
+    from (#99)."""
+    sql = "SELECT * FROM solve_stats"
+    args = ()
+    if days:
+        sql += " WHERE finished_at >= datetime('now', ?)"
+        args = (f"-{int(days)} days",)
+    sql += " ORDER BY finished_at DESC"
+    return [dict(r) for r in conn.execute(sql, args)]
+
+
 def history(conn, days=None):
     """The daily history, newest first: one dict per day with the counts
     and the number of distinct uploaders. `days` caps how many."""

@@ -266,3 +266,81 @@ def test_summary_says_person_for_one_and_nothing_for_none():
                                  ).startswith("3 uploads from 1 person")
     assert notify.format_summary({"uploads": 0, "uploaders": 0, **base}
                                  ).startswith("0 uploads ·")
+
+
+# --- the numbers behind every solve (#99) ------------------------------
+
+from app import stats as stats_mod, worker as worker_mod
+
+
+def _job(conn, job_id, mode="quick", device=None):
+    conn.execute(
+        "INSERT INTO jobs (id, image_path, status, created_at, mode, exif_json, device_json) "
+        "VALUES (?, '/x.jpg', 'solving', '2026-09-14 21:00:00', ?, ?, ?)",
+        (job_id, mode, json.dumps({"fov_deg": 54.9, "gravity": [0.0, -0.9, 0.4]}),
+         json.dumps(device) if device else None))
+    return conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+
+
+def test_a_finished_solve_leaves_its_numbers_behind(fresh_db):
+    result = {
+        "success": True, "total_seconds": 18.4, "stars_detected": 63,
+        "match": {"logodds": 214.5, "nmatch": 42, "ndistract": 8},
+        "attempts": [{"fov_bounds": [21.0, 41.0], "success": False, "thorough": False, "timed_out": False},
+                     {"fov_bounds": [38.4, 65.9], "success": True, "thorough": False, "timed_out": False}],
+        "verification": {"verified": True, "stars_matched": 36, "stars_hidden": 4, "warped": False,
+                         "depth": {"limiting_mag": 6.4}},
+        "pointing": {"ra": 219.9, "dec": -60.8, "arcsec_per_px": 65.3, "fov_deg": [54.9, 73.2]},
+        "ephemeris": {"time_source": "exif_offset"},
+    }
+    with db.get_conn() as conn:
+        job = _job(conn, "solved1", device={"make": "Apple", "model": "iPhone 15 Plus"})
+        rec = stats_mod.record_solve(conn, job, "done", result,
+                                     json.loads(job["exif_json"]), json.loads(job["device_json"]))
+        rows = stats_mod.solve_history(conn)
+    assert rec["logodds"] == 214.5 and rec["nmatch"] == 42 and rec["stars_detected"] == 63
+    assert rec["attempts"] == 2 and rec["thorough_attempts"] == 0 and rec["timed_out"] == 0
+    assert (rec["tier_lo"], rec["tier_hi"]) == (38.4, 65.9)
+    assert rec["exif_fov_deg"] == 54.9 and rec["fitted_fov_deg"] == 54.9
+    assert rec["stars_matched"] == 36 and rec["limiting_mag"] == 6.4 and rec["warped"] == 0
+    assert rec["has_tilt"] == 1 and rec["make"] == "Apple" and rec["mode"] == "quick"
+    assert len(rows) == 1 and rows[0]["job_id"] == "solved1" and rows[0]["finished_at"]
+
+
+def test_a_failure_and_a_crash_still_get_rows_and_a_deepen_overwrites(fresh_db):
+    with db.get_conn() as conn:
+        job = _job(conn, "failed1")
+        stats_mod.record_solve(conn, job, "failed",
+                               {"success": False, "attempts": [{"fov_bounds": [21, 41], "success": False,
+                                                                 "thorough": True, "timed_out": True}],
+                                "failure": {"reason": "timeout", "stars_detected": 12}})
+        stats_mod.record_solve(conn, _job(conn, "crashed"), "failed", None)
+        rows = {r["job_id"]: r for r in stats_mod.solve_history(conn)}
+    assert rows["failed1"]["reason"] == "timeout" and rows["failed1"]["timed_out"] == 1
+    assert rows["failed1"]["stars_detected"] == 12 and rows["failed1"]["tier_lo"] is None
+    assert rows["crashed"]["status"] == "failed" and rows["crashed"]["attempts"] == 0
+    # the deepen finishes the same job again: one row, the later numbers
+    with db.get_conn() as conn:
+        job = conn.execute("SELECT * FROM jobs WHERE id = 'failed1'").fetchone()
+        stats_mod.record_solve(conn, job, "done",
+                               {"success": True, "match": {"logodds": 70.6, "nmatch": 19},
+                                "attempts": [{"fov_bounds": [10, 21], "success": True}]})
+        rows = stats_mod.solve_history(conn)
+    assert [r["job_id"] for r in rows].count("failed1") == 1
+    assert next(r for r in rows if r["job_id"] == "failed1")["logodds"] == 70.6
+
+
+def test_the_rows_outlive_the_sweep(fresh_db, tmp_path):
+    img = tmp_path / "gone.jpg"
+    img.write_bytes(b"x")
+    with db.get_conn() as conn:
+        conn.execute(
+            "INSERT INTO jobs (id, image_path, status, created_at, exif_json) "
+            "VALUES ('old', ?, 'done', '2020-01-01 00:00:00', '{}')", (str(img),))
+        job = conn.execute("SELECT * FROM jobs WHERE id = 'old'").fetchone()
+        stats_mod.record_solve(conn, job, "done", {"match": {"logodds": 42.7, "nmatch": 12}})
+    assert worker_mod.sweep_expired() == 1
+    with db.get_conn() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
+        assert stats_mod.solve_history(conn)[0]["logodds"] == 42.7
+        assert len(stats_mod.solve_history(conn, days=1)) == 1  # finished just now

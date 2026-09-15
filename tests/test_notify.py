@@ -14,8 +14,9 @@ def sent(monkeypatch):
     """Capture publishes instead of making them, and report success."""
     box = []
 
-    def fake_post(message, title=None, tags=None, priority=None):
-        box.append({"message": message, "title": title, "priority": priority})
+    def fake_post(message, title=None, tags=None, priority=None, click=None):
+        box.append({"message": message, "title": title, "priority": priority,
+                    "click": click})
         return True
 
     monkeypatch.setattr(notify, "post", fake_post)
@@ -248,3 +249,54 @@ def test_a_set_but_empty_knob_falls_back_to_its_default(monkeypatch):
     assert notify._int_env("NTFY_BURST_SOLVES", 6) == 6
     monkeypatch.setenv("NTFY_BURST_SOLVES", "3")
     assert notify._int_env("NTFY_BURST_SOLVES", 6) == 3
+
+
+# --- the day's solves in the summary (#114) --------------------------
+
+
+def test_summary_lists_the_days_solves_with_links_and_marks(fresh_db, sent, monkeypatch):
+    monkeypatch.setattr(notify, "SUMMARY_HOUR_UTC", 7)
+    monkeypatch.setattr(notify, "PUBLIC_URL", "https://asterism.example")
+    with db.get_conn() as conn:
+        _insert(conn, "older1", status="done", created_at=_at(conn, "-5 hours"),
+                result={"narration": {"caption": "Altair over the lodge"}})
+        _insert(conn, "newest", status="done", created_at=_at(conn, "-1 hours"),
+                result={"labels": [{"name": "Vega", "kind": "star"}],
+                        "constellations": [{"name": "Lyra"}]})
+        _insert(conn, "hiddn1", status="done", created_at=_at(conn, "-2 hours"),
+                result={"narration": {"caption": "must not appear"}})
+        _insert(conn, "failed", status="failed", created_at=_at(conn, "-1 hours"))
+        _insert(conn, "lastwk", status="done", created_at="2020-01-01 00:00:00",
+                result={"narration": {"caption": "long gone"}})
+        conn.execute("UPDATE jobs SET hidden = 1 WHERE id = 'hiddn1'")
+        conn.execute("UPDATE jobs SET kept = 1 WHERE id = 'older1'")
+        message = notify.check_summary(conn, "2026-08-15 07:00:00")
+    # the counts see every upload, hidden included; the list shows only what is visible
+    assert message.startswith("4 uploads · 3 solved · 1 failed · 1 hidden")
+    lines = message.split("\n")
+    assert lines[1] == "" and lines[2] == "The day's solves, newest first:"
+    # the deterministic caption for the one without narration, newest first
+    assert lines[3] == "• Vega · Lyra https://asterism.example/?job=newest"
+    assert lines[4] == "• Altair over the lodge (kept by uploader) https://asterism.example/?job=older1"
+    assert len(lines) == 5
+    assert "must not appear" not in message and "long gone" not in message
+    assert sent[0]["click"] == "https://asterism.example/?job=newest"
+
+
+def test_a_quiet_day_has_no_list_and_no_click(fresh_db, sent, monkeypatch):
+    monkeypatch.setattr(notify, "SUMMARY_HOUR_UTC", 7)
+    with db.get_conn() as conn:
+        message = notify.check_summary(conn, "2026-08-15 07:00:00")
+    assert "\n" not in message
+    assert sent[0]["click"] is None
+
+
+def test_the_list_is_capped_where_the_burst_alert_takes_over(fresh_db, sent, monkeypatch):
+    monkeypatch.setattr(notify, "SUMMARY_HOUR_UTC", 7)
+    with db.get_conn() as conn:
+        for i in range(12):
+            _insert(conn, f"s{i:02d}", status="done", created_at=_at(conn, f"-{i + 1} minutes"),
+                    result={"narration": {"caption": f"solve {i}"}})
+        message = notify.check_summary(conn, "2026-08-15 07:00:00")
+    assert message.count("\n• ") == notify.SUMMARY_SOLVES
+    assert "solve 0" in message and "solve 11" not in message

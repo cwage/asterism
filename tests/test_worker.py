@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from app import (beyond, constellations, db, ephemeris, locate, narrate,
+from app import (beyond, constellations, db, ephemeris, locate, lore, narrate,
                  night, satellites, solver, verify, worker)
 
 JOB = {"id": "abc123", "image_path": "/photos/x.jpg", "mode": "quick",
@@ -43,6 +43,7 @@ def stub_solve(tmp_path, monkeypatch):
     monkeypatch.setattr(solver, "pointing", lambda *a, **k: None)
     monkeypatch.setattr(night, "annotate", lambda *a, **k: None)
     monkeypatch.setattr(locate, "annotate", lambda *a, **k: None)
+    monkeypatch.setattr(lore, "annotate", lambda *a, **k: [])
 
 
 def test_bodies_merge_ahead_of_stars(monkeypatch):
@@ -458,3 +459,16 @@ def test_pointing_summary_rides_on_the_result(monkeypatch):
     monkeypatch.setattr(solver, "pointing", boom)
     status, result, _ = worker.process(JOB)
     assert status == "done" and result["pointing"] is None
+
+
+def test_lore_rides_on_the_result_and_its_failure_is_survived(monkeypatch):
+    entry = {"abbr": "Ori", "name": "Orion", "line": lore.LORE["Ori"]}
+    monkeypatch.setattr(lore, "annotate", lambda figures, labels: [entry])
+    status, result, _ = worker.process(JOB)
+    assert status == "done" and result["lore"] == [entry]
+
+    def boom(*a, **k):
+        raise RuntimeError("no catalog")
+    monkeypatch.setattr(lore, "annotate", boom)
+    status, result, _ = worker.process(JOB)
+    assert status == "done" and result["lore"] == []

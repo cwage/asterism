@@ -197,6 +197,14 @@
   #night:empty { display: none; }
   #night p { margin: 0; }
   #night p + p { margin-top: 0.4rem; }
+  /* Constellation lore (#123): same panel, a quieter voice. */
+  #lore { border: 1px solid #1c2634; border-radius: 10px;
+          background: var(--panel); padding: 0.75rem 1rem;
+          margin: 0 0 0.75rem; font-size: 0.95rem; color: var(--dim); }
+  #lore:empty { display: none; }
+  #lore p { margin: 0; }
+  #lore p + p { margin-top: 0.4rem; }
+  #lore b { color: var(--ink); font-weight: 500; }
 
   /* Hidden until render() has a photo: an empty inline-block still claims a
      line box, which would gap the feed away from the upload control. */
@@ -276,6 +284,7 @@
 <div id="actions"></div>
 <div id="narration"></div>
 <div id="night"></div>
+<div id="lore"></div>
 <div id="controls" hidden>
   <!-- Each toggle carries its layer's colour, so the controls double as
        the key to the overlay: what a blue ring, a gold ring, a coral
@@ -689,6 +698,7 @@ function clearResult() {
   document.getElementById('fail-detail').textContent = '';
   document.getElementById('narration').textContent = '';
   document.getElementById('night').replaceChildren();
+  document.getElementById('lore').replaceChildren();
   document.getElementById('controls').hidden = true;
 }
 
@@ -1354,6 +1364,14 @@ function render(id, job) {
     document.getElementById('night').replaceChildren(...nightLines(job).map(line => {
       const p = document.createElement('p');
       p.textContent = line;
+      return p;
+    }));
+    // A sentence of lore for the constellations the eye lands on (#123).
+    document.getElementById('lore').replaceChildren(...(job.result.lore || []).map(entry => {
+      const p = document.createElement('p');
+      const b = document.createElement('b');
+      b.textContent = entry.name;
+      p.append(b, ' — ' + entry.line.replace(new RegExp('^' + entry.name + ' '), ''));
       return p;
     }));
   };
