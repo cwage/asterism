@@ -86,6 +86,12 @@ Final home: `asterism.quietlife.net`.
   at all when even the bright stars are mostly hidden. The sentences are built in the worker
   so the page, the copied description and the narration (which gets them
   as facts) all say the same thing.
+- A sentence of lore for the constellations in frame (#123): one
+  reliable sentence per constellation, from a table in `app/lore.py`
+  (original prose from the standard mythology and naming history, so no
+  licence rides along), shown for the two constellations whose brightest
+  confirmed star is brightest. The narration gets them as facts it may
+  draw on and must not contradict.
 - Roughly where on Earth (#115), without GPS: iPhones record the gravity
   vector at capture in the MakerNote, which says where the zenith sits
   relative to the frame; the WCS turns that into the zenith's sky

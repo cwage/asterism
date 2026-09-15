@@ -223,3 +223,15 @@ def test_the_place_line_rides_with_the_night_notes():
                       "place": {"source": "tilt", "line": line}}, client=client)
     payload = json.loads(client.calls[0]["messages"][0]["content"])
     assert payload["night_notes"] == ["The Moon was new, so it added no light to the sky.", line]
+
+
+def test_lore_reaches_the_model_as_its_own_list():
+    client = FakeClient()
+    narrate.annotate({**RESULT, "lore": [{"abbr": "Ori", "name": "Orion", "line": "Orion is the hunter."}]},
+                     client=client)
+    payload = json.loads(client.calls[0]["messages"][0]["content"])
+    assert payload["lore"] == ["Orion is the hunter."]
+    assert "lore" in client.calls[0]["system"]
+    client = FakeClient()
+    narrate.annotate(RESULT, client=client)
+    assert json.loads(client.calls[0]["messages"][0]["content"])["lore"] == []
