@@ -477,8 +477,15 @@ async def file_feedback(request: Request):
     generic 502 with the real error in the log (never the token)."""
     if not feedback.enabled():
         raise HTTPException(404, "Not Found")
+    # Bounded before it is parsed: nothing below should have to cope with
+    # a body the caller made as large as they liked.
+    body = b""
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > feedback.MAX_BODY_BYTES:
+            raise HTTPException(413, "that's a lot of report; keep it under 16KB")
     try:
-        data = await request.json()
+        data = json.loads(body)
     except Exception:
         raise HTTPException(400, "send JSON")
     if not isinstance(data, dict):
@@ -492,32 +499,40 @@ async def file_feedback(request: Request):
         context = {"context": str(context)[:feedback.MAX_CONTEXT_CHARS]} if context else {}
     if _feedback_limited(_client_ip(request)):
         raise HTTPException(429, "one report a minute; try again shortly")
-    if feedback.daily_cap_reached():
-        raise HTTPException(429, "the site has had its fill of reports for today; try tomorrow")
 
-    # What the server knows about the job the page names, if any.
+    # What the server knows about the job the page names, if any. Hidden
+    # rows are not there, exactly as they are not there to GET /jobs: a
+    # takedown must not be copyable into a public issue by its id.
     job = None
     job_id = context.get("job")
     if isinstance(job_id, str) and re.fullmatch(r"[0-9a-f]{32}", job_id):
         with db.get_conn() as conn:
             row = conn.execute(
-                "SELECT status, error, created_at, hidden, featured, kept, result_json "
-                "FROM jobs WHERE id = ?", (job_id,)
+                "SELECT status, error, created_at, featured, kept, result_json "
+                "FROM jobs WHERE id = ? AND hidden = 0", (job_id,)
             ).fetchone()
         if row:
             result = json.loads(row["result_json"]) if row["result_json"] else {}
             job = {"id": job_id, "status": row["status"], "error": row["error"],
-                   "created_at": row["created_at"], "hidden": bool(row["hidden"]),
+                   "created_at": row["created_at"],
                    "featured": bool(row["featured"]), "kept": bool(row["kept"]),
                    "failure": (result.get("failure") or {}).get("reason"),
                    "match": result.get("match"), "fov_bounds": result.get("fov_bounds"),
+                   "pointing": result.get("pointing"),
                    "attempts": len(result.get("attempts") or [])}
         else:
             job = {"id": job_id, "status": "no such job"}
+
+    with db.get_conn() as conn:
+        slot = feedback.reserve(conn)
+    if slot is None:
+        raise HTTPException(429, "the site has had its fill of reports for today; try tomorrow")
     filed = await run_in_threadpool(
         feedback.file_report, description, context,
         request.headers.get("user-agent"), job)
     if not filed:
+        with db.get_conn() as conn:
+            feedback.release(conn, slot)
         raise HTTPException(502, "could not file the report right now")
     return filed
 

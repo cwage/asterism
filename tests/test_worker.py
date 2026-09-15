@@ -40,6 +40,7 @@ def stub_solve(tmp_path, monkeypatch):
     # Same for the deep catalog projection and the night context (#121,
     # #122): both read the WCS file, and neither is what these tests test.
     monkeypatch.setattr(solver, "project_deep", lambda *a, **k: None)
+    monkeypatch.setattr(solver, "pointing", lambda *a, **k: None)
     monkeypatch.setattr(night, "annotate", lambda *a, **k: None)
     monkeypatch.setattr(locate, "annotate", lambda *a, **k: None)
 
@@ -444,3 +445,16 @@ def test_place_is_stored_and_its_failure_is_survived(monkeypatch):
     monkeypatch.setattr(locate, "annotate", boom)
     status, result, _ = worker.process(JOB)
     assert status == "done" and result["place"] is None
+
+
+def test_pointing_summary_rides_on_the_result(monkeypatch):
+    monkeypatch.setattr(solver, "pointing",
+                        lambda wcs, w, h: {"ra": 84.0, "dec": 0.0, "arcsec_per_px": 144.0, "fov_deg": [4.0, 4.0]})
+    status, result, _ = worker.process(JOB)
+    assert status == "done" and result["pointing"]["ra"] == 84.0
+
+    def boom(*a, **k):
+        raise RuntimeError("no wcs")
+    monkeypatch.setattr(solver, "pointing", boom)
+    status, result, _ = worker.process(JOB)
+    assert status == "done" and result["pointing"] is None

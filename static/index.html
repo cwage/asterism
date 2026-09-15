@@ -317,7 +317,7 @@ plate solving. <button type="button" id="feedback-open">Found a problem or have 
     </details>
     <p class="note">This creates a public report on GitHub, with the details
     above. Don't include personal information.</p>
-    <p class="status" id="feedback-status"></p>
+    <p class="status" id="feedback-status" aria-live="polite"></p>
     <div class="intro-actions">
       <button type="button" class="quiet" id="feedback-cancel">Cancel</button>
       <button type="button" id="feedback-send">Send</button>
@@ -1386,6 +1386,7 @@ function feedbackContext() {
     ctx.status = shownJob.status || null;
     if (shownJob.error) ctx.error = shownJob.error;
     if (r.failure && r.failure.reason) ctx.failure = r.failure.reason;
+    if (r.pointing) ctx.pointing = r.pointing;
     if (r.match) ctx.match = r.match;
     if (r.fov_bounds) ctx.fov_bounds = r.fov_bounds;
     if (r.low_confidence) ctx.low_confidence = true;
@@ -1400,10 +1401,17 @@ function openFeedback() {
   document.getElementById('feedback-status').textContent = '';
   document.getElementById('feedback-send').disabled = false;
   document.getElementById('feedback-overlay').classList.add('open');
+  const text = document.getElementById('feedback-text');
+  if (typeof text.focus === 'function') text.focus();
 }
 
 function closeFeedback() {
-  document.getElementById('feedback-overlay').classList.remove('open');
+  const overlay = document.getElementById('feedback-overlay');
+  const wasOpen = overlay.classList.contains('open');
+  overlay.classList.remove('open');
+  // Hand focus back to the control that opened it, the way a dialog should.
+  const opener = document.getElementById('feedback-open');
+  if (wasOpen && typeof opener.focus === 'function') opener.focus();
 }
 
 async function sendFeedback() {

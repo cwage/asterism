@@ -376,6 +376,24 @@ def load_catalog():
     return stars
 
 
+def pointing(wcs_path, width, height):
+    """Where the solve put the frame: centre RA/Dec in degrees and the
+    pixel scale in arcseconds, from the WCS. The one summary of a solve
+    worth quoting in a bug report (#137), and the feed's thumbnails and
+    the sky-overlap link (#119) will want it too."""
+    from astropy.io import fits
+    from astropy.wcs import WCS
+    from astropy.wcs.utils import proj_plane_pixel_scales
+
+    with fits.open(wcs_path) as hdul:
+        wcs = WCS(hdul[0].header)
+    ra, dec = (float(v) for v in wcs.all_pix2world(width / 2.0, height / 2.0, 0))
+    scale = float(max(proj_plane_pixel_scales(wcs))) * 3600.0
+    return {"ra": round(ra, 3), "dec": round(dec, 3),
+            "arcsec_per_px": round(scale, 2),
+            "fov_deg": [round(scale * width / 3600.0, 1), round(scale * height / 3600.0, 1)]}
+
+
 def annotate(wcs_path, width, height, max_labels=40):
     """Project catalog stars through the solved WCS; return pixel-space labels."""
     from astropy.io import fits

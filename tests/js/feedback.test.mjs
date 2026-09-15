@@ -8,7 +8,8 @@ const JOB = {
   status: 'done', solve_seconds: 2.1,
   result: { labels: [{ name: 'Vega', x: 1, y: 1, mag: 0.03, kind: 'star', status: 'matched' }],
             constellations: [], match: { logodds: 214.5, nmatch: 42, ndistract: 8 },
-            fov_bounds: [38.4, 65.9] },
+            fov_bounds: [38.4, 65.9],
+            pointing: { ra: 219.9, dec: -60.8, arcsec_per_px: 65.3, fov_deg: [54.9, 73.2] } },
 };
 
 function stub(calls, respond) {
@@ -33,6 +34,7 @@ test('opening shows the context the report will carry', () => {
   assert.equal(ctx.status, 'done');
   assert.deepEqual(ctx.match, JOB.result.match);
   assert.deepEqual(ctx.fov_bounds, JOB.result.fov_bounds);
+  assert.deepEqual(ctx.pointing, JOB.result.pointing);
   sandbox.closeFeedback();
   assert.ok(!els['feedback-overlay'].className.includes('open'));
 });

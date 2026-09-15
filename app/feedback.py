@@ -7,55 +7,88 @@ context we would otherwise have to ask for: which job, what state it was
 in, what the solve found, which browser.
 
 The endpoint is unauthenticated and writes to a public repository, so it
-is defensive: a token is required or it does not exist (503); the text
-is capped; a per-address cooldown and a global daily cap bound the
-worst case; and every @ in the visitor's words is neutralised so a
-report can never page a GitHub user. GITHUB_TOKEN needs only issues
-write on this repository; it is never logged, not even on failure.
+is defensive: a token is required or the endpoint does not exist (404,
+like the admin endpoints); the request body is bounded before it is
+parsed and the text is capped after; a per-address cooldown and a global
+daily cap bound the worst case, the cap kept in the database so the
+machine's auto-restarts don't reset it and reserved under a lock so a
+burst can't overshoot it; and every @ in the visitor's words, title
+included, is neutralised so a report can never page a GitHub user.
+GITHUB_TOKEN needs only issues write on this repository; it is never
+logged, not even on failure.
 """
 
 import json
 import os
-import time
+import threading
 import urllib.error
 import urllib.request
-from collections import deque
-from datetime import datetime, timezone
+import uuid
+from datetime import datetime, timedelta, timezone
 
 TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
 REPO = os.environ.get("GITHUB_REPO", "cwage/asterism").strip()
 LABEL = os.environ.get("FEEDBACK_LABEL", "bug-report")
+MAX_BODY_BYTES = 16 * 1024      # the whole request, before anything parses it
 MAX_DESCRIPTION_CHARS = 2000
 MAX_CONTEXT_CHARS = 5000
 MAX_TITLE_CHARS = 80
 COOLDOWN_SECONDS = 60           # per client address
 PER_DAY = int(os.environ.get("FEEDBACK_PER_DAY", "20"))  # across everyone
 TIMEOUT_SECONDS = 10.0
+META_KEY = "feedback:filed"     # JSON list of {"id", "at"} for the last day
 
-_filed = deque()  # monotonic times of reports filed today, for the daily cap
+_cap_lock = threading.Lock()
 
 
 def enabled():
     return bool(TOKEN and REPO)
 
 
-def daily_cap_reached(now=None):
-    """Whether today's global allowance is spent. Counts filings, not
-    attempts: the point is bounding what lands in the repo."""
-    now = time.monotonic() if now is None else now
-    while _filed and _filed[0] <= now - 86400:
-        _filed.popleft()
-    return len(_filed) >= PER_DAY
+def _load(conn):
+    row = conn.execute("SELECT value FROM meta WHERE key = ?", (META_KEY,)).fetchone()
+    try:
+        entries = json.loads(row["value"]) if row else []
+    except (TypeError, ValueError):
+        entries = []
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    return [e for e in entries if isinstance(e, dict) and e.get("at", "") > cutoff]
 
 
-def _record_filed(now=None):
-    _filed.append(time.monotonic() if now is None else now)
+def _save(conn, entries):
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (META_KEY, json.dumps(entries)))
+
+
+def reserve(conn):
+    """Take one of today's slots, or None when they are spent. The slot
+    is written before the issue is posted and released if that fails, so
+    the cap counts filings, a burst can't see the same free slot twice
+    (the lock), and a restart doesn't hand out a fresh day (the row)."""
+    with _cap_lock:
+        entries = _load(conn)
+        if len(entries) >= PER_DAY:
+            return None
+        slot = {"id": uuid.uuid4().hex, "at": datetime.now(timezone.utc).isoformat()}
+        _save(conn, entries + [slot])
+        return slot["id"]
+
+
+def release(conn, slot):
+    with _cap_lock:
+        _save(conn, [e for e in _load(conn) if e.get("id") != slot])
+
+
+def filed_today(conn):
+    return len(_load(conn))
 
 
 def neutralise(text):
     """The visitor's words, unable to page anyone or break out of the
-    fence they are shown in: every @ becomes a full-width one, and a
-    run of backticks loses its power."""
+    fence they are shown in: every @ becomes a full-width one, and every
+    run of backticks loses its power (str.replace is global)."""
     return text.replace("@", "＠").replace("```", "'''")
 
 
@@ -63,7 +96,7 @@ def title_for(description):
     first = " ".join(description.strip().splitlines()[0].split()) if description.strip() else "Feedback"
     if len(first) > MAX_TITLE_CHARS:
         first = first[:MAX_TITLE_CHARS - 1].rstrip() + "…"
-    return f"Feedback: {first}"
+    return "Feedback: " + neutralise(first).replace("`", "'")
 
 
 def body_for(description, client_context, server_context):
@@ -99,9 +132,15 @@ def _post(payload):
         return json.loads(response.read().decode("utf-8"))
 
 
+def _redact(text):
+    return text.replace(TOKEN, "<token>") if TOKEN else text
+
+
 def file_report(description, client_context, user_agent=None, job=None):
     """File the issue. Returns {"number", "url"} or None when GitHub did
-    not take it (the reason goes to the log, without the token)."""
+    not take it (the reason goes to the log, with the token redacted).
+    The daily-cap slot is the caller's: reserve() before, release() on
+    None."""
     description = description.strip()[:MAX_DESCRIPTION_CHARS]
     server_context = {
         "filed_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
@@ -115,10 +154,14 @@ def file_report(description, client_context, user_agent=None, job=None):
     try:
         issue = _post(payload)
     except urllib.error.HTTPError as e:
-        print(f"feedback: GitHub refused the issue (HTTP {e.code})")
+        detail = ""
+        try:
+            detail = e.read(500).decode("utf-8", "replace")
+        except Exception:
+            pass
+        print(f"feedback: GitHub refused the issue (HTTP {e.code}) {_redact(detail)}")
         return None
     except Exception as e:
-        print(f"feedback: filing failed ({type(e).__name__})")
+        print(f"feedback: filing failed ({type(e).__name__}: {_redact(str(e))})")
         return None
-    _record_filed()
     return {"number": issue.get("number"), "url": issue.get("html_url")}
