@@ -196,6 +196,19 @@ curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" https://asterism.quietlife.
 `/unfeature` puts it back in the normal retention window, where the next sweep
 collects it if it is already older than `RETENTION_HOURS` — usually the point.
 
+Same `ADMIN_TOKEN` gate as the kill switch, and the same way of finding a job id
+(see the runbook above). Only a solved job can be featured, and a hidden one
+can't be: featuring is a request that the sweep never collect something, which
+is the wrong thing to ask about a job that has been pulled from the site.
+Hiding therefore clears the flag — the kill switch always wins, so nothing ends
+up invisible *and* immortal.
+
+Featuring changes retention, not placement. The feed is still
+`ORDER BY created_at DESC LIMIT 24`, so a featured solve is kept forever but
+sinks out of the strip once 24 newer solves exist. On a quiet site that never
+happens, which is the case this exists for. Storage grows monotonically by
+design; a few dozen phone JPEGs and their cards is nothing against the volume.
+
 ### Kept by the uploader
 
 Featuring is operator-only, so the solves that survived the sweep used to be
@@ -215,19 +228,6 @@ not touch `kept` and `/unkeep` does not touch `featured`, so an operator's
 showcase and an uploader's keep can each be undone without the other.
 The nightly digest counts kept solves separately, since they need no
 action.
-
-Same `ADMIN_TOKEN` gate as the kill switch, and the same way of finding a job id
-(see the runbook above). Only a solved job can be featured, and a hidden one
-can't be: featuring is a request that the sweep never collect something, which
-is the wrong thing to ask about a job that has been pulled from the site.
-Hiding therefore clears the flag — the kill switch always wins, so nothing ends
-up invisible *and* immortal.
-
-Featuring changes retention, not placement. The feed is still
-`ORDER BY created_at DESC LIMIT 24`, so a featured solve is kept forever but
-sinks out of the strip once 24 newer solves exist. On a quiet site that never
-happens, which is the case this exists for. Storage grows monotonically by
-design; a few dozen phone JPEGs and their cards is nothing against the volume.
 
 ## Following new solves
 

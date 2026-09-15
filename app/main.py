@@ -6,6 +6,7 @@ import json
 import math
 import os
 import re
+import threading
 import time
 import uuid
 import xml.etree.ElementTree as ET
@@ -52,6 +53,9 @@ ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
 _upload_log = defaultdict(deque)  # client ip -> recent upload monotonic times
 _keep_log = defaultdict(deque)    # client ip -> recent keep monotonic times
+# The sync handlers run in a thread pool, so two requests from one address
+# can race the check-then-append; the ceilings are meant to be hard.
+_limiter_lock = threading.Lock()
 
 # The orientation bake holds a decoded frame (and its transposed copy) in
 # memory and runs in the threadpool that also serves the sync handlers. One
@@ -91,15 +95,16 @@ def _window_limited(logs, ip, limit, window, now=None):
     """Sliding window per client IP. Counts attempts, not successes, so a
     rejected request isn't a free retry."""
     now = time.monotonic() if now is None else now
-    log = logs[ip]
-    while log and log[0] <= now - window:
-        log.popleft()
-    if len(log) >= limit:
-        return True
-    log.append(now)
-    if len(logs) > 10000:  # shed empty entries under IP churn
-        for key in [k for k, v in logs.items() if not v][:5000]:
-            del logs[key]
+    with _limiter_lock:
+        log = logs[ip]
+        while log and log[0] <= now - window:
+            log.popleft()
+        if len(log) >= limit:
+            return True
+        log.append(now)
+        if len(logs) > 10000:  # shed empty entries under IP churn
+            for key in [k for k, v in logs.items() if not v][:5000]:
+                del logs[key]
     return False
 
 

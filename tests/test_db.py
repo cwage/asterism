@@ -25,10 +25,14 @@ def test_init_db_adds_mode_column_to_old_schema(tmp_path, monkeypatch):
     with db.get_conn() as conn:
         row = conn.execute(
             "SELECT mode, orphan_recoveries, uploader_hash, device_json, "
-            "counted, content_hash FROM jobs WHERE id = 'old1'"
+            "counted, content_hash, hidden, featured, kept "
+            "FROM jobs WHERE id = 'old1'"
         ).fetchone()
         assert row["mode"] == "quick"
         assert row["orphan_recoveries"] == 0
+        # Flags an old row never had: visible, not featured, not kept (#113),
+        # so the sweep, the feed and the keep endpoints treat it as new.
+        assert (row["hidden"], row["featured"], row["kept"]) == (0, 0, 0)
         # Uploader record (#116): nullable facts, and an existing row has
         # not been folded into the daily history yet.
         assert row["uploader_hash"] is None

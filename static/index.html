@@ -1183,6 +1183,17 @@ function starListText(job) {
 // the retention sweep, offered while the window is open, and withdrawable.
 // The server decides whether it is on offer (keep_open) and whether it is
 // already kept; the button just reflects that and flips it.
+async function refusalText(res) {
+  // FastAPI wraps an HTTPException as {"detail": "..."}; say the words,
+  // not the JSON, and fall back to the body for anything else.
+  const text = await res.text();
+  try {
+    const detail = JSON.parse(text).detail;
+    if (typeof detail === 'string') return detail;
+  } catch {}
+  return text;
+}
+
 function keepButton(id, job) {
   const btn = document.createElement('button');
   btn.type = 'button';
@@ -1198,10 +1209,16 @@ function keepButton(id, job) {
       const res = await fetch('/jobs/' + encodeURIComponent(id) + '/' + path, { method: 'POST' });
       if (!res.ok) {
         if (res.status === 404 || res.status === 410) forgetRecentUpload(id);
-        btn.textContent = (job.kept ? 'could not undo: ' : 'could not keep: ') + await res.text();
+        btn.textContent = (job.kept ? 'could not undo: ' : 'could not keep: ') + await refusalText(res);
         return;
       }
       job.kept = !job.kept;
+      // Undoing a keep past the window leaves nothing on offer: a fresh
+      // keep would only be refused, so the control goes with the keep.
+      if (!job.kept && !job.keep_open) {
+        btn.remove();
+        return;
+      }
       label();
     } catch {
       btn.textContent = 'could not reach the site';

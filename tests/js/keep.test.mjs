@@ -22,7 +22,10 @@ function fetchStub(calls, respond) {
 }
 
 const ok = (body) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
-const refuse = (status, text) => ({ ok: false, status, text: async () => text });
+// FastAPI's shape for an HTTPException, and a plain-text body for
+// anything that isn't one.
+const refuse = (status, detail) => ({ ok: false, status, text: async () => JSON.stringify({ detail }) });
+const refusePlain = (status, text) => ({ ok: false, status, text: async () => text });
 
 function keepBtn(els) {
   return els.actions.children.find(c => /keep|kept/.test(c.textContent));
@@ -77,6 +80,30 @@ test('a refusal is shown on the button, and the next tap tries again', async () 
   assert.equal(btn.disabled, false);
   await btn.dispatch('click');
   assert.equal(calls.length, 2);
+});
+
+test('a refusal that is not JSON is shown as it came', async () => {
+  const { sandbox, els } = loadPage({
+    fetch: fetchStub([], () => refusePlain(502, 'bad gateway')),
+  });
+  sandbox.render('abc', { ...DONE, keep_open: true, kept: false });
+  els.photo.onload();
+  const btn = keepBtn(els);
+  await btn.dispatch('click');
+  assert.equal(btn.textContent, 'could not keep: bad gateway');
+});
+
+test('undoing a keep past the window takes the control away', async () => {
+  const calls = [];
+  const { sandbox, els } = loadPage({ fetch: fetchStub(calls, () => ok({ kept: false })) });
+  sandbox.render('abc', { ...DONE, keep_open: false, kept: true });
+  els.photo.onload();
+  const btn = keepBtn(els);
+  await btn.dispatch('click');
+  assert.equal(calls[0].url, '/jobs/abc/unkeep');
+  // nothing left to offer: a fresh keep would only be refused
+  assert.equal(keepBtn(els), undefined);
+  assert.ok(!els.actions.children.includes(btn));
 });
 
 test('the disclosure and the feed heading say the window has an exception', () => {
