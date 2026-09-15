@@ -20,6 +20,11 @@ services:
       - ./static:/srv/static:ro
     environment:
       - DATA_DIR=/data
+      # Overridable for local runs that push a corpus sample through the
+      # real upload path (bake, hash, queue): the production defaults
+      # stop a calibration batch at twelve.
+      - UPLOADS_PER_HOUR=${UPLOADS_PER_HOUR:-12}
+      - MAX_QUEUE_DEPTH=${MAX_QUEUE_DEPTH:-20}
 
   worker:
     # LLM narration (#12) needs ANTHROPIC_API_KEY and satellite crossings

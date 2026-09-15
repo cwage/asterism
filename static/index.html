@@ -1145,7 +1145,11 @@ function describeText(job) {
 // the worker's own sentences, verbatim, so the page and the copied
 // description say the same thing.
 function nightLines(job) {
-  return ((job.result || {}).night || {}).lines || [];
+  const r = job.result || {};
+  const lines = (r.night || {}).lines || [];
+  // Where on Earth (#115) reads as one more line of the same kind.
+  const place = r.place && r.place.line;
+  return place ? [...lines, place] : lines;
 }
 
 // '8°', '0.4°': whole degrees, except under one degree where a tenth is

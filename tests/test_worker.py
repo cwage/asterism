@@ -6,8 +6,8 @@ import json
 
 import pytest
 
-from app import (beyond, constellations, db, ephemeris, narrate, night,
-                 satellites, solver, verify, worker)
+from app import (beyond, constellations, db, ephemeris, locate, narrate,
+                 night, satellites, solver, verify, worker)
 
 JOB = {"id": "abc123", "image_path": "/photos/x.jpg", "mode": "quick",
        "exif_json": json.dumps({"width": 100, "height": 100})}
@@ -41,6 +41,7 @@ def stub_solve(tmp_path, monkeypatch):
     # #122): both read the WCS file, and neither is what these tests test.
     monkeypatch.setattr(solver, "project_deep", lambda *a, **k: None)
     monkeypatch.setattr(night, "annotate", lambda *a, **k: None)
+    monkeypatch.setattr(locate, "annotate", lambda *a, **k: None)
 
 
 def test_bodies_merge_ahead_of_stars(monkeypatch):
@@ -429,3 +430,17 @@ def test_deep_catalog_projection_failure_still_verifies(monkeypatch):
     status, result, _ = worker.process(JOB)
     assert status == "done"
     assert calls == [None]  # verification ran, just without a depth estimate
+
+
+def test_place_is_stored_and_its_failure_is_survived(monkeypatch):
+    line = "The phone recorded its tilt, so sky geometry puts this near 36°N, 74°E: northern Pakistan."
+    monkeypatch.setattr(locate, "annotate",
+                        lambda wcs, w, h, exif: {"source": "tilt", "line": line})
+    status, result, _ = worker.process(JOB)
+    assert status == "done" and result["place"]["line"] == line
+
+    def boom(*a, **k):
+        raise RuntimeError("map missing")
+    monkeypatch.setattr(locate, "annotate", boom)
+    status, result, _ = worker.process(JOB)
+    assert status == "done" and result["place"] is None

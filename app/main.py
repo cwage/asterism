@@ -211,6 +211,7 @@ async def create_job(request: Request, image: UploadFile):
 
     try:
         width, height = exif.dimensions(image_path)      # header only
+        orientation = exif.orientation(image_path)       # before the bake resets it
     except Exception as e:
         os.unlink(image_path)
         raise HTTPException(400, f"could not read image: {e}")
@@ -227,7 +228,7 @@ async def create_job(request: Request, image: UploadFile):
         # A 12MP re-encode is a CPU-bound moment; keep it off the event loop.
         async with _orient_slot:
             await run_in_threadpool(exif.normalize_orientation, image_path)
-        exif_info = exif.read_exif(image_path)
+        exif_info = exif.read_exif(image_path, orientation=orientation)
     except asyncio.CancelledError:
         # Cancelled while waiting on the bake (a server shutdown): the row
         # was never going to be inserted, so drop the file now rather than

@@ -4,6 +4,7 @@ layers, exposure time for the crossing window — plus the GPS strip that makes
 an upload safe to serve publicly."""
 
 import math
+import struct
 import os
 
 from PIL import Image
@@ -25,6 +26,7 @@ TAG_MAKE = 271
 TAG_MODEL = 272
 TAG_SOFTWARE = 305
 TAG_PIXEL_Y_DIMENSION = 40963
+TAG_MAKERNOTE = 37500
 
 # Fallback when EXIF gives us nothing: generous phone-plausible field widths.
 DEFAULT_FOV_BOUNDS = (30.0, 90.0)
@@ -160,9 +162,58 @@ def _derive_focal_35mm(exif_ifd, px_width):
     return focal * 36.0 / sensor_mm
 
 
-def read_exif(path):
+def apple_gravity(makernote):
+    """The phone's tilt at capture (#115): Apple's MakerNote tag 8,
+    "AccelerationVector", three signed rationals in units of g. Measured
+    against a real frame it is CoreMotion's gravity vector in the phone's
+    frame: X toward the phone's right (as seen from the front), Y toward
+    its top, Z out of the screen toward the user; the rear camera looks
+    along -Z. None when absent, not Apple's layout, or not roughly unit
+    length (a phone in free fall has other problems)."""
+    try:
+        if not makernote or not bytes(makernote).startswith(b"Apple iOS"):
+            return None
+        mn = bytes(makernote)
+        endian = ">" if mn[12:14] == b"MM" else "<"
+        count = struct.unpack(endian + "H", mn[14:16])[0]
+        for i in range(count):
+            tag, typ, n, val = struct.unpack(endian + "HHII", mn[16 + 12 * i:28 + 12 * i])
+            if tag != 8:
+                continue
+            if typ != 10 or n != 3:
+                return None
+            out = []
+            for k in range(3):
+                num, den = struct.unpack(endian + "ii", mn[val + 8 * k:val + 8 * k + 8])
+                if den == 0:
+                    return None
+                out.append(num / den)
+            if all(math.isfinite(v) for v in out) and 0.5 < math.hypot(*out) < 1.5:
+                return out
+            return None
+    except (struct.error, IndexError, TypeError):
+        return None
+    return None
+
+
+def orientation(path):
+    """The EXIF Orientation tag, 1 when absent or unreadable. Read from
+    the header alone, like dimensions(); meant for before the bake, which
+    resets the tag to 1 once the pixels are laid out upright."""
+    try:
+        with Image.open(path) as img:
+            return int(img.getexif().get(TAG_ORIENTATION) or 1)
+    except Exception:
+        return 1
+
+
+def read_exif(path, orientation=None):
     """Return {fov_bounds, fov_deg, fov_tiers, focal_35mm, datetime_original, offset_time_original,
-    exposure_seconds, lat, lon, heading, heading_ref, width, height}."""
+    exposure_seconds, lat, lon, heading, heading_ref, width, height, gravity, orientation}.
+
+    `orientation` is the tag's value before normalize_orientation baked it
+    into the pixels; the tilt vector (gravity) is in the phone's frame,
+    and that value is what relates it to the upright image."""
     info = {
         "fov_bounds": DEFAULT_FOV_BOUNDS,
         "fov_deg": None,
@@ -178,12 +229,20 @@ def read_exif(path):
         "lon": None,
         "heading": None,
         "heading_ref": None,
+        "gravity": None,
+        "orientation": None,
     }
     with Image.open(path) as img:
         info["width"], info["height"] = img.size
         ex = img.getexif()
         exif_ifd = ex.get_ifd(EXIF_IFD)
         gps = ex.get_ifd(GPS_IFD)
+
+    # The phone's tilt (#115), and the orientation the pixels were stored
+    # in, which is what maps the tilt onto the upright image.
+    info["gravity"] = apple_gravity(exif_ifd.get(TAG_MAKERNOTE))
+    info["orientation"] = int(orientation) if orientation is not None \
+        else int(ex.get(TAG_ORIENTATION) or 1)
 
     f35 = exif_ifd.get(TAG_FOCAL_35MM)
     # Same 0/0-rational hazard as the GPS tags: a NaN here would poison

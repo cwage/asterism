@@ -7,8 +7,8 @@ import shutil
 import time
 import traceback
 
-from . import (beyond, constellations, db, dso, ephemeris, narrate, night,
-               notify, satellites, solver, stats, verify)
+from . import (beyond, constellations, db, dso, ephemeris, locate, narrate,
+               night, notify, satellites, solver, stats, verify)
 
 # Below this many detected star-like sources, a quick job fails fast
 # instead of burning cpulimit tiers on daylight/food/pitch-black uploads.
@@ -340,6 +340,16 @@ def _label_everything(result, wcs_path, image_path, exif_info, job_id):
     except Exception:
         print(f"worker: night context failed for {job_id}\n{traceback.format_exc()}")
         result["night"] = None
+
+    # Roughly where on Earth (#115): from the phone's own tilt when it
+    # recorded one, or a name for a GPS fix. Best-effort like the rest.
+    try:
+        result["place"] = locate.annotate(
+            wcs_path, exif_info["width"], exif_info["height"], exif_info
+        )
+    except Exception:
+        print(f"worker: place estimate failed for {job_id}\n{traceback.format_exc()}")
+        result["place"] = None
 
     # LLM narration (#12), best-effort: no API key or a failed call just
     # leaves the deterministic card caption in place.

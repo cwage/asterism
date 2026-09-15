@@ -561,3 +561,58 @@ def test_icc_profile_survives_the_bake_and_the_strip_fallback(tmp_path, ext):
     with Image.open(path) as img:
         assert img.size == (32, 64)
         assert img.info.get("icc_profile") == profile
+
+
+# ---- the phone's tilt (#115) ----
+
+import struct
+
+
+def _apple_makernote(vector, endian=">"):
+    """An Apple MakerNote with one entry: tag 8, three signed rationals."""
+    head = b"Apple iOS\x00\x00\x01" + (b"MM" if endian == ">" else b"II")
+    entry_end = 16 + 12
+    values = b"".join(struct.pack(endian + "ii", int(round(v * 10000)), 10000) for v in vector)
+    entries = struct.pack(endian + "H", 1) + struct.pack(endian + "HHII", 8, 10, 3, entry_end)
+    return head + entries + values
+
+
+def test_apple_tilt_vector_is_read_and_sanity_checked():
+    assert exif.apple_gravity(_apple_makernote([0.0172, -0.9001, 0.4273])) == \
+        pytest.approx([0.0172, -0.9001, 0.4273], abs=1e-4)
+    assert exif.apple_gravity(_apple_makernote([0.0172, -0.9001, 0.4273], endian="<")) == \
+        pytest.approx([0.0172, -0.9001, 0.4273], abs=1e-4)
+    assert exif.apple_gravity(None) is None
+    assert exif.apple_gravity(b"not apple at all") is None
+    assert exif.apple_gravity(_apple_makernote([0.0, 0.0, 0.0])) is None   # no gravity: not a phone
+    assert exif.apple_gravity(_apple_makernote([3.0, 0.0, 0.0])) is None   # not unit length
+    assert exif.apple_gravity(b"Apple iOS\x00\x00\x01MM\x00\x01\x00\x08") is None  # truncated
+
+
+def test_tilt_and_orientation_ride_in_the_exif_record(tmp_path):
+    path = tmp_path / "tilted.jpg"
+    ex = synth.build_exif(f35mm=26, datetime_original="2026:09:09 22:17:22",
+                          offset_time_original="+05:00")
+    ex.get_ifd(exif.EXIF_IFD)[exif.TAG_MAKERNOTE] = _apple_makernote([0.0172, -0.9001, 0.4273])
+    ex[exif.TAG_ORIENTATION] = 6
+    Image.new("RGB", (400, 300)).save(path, exif=ex)
+
+    assert exif.orientation(path) == 6
+    info = exif.read_exif(path)
+    assert info["gravity"] == pytest.approx([0.0172, -0.9001, 0.4273], abs=1e-4)
+    assert info["orientation"] == 6
+
+    # the bake resets the tag; the value captured before it is what counts
+    assert exif.normalize_orientation(path) is True
+    assert exif.orientation(path) == 1
+    info = exif.read_exif(path, orientation=6)
+    assert info["orientation"] == 6
+    assert info["gravity"] == pytest.approx([0.0172, -0.9001, 0.4273], abs=1e-4)  # survives the re-encode
+
+
+def test_no_makernote_means_no_tilt(tmp_path):
+    path = tmp_path / "plain.jpg"
+    Image.new("RGB", (320, 240)).save(path)
+    info = exif.read_exif(path)
+    assert info["gravity"] is None and info["orientation"] == 1
+    assert exif.orientation(tmp_path / "missing.jpg") == 1
