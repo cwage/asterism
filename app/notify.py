@@ -133,6 +133,10 @@ def activity_counts(conn, since):
     # the only reading of it that means anything.
     counts["featured"] = conn.execute(
         "SELECT COUNT(*) FROM jobs WHERE featured = 1").fetchone()[0]
+    # Same reading for uploader keeps (#113): these need no action from
+    # the operator, which is exactly why the digest should say so.
+    counts["kept"] = conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE kept = 1").fetchone()[0]
     counts["uploaders"] = conn.execute(
         "SELECT COUNT(DISTINCT uploader_hash) FROM jobs "
         "WHERE created_at >= ? AND uploader_hash IS NOT NULL",
@@ -153,6 +157,8 @@ def format_summary(counts):
     parts.append(failed)
     parts.append(f"{counts['hidden']} hidden")
     parts.append(f"{counts['featured']} featured")
+    if counts.get("kept"):
+        parts.append(f"{counts['kept']} kept by uploaders")
     return " · ".join(parts)
 
 

@@ -234,13 +234,14 @@
 </label>
 
 <details class="disclosure">
-  <summary>Uploads are public, and deleted after 24 hours.</summary>
+  <summary>Uploads are public, and deleted after 24 hours unless you keep them.</summary>
   <p>Anyone with the result link can view your photo and its labels, and
   successful solves appear in the "recently solved" feed on this page. GPS
   metadata is removed from the stored photo (uploads with location data we
   can't remove are rejected), coordinates shown in results are rounded to city
-  scale, and everything is deleted after 24 hours — apart from the occasional
-  solve kept on as an example of what the site does. Photos are also sent to
+  scale, and everything is deleted after 24 hours — unless you choose to keep
+  your solve on the site from its result page, or it is one of the occasional
+  solves kept on as an example of what the site does. Photos are also sent to
   an AI service (Anthropic) to write the short description of what they
   show.</p>
 </details>
@@ -533,7 +534,7 @@ async function renderFeed() {
   if (!jobs.length) return;
   const title = document.createElement('p');
   title.className = 'title';
-  title.textContent = 'Recently solved by everyone (links live for 24 hours):';
+  title.textContent = 'Recently solved by everyone (links live for 24 hours unless kept):';
   // The same strip as an Atom feed (#127), for following without visiting.
   const atom = document.createElement('a');
   atom.href = '/feed.atom';
@@ -1178,6 +1179,39 @@ function starListText(job) {
   return lines.join('\n');
 }
 
+// Keep this solve on the site (#113): the uploader's own exemption from
+// the retention sweep, offered while the window is open, and withdrawable.
+// The server decides whether it is on offer (keep_open) and whether it is
+// already kept; the button just reflects that and flips it.
+function keepButton(id, job) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'copy';
+  const label = () => {
+    btn.textContent = job.kept ? 'kept on the site — undo' : 'keep this solve on the site';
+  };
+  label();
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    const path = job.kept ? 'unkeep' : 'keep';
+    try {
+      const res = await fetch('/jobs/' + encodeURIComponent(id) + '/' + path, { method: 'POST' });
+      if (!res.ok) {
+        if (res.status === 404 || res.status === 410) forgetRecentUpload(id);
+        btn.textContent = (job.kept ? 'could not undo: ' : 'could not keep: ') + await res.text();
+        return;
+      }
+      job.kept = !job.kept;
+      label();
+    } catch {
+      btn.textContent = 'could not reach the site';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  return btn;
+}
+
 // A button that puts text on the clipboard and says so for a moment. The
 // clipboard API wants a secure context and a user gesture, and both hold
 // here; a browser that refuses anyway is told, rather than left with a
@@ -1223,6 +1257,9 @@ function render(id, job) {
     const actions = [cardLink];
     if (describeText(job)) actions.push(copyButton('copy description', () => describeText(job)));
     if (starListText(job)) actions.push(copyButton('copy star list', () => starListText(job)));
+    // Keep control (#113): on offer inside the window, and always shown
+    // for a kept solve so the keep can be withdrawn.
+    if (job.keep_open || job.kept) actions.push(keepButton(id, job));
     document.getElementById('actions').replaceChildren(...actions);
     // The status line reflects the full result, not the current layer state.
     const labels = job.result.labels;

@@ -196,6 +196,26 @@ curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" https://asterism.quietlife.
 `/unfeature` puts it back in the normal retention window, where the next sweep
 collects it if it is already older than `RETENTION_HOURS` — usually the point.
 
+### Kept by the uploader
+
+Featuring is operator-only, so the solves that survived the sweep used to be
+the ones the operator happened to notice in time; a set of six good frames
+from one traveler came in overnight and the best were gone before anyone
+looked. The person with the strongest claim on whether a photo stays up is
+the one who took it, so the result page offers "keep this solve on the site"
+(#113) while the window is open. It sets a separate `kept` flag through
+`POST /jobs/{id}/keep`, with no token: the job id is the only access control
+there is (#21), and it is already the link. "kept on the site — undo" calls
+`/unkeep`, after which the next sweep collects the job if it is past the
+window. Only a solved, un-hidden job inside the window can be kept, and
+hiding clears the flag like it clears `featured`, so nothing is both
+invisible and immortal. `KEEPS_PER_DAY` (6) caps keeps per client address
+in a sliding day, so one person can't pin the whole feed; `/unfeature` does
+not touch `kept` and `/unkeep` does not touch `featured`, so an operator's
+showcase and an uploader's keep can each be undone without the other.
+The nightly digest counts kept solves separately, since they need no
+action.
+
 Same `ADMIN_TOKEN` gate as the kill switch, and the same way of finding a job id
 (see the runbook above). Only a solved job can be featured, and a hidden one
 can't be: featuring is a request that the sweep never collect something, which
