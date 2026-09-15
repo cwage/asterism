@@ -81,3 +81,11 @@ def test_project_deep_is_empty_when_the_field_is_elsewhere(tmp_path, monkeypatch
     path = tmp_path / "south.wcs"
     fits.PrimaryHDU(header=wcs.to_header()).writeto(path)
     assert solver.project_deep(str(path), WIDTH, HEIGHT, max_mag=9.0) == []
+
+
+def test_pointing_reads_the_centre_and_scale_off_the_wcs(orion_wcs_file):
+    path, wcs = orion_wcs_file
+    p = solver.pointing(str(path), WIDTH, HEIGHT)
+    assert p["ra"] == pytest.approx(84.0, abs=0.05) and p["dec"] == pytest.approx(0.0, abs=0.05)
+    assert p["arcsec_per_px"] == pytest.approx(40.0 / WIDTH * 3600.0, rel=0.01)
+    assert p["fov_deg"] == [40.0, 30.0]

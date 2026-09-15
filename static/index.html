@@ -70,6 +70,24 @@
     .intro { border-radius: 12px 12px 0 0; max-height: 80vh; }
   }
 
+  /* Feedback dialog (#137): the explainer's dressing, with a textarea. */
+  .feedback textarea { width: 100%; box-sizing: border-box; min-height: 7rem;
+                       font: inherit; font-size: 0.95rem; color: var(--ink);
+                       background: var(--bg); border: 1px solid var(--line);
+                       border-radius: 8px; padding: 0.6rem; resize: vertical; }
+  .feedback details { margin: 0.7rem 0; font-size: 0.85rem; color: var(--dim); }
+  .feedback pre { margin: 0.4rem 0 0; padding: 0.5rem; max-height: 10rem;
+                  overflow: auto; font-size: 0.75rem; color: var(--dim);
+                  background: var(--bg); border-radius: 6px; }
+  .feedback .note { font-size: 0.85rem; color: var(--faint); }
+  .feedback .status { min-height: 1.2rem; margin: 0.5rem 0 0; font-size: 0.9rem; }
+  .feedback .status a { color: var(--accent); }
+  .intro-actions button[disabled] { opacity: 0.5; cursor: default; }
+  .intro-actions button.quiet { border-color: var(--line); color: var(--dim); margin-right: 0.5rem; }
+  footer button { cursor: pointer; font: inherit; background: none; border: none;
+                  padding: 0; color: var(--dim); text-decoration: underline; }
+  footer button:hover { color: var(--accent); }
+
   .disclosure { font-size: 0.8rem; color: var(--faint); margin: 0.75rem 0 0; }
   /* The policy text was the densest block above the fold and the first thing
      a new visitor read (#74). One line by default, full text on demand. */
@@ -285,7 +303,27 @@
 <div id="feed"></div>
 
 <footer><a href="https://github.com/cwage/asterism">asterism</a> — phone-first
-plate solving.</footer>
+plate solving. <button type="button" id="feedback-open">Found a problem or have a suggestion?</button></footer>
+
+<div class="intro-overlay" id="feedback-overlay">
+  <div class="intro feedback" role="dialog" aria-modal="true" aria-labelledby="feedback-title">
+    <h2 id="feedback-title">Found a problem or have a suggestion?</h2>
+    <p>Say what happened, or what you'd like. It goes straight to the
+    project as a report.</p>
+    <textarea id="feedback-text" aria-label="Your report" placeholder="What went wrong, or what would help?"></textarea>
+    <details>
+      <summary>What gets sent with it</summary>
+      <pre id="feedback-context"></pre>
+    </details>
+    <p class="note">This creates a public report on GitHub, with the details
+    above. Don't include personal information.</p>
+    <p class="status" id="feedback-status" aria-live="polite"></p>
+    <div class="intro-actions">
+      <button type="button" class="quiet" id="feedback-cancel">Cancel</button>
+      <button type="button" id="feedback-send">Send</button>
+    </div>
+  </div>
+</div>
 
 <script>
 // Jobs handed back for a re-upload of the same bytes (#120), by id. The
@@ -591,7 +629,7 @@ document.getElementById('intro-overlay').addEventListener('click', (e) => {
   if (e.target === document.getElementById('intro-overlay')) closeIntro();
 });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeIntro();
+  if (e.key === 'Escape') { closeIntro(); closeFeedback(); }
 });
 if (shouldAutoOpenIntro(location.search)) openIntro();
 
@@ -1335,6 +1373,91 @@ function render(id, job) {
 // does nothing. That is how the satellite toggle shipped inert.
 for (const layId of ['lay-stars', 'lay-solar', 'lay-dso', 'lay-con', 'lay-sat', 'lay-beyond'])
   document.getElementById(layId).addEventListener('change', draw);
+
+// Feedback (#137): a report or a suggestion, filed as a GitHub issue with
+// the context we would otherwise have to ask for. The context is shown
+// before it is sent, so nobody is surprised by what a public report
+// carries; the server adds what it knows about the job and the browser.
+function feedbackContext() {
+  const job = new URLSearchParams(location.search).get('job');
+  const r = (shownJob && shownJob.result) || {};
+  const ctx = { url: location.href, job: job || null };
+  if (shownJob) {
+    ctx.status = shownJob.status || null;
+    if (shownJob.error) ctx.error = shownJob.error;
+    if (r.failure && r.failure.reason) ctx.failure = r.failure.reason;
+    if (r.pointing) ctx.pointing = r.pointing;
+    if (r.match) ctx.match = r.match;
+    if (r.fov_bounds) ctx.fov_bounds = r.fov_bounds;
+    if (r.low_confidence) ctx.low_confidence = true;
+  }
+  ctx.userAgent = navigator.userAgent || null;
+  return ctx;
+}
+
+function openFeedback() {
+  document.getElementById('feedback-context').textContent =
+    JSON.stringify(feedbackContext(), null, 1);
+  document.getElementById('feedback-status').textContent = '';
+  document.getElementById('feedback-send').disabled = false;
+  document.getElementById('feedback-overlay').classList.add('open');
+  const text = document.getElementById('feedback-text');
+  if (typeof text.focus === 'function') text.focus();
+}
+
+function closeFeedback() {
+  const overlay = document.getElementById('feedback-overlay');
+  const wasOpen = overlay.classList.contains('open');
+  overlay.classList.remove('open');
+  // Hand focus back to the control that opened it, the way a dialog should.
+  const opener = document.getElementById('feedback-open');
+  if (wasOpen && typeof opener.focus === 'function') opener.focus();
+}
+
+async function sendFeedback() {
+  const text = document.getElementById('feedback-text').value.trim();
+  const status = document.getElementById('feedback-status');
+  const send = document.getElementById('feedback-send');
+  if (!text) {
+    status.textContent = 'Say what happened first.';
+    return;
+  }
+  send.disabled = true;
+  status.textContent = 'sending…';
+  try {
+    const res = await fetch('/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: text, context: feedbackContext() }),
+    });
+    if (!res.ok) {
+      status.textContent = 'could not send: ' + await refusalText(res);
+      send.disabled = false;
+      return;
+    }
+    const filed = await res.json();
+    status.replaceChildren();
+    status.append('Thanks — filed as ');
+    const a = document.createElement('a');
+    a.href = filed.url;
+    a.textContent = '#' + filed.number;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    status.append(a);
+    status.append('.');
+    document.getElementById('feedback-text').value = '';
+  } catch {
+    status.textContent = 'could not reach the site';
+    send.disabled = false;
+  }
+}
+
+document.getElementById('feedback-open').addEventListener('click', openFeedback);
+document.getElementById('feedback-cancel').addEventListener('click', closeFeedback);
+document.getElementById('feedback-send').addEventListener('click', sendFeedback);
+document.getElementById('feedback-overlay').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('feedback-overlay')) closeFeedback();
+});
 document.getElementById('mag-limit').addEventListener('input', () => {
   document.getElementById('mag-val').textContent =
     document.getElementById('mag-limit').value;

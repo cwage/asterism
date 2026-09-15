@@ -17,7 +17,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.routing import APIRoute
 
-from . import card, db, exif, sky_tags, stats
+from . import card, db, exif, feedback, sky_tags, stats
 
 app = FastAPI(title="asterism")
 db.init_db()
@@ -53,6 +53,7 @@ ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
 _upload_log = defaultdict(deque)  # client ip -> recent upload monotonic times
 _keep_log = defaultdict(deque)    # client ip -> recent keep monotonic times
+_feedback_log = defaultdict(deque)  # client ip -> recent feedback monotonic times
 # The sync handlers run in a thread pool, so two requests from one address
 # can race the check-then-append; the ceilings are meant to be hard.
 _limiter_lock = threading.Lock()
@@ -116,6 +117,11 @@ def _rate_limited(ip, now=None):
 def _keep_limited(ip, now=None):
     """Keeps (#113): KEEPS_PER_DAY in a sliding day."""
     return _window_limited(_keep_log, ip, KEEPS_PER_DAY, 86400, now)
+
+
+def _feedback_limited(ip, now=None):
+    """Feedback (#137): one report per address per cooldown."""
+    return _window_limited(_feedback_log, ip, 1, feedback.COOLDOWN_SECONDS, now)
 
 
 def _queue_depth():
@@ -455,6 +461,80 @@ def unkeep_job(job_id: str):
         ).rowcount:
             raise HTTPException(404, _GONE)
     return {"id": job_id, "kept": False}
+
+
+@app.post("/feedback")
+async def file_feedback(request: Request):
+    """File a visitor's report or suggestion as a GitHub issue (#137).
+
+    404 when no token is configured, like the admin endpoints: unset
+    means absent. The body is JSON: {description, context}, where context
+    is whatever the page knew (job id, status, the solve's pointing, the
+    URL). The server adds what it knows about that job from the database,
+    the user agent and the time, and files the lot as three fenced
+    sections. Text is capped, mentions are neutralised, one report per
+    address per minute, a global daily cap, and a failure upstream is a
+    generic 502 with the real error in the log (never the token)."""
+    if not feedback.enabled():
+        raise HTTPException(404, "Not Found")
+    # Bounded before it is parsed: nothing below should have to cope with
+    # a body the caller made as large as they liked.
+    body = b""
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > feedback.MAX_BODY_BYTES:
+            raise HTTPException(413, "that's a lot of report; keep it under 16KB")
+    try:
+        data = json.loads(body)
+    except Exception:
+        raise HTTPException(400, "send JSON")
+    if not isinstance(data, dict):
+        raise HTTPException(400, "send JSON")
+    description = str(data.get("description") or "").strip()
+    if not description:
+        raise HTTPException(400, "say what happened, or what you'd like")
+    description = description[:feedback.MAX_DESCRIPTION_CHARS]
+    context = data.get("context")
+    if not isinstance(context, dict):
+        context = {"context": str(context)[:feedback.MAX_CONTEXT_CHARS]} if context else {}
+    if _feedback_limited(_client_ip(request)):
+        raise HTTPException(429, "one report a minute; try again shortly")
+
+    # What the server knows about the job the page names, if any. Hidden
+    # rows are not there, exactly as they are not there to GET /jobs: a
+    # takedown must not be copyable into a public issue by its id.
+    job = None
+    job_id = context.get("job")
+    if isinstance(job_id, str) and re.fullmatch(r"[0-9a-f]{32}", job_id):
+        with db.get_conn() as conn:
+            row = conn.execute(
+                "SELECT status, error, created_at, featured, kept, result_json "
+                "FROM jobs WHERE id = ? AND hidden = 0", (job_id,)
+            ).fetchone()
+        if row:
+            result = json.loads(row["result_json"]) if row["result_json"] else {}
+            job = {"id": job_id, "status": row["status"], "error": row["error"],
+                   "created_at": row["created_at"],
+                   "featured": bool(row["featured"]), "kept": bool(row["kept"]),
+                   "failure": (result.get("failure") or {}).get("reason"),
+                   "match": result.get("match"), "fov_bounds": result.get("fov_bounds"),
+                   "pointing": result.get("pointing"),
+                   "attempts": len(result.get("attempts") or [])}
+        else:
+            job = {"id": job_id, "status": "no such job"}
+
+    with db.get_conn() as conn:
+        slot = feedback.reserve(conn)
+    if slot is None:
+        raise HTTPException(429, "the site has had its fill of reports for today; try tomorrow")
+    filed = await run_in_threadpool(
+        feedback.file_report, description, context,
+        request.headers.get("user-agent"), job)
+    if not filed:
+        with db.get_conn() as conn:
+            feedback.release(conn, slot)
+        raise HTTPException(502, "could not file the report right now")
+    return filed
 
 
 FEED_LIMIT = 24

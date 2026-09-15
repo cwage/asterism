@@ -278,6 +278,15 @@ def _label_everything(result, wcs_path, image_path, exif_info, job_id):
 
     labels = bodies + labels + dsos
 
+    # Where the solve put the frame, as one line of numbers (#137).
+    try:
+        result["pointing"] = solver.pointing(
+            wcs_path, exif_info["width"], exif_info["height"]
+        )
+    except Exception:
+        print(f"worker: pointing summary failed for {job_id}\n{traceback.format_exc()}")
+        result["pointing"] = None
+
     # How deep the photo reaches (#122) is measured against the whole
     # catalog, not the labelled bright end, so the answer is the sky's and
     # not the label budget's. Best-effort like the layers above.
