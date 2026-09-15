@@ -578,6 +578,10 @@ def _public_exif(exif_info):
     if not exif_info:
         return exif_info
     out = dict(exif_info)
+    # The phone's tilt and the pre-bake orientation (#115) are inputs to
+    # the place estimate, not results; the estimate is what gets shown.
+    out.pop("gravity", None)
+    out.pop("orientation", None)
     # NaN survives a json.dumps/loads round trip but not the strict encoder
     # Starlette serves responses with, so a single non-finite value stored
     # before exif.py learned to reject them 500s the whole payload. Null it

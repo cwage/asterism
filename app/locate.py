@@ -70,8 +70,10 @@ COUNTRY_NAMES = {
 # but the tag is reset by any tool that rotates the pixels first (an
 # export, a messaging app that kept the MakerNote), so the hold is read
 # from the tilt itself: which phone axis points skyward, and whether the
-# upright frame is portrait or landscape. The tag stays in the job record
-# (exif.read_exif) for traceability and nothing here depends on it.
+# upright frame is portrait or landscape. The pre-bake tag is consulted
+# for one thing only: the mirrored values, which the bake flips left to
+# right, and which no rear camera writes, so this is belt and braces.
+MIRRORED = {2, 4, 5, 7}
 _HOLDS = {
     "portrait": ((1, 0, 0), (0, -1, 0)),          # top of the phone up
     "portrait-inverted": ((-1, 0, 0), (0, 1, 0)),
@@ -96,7 +98,7 @@ def hold(up, width, height):
     return "landscape-right" if ux >= 0 else "landscape-left"
 
 
-def up_in_frame(gravity, width, height):
+def up_in_frame(gravity, width, height, orientation=None):
     """Where the zenith lies relative to the upright image, from the
     phone's gravity vector: ((dx, dy), zeta), a unit direction in image
     coordinates (x right, y down) and the angle in degrees from the frame
@@ -105,7 +107,8 @@ def up_in_frame(gravity, width, height):
 
     The vector is in the phone's frame (X right, Y up, Z toward the
     user); the rear camera looks along -Z, so the zenith is in front of
-    the camera when up has a -Z component."""
+    the camera when up has a -Z component. `orientation` is the pre-bake
+    tag, used only to undo a mirrored bake's left-right flip."""
     g = np.asarray(gravity, dtype=float)
     norm = float(np.linalg.norm(g))
     if not math.isfinite(norm) or norm == 0.0:
@@ -116,6 +119,8 @@ def up_in_frame(gravity, width, height):
         return None
     right, down = _HOLDS[hold(up, width, height)]
     dx, dy = float(np.dot(up, right)), float(np.dot(up, down))
+    if orientation in MIRRORED:
+        dx = -dx
     span = math.hypot(dx, dy)
     if span < 1e-9:
         dx, dy = 0.0, -1.0  # straight up: the direction no longer matters
@@ -136,12 +141,12 @@ def _radec(v):
     return ra, dec
 
 
-def zenith(wcs, width, height, gravity):
+def zenith(wcs, width, height, gravity, orientation=None):
     """The zenith's (ra, dec): from the frame centre, `zeta` degrees along
     the great circle that leaves the centre in the image direction the
     tilt gives. The WCS supplies both points on that circle, so any
     flip or rotation in the solve is already accounted for."""
-    tilt = up_in_frame(gravity, width, height)
+    tilt = up_in_frame(gravity, width, height, orientation)
     if tilt is None:
         return None
     (dx, dy), zeta = tilt
@@ -330,7 +335,7 @@ def estimate(wcs_path, width, height, exif_info):
     if lat is not None and lon is not None:
         regions, sea = name_box(lat, lon, GPS_HALF_DEG, GPS_HALF_DEG)
         return {"source": "gps", "lat": round(lat, 1), "lon": round(lon, 1),
-                "error_deg": GPS_HALF_DEG, "zone": None, "regions": regions,
+                "error_deg": GPS_HALF_DEG, "regions": regions,
                 "sea": sea, "reason": None}
 
     gravity = exif_info.get("gravity")
@@ -341,12 +346,14 @@ def estimate(wcs_path, width, height, exif_info):
 
     with fits.open(wcs_path) as hdul:
         wcs = WCS(hdul[0].header)
-    z = zenith(wcs, width, height, gravity)
+    z = zenith(wcs, width, height, gravity, exif_info.get("orientation"))
     if z is None:
         return {"source": "tilt", "reason": "camera aimed below the horizontal"}
     ra, dec = z
+    # The zone the clock check resolved stays out of the dict: the job
+    # record is public, and the estimate is the only location it carries.
     out = {"source": "tilt", "lat": round(dec, 1), "lon": None,
-           "error_deg": TILT_ERROR_DEG, "zone": None, "regions": None,
+           "error_deg": TILT_ERROR_DEG, "regions": None,
            "sea": None, "reason": None}
     when_utc, source = ephemeris.resolve_utc(exif_info)
     delta = ephemeris._parse_offset(exif_info.get("offset_time_original"))
@@ -357,8 +364,7 @@ def estimate(wcs_path, width, height, exif_info):
     lon = _wrap(ra - gmst)
     out["lon"] = round(lon, 1)
     half_lon = TILT_ERROR_DEG / max(0.2, math.cos(math.radians(dec)))
-    agrees, zone = _clock_agrees(dec, lon, TILT_ERROR_DEG, half_lon, when_utc, delta)
-    out["zone"] = zone
+    agrees, _zone = _clock_agrees(dec, lon, TILT_ERROR_DEG, half_lon, when_utc, delta)
     if not agrees:
         out["reason"] = "clock disagrees with the tilt"
         return out

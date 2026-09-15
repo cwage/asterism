@@ -212,8 +212,11 @@ def read_exif(path, orientation=None):
     exposure_seconds, lat, lon, heading, heading_ref, width, height, gravity, orientation}.
 
     `orientation` is the tag's value before normalize_orientation baked it
-    into the pixels; the tilt vector (gravity) is in the phone's frame,
-    and that value is what relates it to the upright image."""
+    into the pixels, recorded for traceability: the upright image already
+    has the rotation applied, so nothing applies it again. locate reads
+    the hold from the tilt vector (gravity, in the phone's frame) and the
+    image's shape, and consults this value only to undo a mirrored
+    bake's left-right flip."""
     info = {
         "fov_bounds": DEFAULT_FOV_BOUNDS,
         "fov_deg": None,

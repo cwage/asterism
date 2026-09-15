@@ -616,3 +616,11 @@ def test_no_makernote_means_no_tilt(tmp_path):
     info = exif.read_exif(path)
     assert info["gravity"] is None and info["orientation"] == 1
     assert exif.orientation(tmp_path / "missing.jpg") == 1
+
+
+def test_public_exif_keeps_the_tilt_to_itself():
+    from app import main
+    out = main._public_exif({"lat": 36.1627, "lon": -86.7816, "gravity": [0.0, -0.9, 0.4],
+                             "orientation": 6, "exposure_seconds": 2.0})
+    assert "gravity" not in out and "orientation" not in out
+    assert out["exposure_seconds"] == 2.0

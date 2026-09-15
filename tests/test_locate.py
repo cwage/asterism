@@ -69,6 +69,10 @@ def test_the_hold_is_read_from_the_tilt_and_the_frame_shape():
         assert locate.hold([-v for v in g], HEIGHT, WIDTH) == name
         (dx, dy), _ = locate.up_in_frame(g, HEIGHT, WIDTH)
         assert (dx, dy) == pytest.approx((0.0, -1.0), abs=1e-9), name
+    # a mirrored bake (no rear camera writes one) flips left and right
+    (dx, dy), _ = locate.up_in_frame(_portrait_gravity(45.0, lean_deg=20.0), WIDTH, HEIGHT, orientation=2)
+    (mx, my), _ = locate.up_in_frame(_portrait_gravity(45.0, lean_deg=20.0), WIDTH, HEIGHT, orientation=6)
+    assert (dx, dy) == pytest.approx((-mx, my))
     # a square crop goes by whichever phone axis is nearer the sky
     assert locate.hold((0.2, 0.9, -0.4), 1000, 1000) == "portrait"
     assert locate.hold((0.2, -0.9, -0.4), 1000, 1000) == "portrait-inverted"
@@ -136,7 +140,7 @@ def test_a_sydney_evening_comes_back_as_new_south_wales(tmp_path):
     assert place["source"] == "tilt"
     assert place["lat"] == pytest.approx(-33.9, abs=0.2)
     assert place["lon"] == pytest.approx(151.2, abs=0.2)
-    assert place["zone"] == "Australia/Sydney"
+    assert "zone" not in place  # resolved for the clock check, never published
     assert "New South Wales, in Australia" in place["regions"]
     assert place["line"] == ("The phone recorded its tilt, so sky geometry puts this near "
                              f"34°S, 151°E: {place['regions']}.")
