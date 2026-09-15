@@ -16,7 +16,7 @@ test('a failed solve shows the photo', () => {
   sandbox.renderFailure('j9', FAILED_JOB);
   assert.equal(els.photo.hidden, false);
   assert.ok(els.photo.src.includes('/jobs/j9/image'), els.photo.src);
-  assert.equal(els.wrap.style.display, 'inline-block');
+  assert.equal(els.wrap.style.display, 'block');
 });
 
 test('a failure narration leads the failure panel', () => {

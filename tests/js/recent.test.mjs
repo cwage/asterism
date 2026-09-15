@@ -258,7 +258,7 @@ test('a successful deepen immediately updates the saved job to queued', async ()
   s.fetch = async () => response({ status: 'queued' });
   let polled;
   s.poll = id => { polled = id; };
-  await page.els.actions.children[0].onclick();
+  await page.els['fail-actions'].children[0].onclick();
   assert.equal(polled, A);
   assert.match(states(page)[0], /^Queued/);
 });
@@ -320,7 +320,7 @@ for (const status of [404, 410, 503]) {
     page.sandbox.rememberUpload(A, 'night.jpg', 100, 'failed');
     page.sandbox.renderFailure(A, { ...failed, result: { failure: { can_deepen: true } } });
     page.sandbox.fetch = async () => ({ ok: false, status, text: async () => 'unavailable' });
-    await page.els.actions.children[0].onclick();
+    await page.els['fail-actions'].children[0].onclick();
     assert.equal(stored(page).length, status === 503 ? 1 : 0);
     assert.match(page.els.status.textContent, /could not restart job/);
   });
