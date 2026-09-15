@@ -272,6 +272,10 @@ async def create_job(request: Request, image: UploadFile):
         device = exif.read_device(image_path)
     except Exception:
         device = None
+    # Everything the pipeline wants is in exif_info and device now, so the
+    # served file keeps nothing but pixels and colour (#117): no phone
+    # model, no software, no MakerNote, no clock. Lossless where it can be.
+    exif.strip_metadata(image_path)
     with db.get_conn() as conn:
         # Look for the same bytes once more, holding the write lock this
         # time: two sends of one frame seconds apart both pass the check

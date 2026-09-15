@@ -367,10 +367,13 @@ job row keeps instead:
   the day is live the salt is in the database beside the tokens, so a copy
   taken that day could test candidate addresses against them. The promise is
   that yesterday is unrecoverable, not that today is.
-- `device_json` — camera make, model and software from the file's own EXIF.
-  The served file carries these already (#117 is about that); they are kept
-  out of `exif_json`, which `/jobs/{id}` serves, so they never reach a public
-  payload.
+- `device_json` — camera make, model and software from the file's own EXIF,
+  kept out of `exif_json`, which `/jobs/{id}` serves, so they never reach a
+  public payload. The served file no longer carries them either (#117):
+  once the upload path has read what it wants, the whole EXIF block is
+  dropped from the stored file, phone model, software, MakerNote and clock
+  included, leaving the pixels and their colour profile. Lossless segment
+  surgery for JPEGs; a file that resists it is re-encoded without EXIF.
 
 The retention sweep folds every expiring row into `daily_stats` (uploads,
 solved, failed by reason, hidden, per UTC day of upload) and the day's distinct

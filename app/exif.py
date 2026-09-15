@@ -493,3 +493,36 @@ def strip_gps(path):
         return _strip_gps_piexif(path)
     except Exception:
         return _strip_gps_pillow(path)
+
+
+def strip_metadata(path):
+    """Drop the whole EXIF block from the stored file, in place (#117).
+
+    Called last on the upload path, once read_exif() and read_device()
+    have taken what the pipeline wants into the job record: the served
+    file then carries no camera make, model or software, no MakerNote
+    with the phone's tilt, no timestamp, only the pixels and their colour
+    profile. Segment surgery through piexif, so the pixels are untouched;
+    a file piexif cannot parse (a PNG, an odd EXIF block) is re-encoded
+    through Pillow without any EXIF instead, the same lossy fallback the
+    GPS strip takes. Returns whether the file changed. Never raises: the
+    GPS strip and has_location() already guard what must not be served,
+    and the rest is hygiene, not a reason to refuse an upload."""
+    try:
+        import piexif
+
+        piexif.remove(path)
+        return True
+    except Exception:
+        pass
+    try:
+        with Image.open(path) as img:
+            fmt = img.format
+            if not img.getexif():
+                return False
+            icc = img.info.get("icc_profile")
+            img.load()
+            img.save(path, format=fmt, quality=95, icc_profile=icc)
+        return True
+    except Exception:
+        return False
