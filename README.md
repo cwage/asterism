@@ -390,6 +390,19 @@ never deleted and are counted once (`jobs.counted`). Read it back with:
 fly ssh console -C "python3 -c 'from app import db, stats; import json; conn = db.get_conn(); print(json.dumps(stats.history(conn, 30), indent=1))'"
 ```
 
+The numbers behind every finished solve survive the sweep too (#99):
+`solve_stats` keeps one row per job with no image data — log-odds and match
+count, the pre-solve star count, which scale tier won and how many were
+tried, wall seconds, the EXIF field against the fitted one, how many labels
+verified and how many hid, the limiting magnitude, the time source, whether
+the phone recorded its tilt, and the camera make. Every threshold in the
+solver was set from a handful of photos; this is where the distribution to
+set them from accumulates. Read it back with:
+
+```
+fly ssh console -C "python3 -c 'from app import db, stats; import json; conn = db.get_conn(); print(json.dumps(stats.solve_history(conn, 30), indent=1))'"
+```
+
 Within the retention window the live rows answer the sharper question — which
 of the last day's uploads came from the same address:
 

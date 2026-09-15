@@ -379,6 +379,9 @@ def _label_everything(result, wcs_path, image_path, exif_info, job_id):
 
     return result
 
+_stars_detected = {}  # job id -> pre-solve star count, until the row is written
+
+
 def process(job):
     exif_info = json.loads(job["exif_json"])
     out_dir = os.path.join(db.DATA_DIR, "jobs", job["id"])
@@ -389,6 +392,7 @@ def process(job):
     if mode != "deep":
         # Checkpoint 1: don't invoke the solver at all on zero-star images.
         n = verify.count_stars(job["image_path"])
+        _stars_detected[job["id"]] = n  # for the solve record (#99)
         if n is not None and n < PRECHECK_MIN_STARS:
             result = {"success": False, "attempts": [], "total_seconds": 0.0,
                       "failure": {"reason": "no_stars", "stars_detected": n,
@@ -563,6 +567,9 @@ def main():
         except Exception:
             status, result, error = "failed", None, traceback.format_exc()[-2000:]
 
+        if result is not None and job["id"] in _stars_detected:
+            result["stars_detected"] = _stars_detected[job["id"]]
+        _stars_detected.pop(job["id"], None)
         with db.get_conn() as conn:
             conn.execute(
                 "UPDATE jobs SET status = ?, result_json = ?, error = ?, solve_seconds = ? "
@@ -575,6 +582,15 @@ def main():
                     job["id"],
                 ),
             )
+            # Keep the numbers, not the photo (#99): the row outlives the
+            # sweep. Best-effort, and outside the job's own write so a bad
+            # record can't cost a finished solve.
+            try:
+                exif_info = json.loads(job["exif_json"]) if job["exif_json"] else {}
+                device = json.loads(job["device_json"]) if "device_json" in job.keys() and job["device_json"] else {}
+                stats.record_solve(conn, job, status, result, exif_info, device)
+            except Exception:
+                print(f"worker: solve record failed for {job['id']}\n{traceback.format_exc()}")
         print(f"worker: {job['id']} -> {status}")
 
 
