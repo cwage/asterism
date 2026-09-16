@@ -27,10 +27,11 @@ test('a narration outranks the static advice copy — never both', () => {
               narration: { text: 'A quick snap of a dark sky.' } },
   });
   // The narration is prompted to build on the advice diagnosis, so showing
-  // both would say the same thing twice in adjacent paragraphs.
-  assert.equal(els.advice.children.length, 1);
-  assert.equal(els.advice.children[0].textContent,
-               'A quick snap of a dark sky.');
+  // both would say the same thing twice in adjacent paragraphs. The only
+  // other child is the link to the photo tips.
+  const paragraphs = els.advice.children.filter((c) => c.className !== 'tips-link');
+  assert.equal(paragraphs.length, 1);
+  assert.equal(paragraphs[0].textContent, 'A quick snap of a dark sky.');
 });
 
 test('every worker advice code has real copy', () => {
@@ -53,12 +54,12 @@ test('an unknown advice code renders nothing rather than guessing', () => {
   assert.ok(panelEmpty(els.advice));
 });
 
-test('a failure without advice leaves the panel empty', () => {
+test('a failure without advice offers only the tips link', () => {
   const { sandbox, els } = loadPage();
   sandbox.renderFailure('j1', {
     error: 'no solution',
     result: { failure: { reason: 'no_match',
                          guess_unavailable: 'no_timestamp' } },
   });
-  assert.ok(panelEmpty(els.advice));
+  assert.deepEqual(els.advice.children.map((c) => c.className), ['tips-link']);
 });

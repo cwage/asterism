@@ -112,12 +112,13 @@ export function loadPage(options = {}) {
   const store = options.store || {};
   const clipboard = [];  // everything the page wrote, in order
   const revoked = [];    // object URLs the page released, in order
+  // The document is an element too, as far as listeners go: the page hangs
+  // its Escape handler there, and a test dispatches to it the same way.
+  const doc = makeEl();
+  doc.getElementById = (id) => (els[id] ??= makeEl());
+  doc.createElement = () => makeEl();
   const sandbox = {
-    document: {
-      getElementById: (id) => (els[id] ??= makeEl()),
-      createElement: () => makeEl(),
-      addEventListener() {},
-    },
+    document: doc,
     localStorage: {
       get length() { return Object.keys(store).length; },
       key: i => Object.keys(store)[i] ?? null,
