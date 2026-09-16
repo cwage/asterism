@@ -38,7 +38,8 @@
      notice the "?" it replaced (#74). Opens the same explainer that shows
      itself once on a first visit. */
   header { position: relative; }
-  .about-open { position: absolute; top: 0; right: 0; cursor: pointer;
+  .header-links { position: absolute; top: 0; right: 0; display: flex; gap: 0.4rem; }
+  .about-open { cursor: pointer;
                 border: 1px solid var(--line); border-radius: 999px;
                 background: none; color: var(--dim); font: inherit;
                 font-size: 0.8rem; padding: 0.25rem 0.7rem; }
@@ -60,6 +61,15 @@
   .intro h2 { margin: 0 0 0.6rem; font-size: 1.15rem; font-weight: 500; }
   .intro p { margin: 0.7rem 0; color: var(--dim); font-size: 0.95rem; }
   .intro .best { color: var(--ink); }
+  /* Photo tips: one line per point, the lead in ink and the rest dim, so
+     the eye can skim the leads without reading the paragraphs. */
+  .intro ul { margin: 0.7rem 0; padding-left: 1.2rem; color: var(--dim); font-size: 0.95rem; }
+  .intro li { margin: 0.5rem 0; }
+  .intro li b { color: var(--ink); font-weight: 500; }
+  #advice .tips-link { margin: 0.5rem 0 0; font-size: 0.85rem; }
+  #advice .tips-link button { cursor: pointer; font: inherit; font-size: inherit;
+                              background: none; border: none; padding: 0;
+                              color: var(--accent); text-decoration: underline; }
   .intro-actions { margin: 1rem 0 0; display: flex; justify-content: flex-end; }
   .intro-actions button { cursor: pointer; font: inherit;
                           border: 1px solid var(--accent); border-radius: 8px;
@@ -260,7 +270,10 @@
   <h1><a href="/">asterism</a></h1>
   <p class="tag">Upload a photo of the night sky — get back a labelled map of
   what you were looking at.</p>
-  <button type="button" class="about-open" id="about-open">What is this?</button>
+  <div class="header-links">
+    <button type="button" class="about-open" id="about-open">What is this?</button>
+    <button type="button" class="about-open" id="tips-open">Photo tips</button>
+  </div>
 </header>
 
 <!-- Shown once on a first visit, and any time via "What is this?". Kept
@@ -279,6 +292,42 @@
     it does.</p>
     <div class="intro-actions">
       <button type="button" id="intro-close">Got it</button>
+    </div>
+  </div>
+</div>
+
+<!-- Photo tips: the failure panel's retry advice, offered before the
+     failure. Never shown unprompted — opened from the header, or from a
+     failed solve's explanation. Phone-only on purpose: ISO, RAW and
+     shutter speed are the enthusiast tier, and a wall of them would be
+     the #74 wall again. -->
+<div class="intro-overlay" id="tips-overlay">
+  <div class="intro" role="dialog" aria-modal="true" aria-labelledby="tips-title">
+    <h2 id="tips-title">Taking a photo the solver can read</h2>
+    <p>The solver needs stars in the pixels, not just in the sky. A few
+    seconds of exposure makes more difference than anything else.</p>
+    <ul>
+      <li><b>Use night mode.</b> iPhone: Night mode comes on by itself in the
+      dark (the yellow moon icon) — tap it and drag the slider to the longest
+      time it offers. Pixel: Night Sight, which switches to Astrophotography
+      on its own once the phone is still. Samsung: Night mode.</li>
+      <li><b>Hold still — any way you can.</b> A tripod is ideal, but a
+      phone leaned against a wall, laid flat on a car roof, wedged in a shoe,
+      or pressed into a beanbag or a bag of rice works too. Use the timer or
+      a volume button so the tap doesn't shake it.</li>
+      <li><b>Zoom out, not in.</b> The main lens or the ultrawide, with no
+      digital zoom: more sky in the frame means more stars to match.</li>
+      <li><b>Get away from lights.</b> A streetlight in the frame flattens the
+      sky. Haze, suburbs, and a bit of glow are fine — a dark sky helps, but
+      the long exposure matters more.</li>
+      <li><b>Mind the Moon and the clouds.</b> A bright Moon or thin cloud
+      washes out everything fainter. Another hour, or another night.</li>
+      <li><b>Upload the original.</b> Screenshots, edits, and photos passed
+      through a messaging app lose the camera's notes about when and how the
+      shot was taken — the solver uses those to explain what it sees.</li>
+    </ul>
+    <div class="intro-actions">
+      <button type="button" id="tips-close">Got it</button>
     </div>
   </div>
 </div>
@@ -407,6 +456,20 @@ function openIntro() {
 function closeIntro() {
   document.getElementById('intro-overlay').classList.remove('open');
   markIntroSeen();
+}
+
+// Photo tips: the same dressing as the explainer, minus the first-visit
+// auto-open. Nothing is remembered; it opens on request only.
+function openTips() {
+  document.getElementById('tips-overlay').classList.add('open');
+}
+
+function closeTips() {
+  const overlay = document.getElementById('tips-overlay');
+  const wasOpen = overlay.classList.contains('open');
+  overlay.classList.remove('open');
+  const opener = document.getElementById('tips-open');
+  if (wasOpen && typeof opener.focus === 'function') opener.focus();
 }
 
 // A shared result link is someone answering "what is this" for you — the
@@ -671,8 +734,13 @@ document.getElementById('intro-overlay').addEventListener('click', (e) => {
   // Backdrop only: a click inside the dialog must not dismiss it.
   if (e.target === document.getElementById('intro-overlay')) closeIntro();
 });
+document.getElementById('tips-open').addEventListener('click', openTips);
+document.getElementById('tips-close').addEventListener('click', closeTips);
+document.getElementById('tips-overlay').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('tips-overlay')) closeTips();
+});
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') { closeIntro(); closeFeedback(); }
+  if (e.key === 'Escape') { closeIntro(); closeTips(); closeFeedback(); }
 });
 if (shouldAutoOpenIntro(location.search)) openIntro();
 
@@ -836,6 +904,20 @@ function renderAdvice(code) {
   if (copy) renderLead(copy);
 }
 
+// Every failure, diagnosed or not, ends with the way to the photo tips: the
+// per-diagnosis copy above stays self-contained (a failure page shouldn't
+// need a second click), and the dialog is the fuller reference behind it.
+function renderTipsLink() {
+  const p = document.createElement('p');
+  p.className = 'tips-link';
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.textContent = 'How to take a photo the solver can read';
+  b.addEventListener('click', openTips);
+  p.append(b);
+  document.getElementById('advice').append(p);
+}
+
 function renderFailure(id, job) {
   const f = job.result && job.result.failure;
   status('solve failed', id);
@@ -847,6 +929,7 @@ function renderFailure(id, job) {
   const narration = job.result && job.result.narration;
   if (narration && narration.text) renderLead(narration.text);
   else if (f && f.advice) renderAdvice(f.advice);
+  renderTipsLink();
   if (f && f.guess) renderGuess(job, f.guess);
   else if (f && f.guess_unavailable) renderNoGuess(f.guess_unavailable);
   // The solver's own account, demoted to a footnote: field widths and
