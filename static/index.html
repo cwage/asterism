@@ -39,6 +39,11 @@
      itself once on a first visit. */
   header { position: relative; }
   .header-links { position: absolute; top: 0; right: 0; display: flex; gap: 0.4rem; }
+  /* Two buttons no longer fit beside the wordmark on a narrow phone; drop
+     them under the tagline instead of over the title. */
+  @media (max-width: 30rem) {
+    .header-links { position: static; margin-top: 0.6rem; }
+  }
   .about-open { cursor: pointer;
                 border: 1px solid var(--line); border-radius: 999px;
                 background: none; color: var(--dim); font: inherit;
@@ -459,8 +464,13 @@ function closeIntro() {
 }
 
 // Photo tips: the same dressing as the explainer, minus the first-visit
-// auto-open. Nothing is remembered; it opens on request only.
-function openTips() {
+// auto-open. Nothing is remembered; it opens on request only — from the
+// header, or from a failure's explanation, and closing hands focus back to
+// whichever of those opened it so a keyboard user keeps their place.
+let tipsOpener = null;
+
+function openTips(opener) {
+  tipsOpener = opener || document.getElementById('tips-open');
   document.getElementById('tips-overlay').classList.add('open');
 }
 
@@ -468,8 +478,8 @@ function closeTips() {
   const overlay = document.getElementById('tips-overlay');
   const wasOpen = overlay.classList.contains('open');
   overlay.classList.remove('open');
-  const opener = document.getElementById('tips-open');
-  if (wasOpen && typeof opener.focus === 'function') opener.focus();
+  if (wasOpen && tipsOpener && typeof tipsOpener.focus === 'function') tipsOpener.focus();
+  tipsOpener = null;
 }
 
 // A shared result link is someone answering "what is this" for you — the
@@ -734,7 +744,7 @@ document.getElementById('intro-overlay').addEventListener('click', (e) => {
   // Backdrop only: a click inside the dialog must not dismiss it.
   if (e.target === document.getElementById('intro-overlay')) closeIntro();
 });
-document.getElementById('tips-open').addEventListener('click', openTips);
+document.getElementById('tips-open').addEventListener('click', () => openTips());
 document.getElementById('tips-close').addEventListener('click', closeTips);
 document.getElementById('tips-overlay').addEventListener('click', (e) => {
   if (e.target === document.getElementById('tips-overlay')) closeTips();
@@ -913,7 +923,7 @@ function renderTipsLink() {
   const b = document.createElement('button');
   b.type = 'button';
   b.textContent = 'How to take a photo the solver can read';
-  b.addEventListener('click', openTips);
+  b.addEventListener('click', () => openTips(b));
   p.append(b);
   document.getElementById('advice').append(p);
 }
