@@ -8,7 +8,8 @@ import time
 import traceback
 
 from . import (beyond, constellations, db, dso, ephemeris, locate, lore,
-               narrate, night, notify, satellites, solver, stats, verify)
+               narrate, night, notify, satellites, solver, stats, streaks,
+               verify)
 
 # Below this many detected star-like sources, a quick job fails fast
 # instead of burning cpulimit tiers on daylight/food/pitch-black uploads.
@@ -321,11 +322,23 @@ def _label_everything(result, wcs_path, image_path, exif_info, job_id):
         print(f"worker: satellites failed for {job_id}\n{traceback.format_exc()}")
         sats = {"skipped": "satellite lookup failed"}
 
+    # Streaks in the pixels — a meteor, or a satellite the layer above
+    # predicted — found and explained. Best-effort like the rest.
+    try:
+        found = streaks.annotate(
+            image_path, wcs_path, exif_info["width"], exif_info["height"],
+            exif_info, sats
+        )
+    except Exception:
+        print(f"worker: streak detection failed for {job_id}\n{traceback.format_exc()}")
+        found = {"streaks": [], "error": "streak detection failed"}
+
     result["labels"] = labels
     result["ephemeris"] = eph_meta
     result["constellations"] = figures
     result["verification"] = verification
     result["satellites"] = sats
+    result["streaks"] = found
 
     # Bright objects just outside the frame (#118), best-effort like the
     # layers above, and before the narration so the model is told what

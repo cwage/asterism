@@ -235,3 +235,25 @@ def test_lore_reaches_the_model_as_its_own_list():
     client = FakeClient()
     narrate.annotate(RESULT, client=client)
     assert json.loads(client.calls[0]["messages"][0]["content"])["lore"] == []
+
+
+def test_payload_carries_streak_verdicts_not_pixels():
+    result = dict(RESULT, streaks={"streaks": [
+        {"start": [10.0, 20.0], "end": [300.0, 400.0], "profile": [1, 2, 3],
+         "kind": "meteor", "confidence": "medium", "length_deg": 5.21,
+         "shower": None, "reasons": ["fades in, brightens along its path, and stops"]},
+        {"start": [0.0, 0.0], "end": [50.0, 50.0], "kind": "satellite",
+         "confidence": "high", "length_deg": 2.0,
+         "satellite": {"name": "ISS (ZARYA)", "norad_id": "25544"},
+         "reasons": ["lies on the computed track of ISS (ZARYA)"]},
+    ]})
+    payload = narrate._payload(result)
+    assert payload["streaks"] == [
+        {"kind": "meteor", "confidence": "medium", "length_deg": 5.21,
+         "reasons": ["fades in, brightens along its path, and stops"]},
+        {"kind": "satellite", "confidence": "high", "length_deg": 2.0,
+         "satellite": "ISS (ZARYA)",
+         "reasons": ["lies on the computed track of ISS (ZARYA)"]},
+    ]
+    assert "profile" not in json.dumps(payload)
+    assert narrate._payload(RESULT)["streaks"] == []

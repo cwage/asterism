@@ -376,6 +376,7 @@
   <label><input type="checkbox" id="lay-dso" checked> <i class="swatch" style="--c: rgb(200, 160, 255)"></i>deep-sky</label>
   <label><input type="checkbox" id="lay-con" checked> <i class="swatch line" style="--c: rgb(150, 170, 210)"></i>constellations</label>
   <label><input type="checkbox" id="lay-sat" checked> <i class="swatch line dashed" style="--c: rgb(140, 230, 190)"></i>satellites</label>
+  <label><input type="checkbox" id="lay-streak" checked> <i class="swatch line" style="--c: rgb(255, 120, 170)"></i>streaks</label>
   <label><input type="checkbox" id="lay-beyond" checked> <i class="swatch arrow" style="--c: rgb(255, 140, 110)"></i>beyond the frame</label>
   <label class="mag">faintest star: mag
     <input type="range" id="mag-limit" min="1" max="4.5" step="0.25" value="4.5">
@@ -1112,6 +1113,28 @@ function labelPriority(l) {
 
 let shownJob = null;
 
+// What to call a detected streak on the overlay: the verdict, and the
+// name when there is one (a shower, a satellite). A verdict the worker
+// holds at low confidence is just a streak on the overlay; the status
+// line carries the hedge.
+function streakName(s) {
+  if (s.kind === 'satellite' && s.satellite) return s.satellite.name;
+  if (s.kind === 'meteor' && s.shower) return `${s.shower.name} meteor`;
+  if (s.confidence === 'low') return 'streak';
+  return s.kind === 'unknown' ? 'streak' : s.kind;
+}
+
+// ...and in the status line, with the doubt spelled out.
+function streakSummary(s) {
+  const len = s.length_deg != null ? ` ${s.length_deg.toFixed(1)}°` : '';
+  if (s.kind === 'unknown') return `a${len} streak of unknown origin`;
+  let what = s.kind === 'meteor'
+    ? (s.shower ? `${s.shower.name} meteor` : 'sporadic meteor')
+    : (s.satellite ? s.satellite.name : 'satellite');
+  if (s.confidence === 'low') return `a${len} streak (possibly a ${what})`;
+  return `a${len} ${what}${s.confidence === 'high' ? '' : ' (likely)'}`;
+}
+
 function controlState() {
   return {
     stars: document.getElementById('lay-stars').checked,
@@ -1119,6 +1142,7 @@ function controlState() {
     dso: document.getElementById('lay-dso').checked,
     constellations: document.getElementById('lay-con').checked,
     satellites: document.getElementById('lay-sat').checked,
+    streaks: document.getElementById('lay-streak').checked,
     beyond: document.getElementById('lay-beyond').checked,
     magLimit: parseFloat(document.getElementById('mag-limit').value),
   };
@@ -1180,6 +1204,45 @@ function draw() {
       satNames.push({ name: c.name, x: mid[0], y: mid[1] });
     }
     ctx.setLineDash([]);
+  }
+
+  // Streaks found in the pixels: drawn solid, since unlike the computed
+  // satellite tracks these are what the sensor actually recorded. A
+  // meteor gets an arrowhead at the end it burned out toward.
+  const streakNames = [];
+  if (state.streaks) {
+    const found = ((shownJob.result.streaks || {}).streaks || []);
+    ctx.strokeStyle = 'rgba(255, 120, 170, 0.85)';
+    ctx.fillStyle = 'rgba(255, 120, 170, 0.85)';
+    ctx.lineWidth = Math.max(1, 1.5 * scale);
+    ctx.setLineDash([]);
+    for (const s of found) {
+      const [x0, y0] = s.start, [x1, y1] = s.end;
+      const len = Math.hypot(x1 - x0, y1 - y0);
+      if (!len) continue;
+      // Sit the line just beside the streak rather than on top of it, so
+      // the thing itself stays visible: offset along the perpendicular.
+      const off = Math.max(6, 7 * scale);
+      const nx = -(y1 - y0) / len * off, ny = (x1 - x0) / len * off;
+      for (const sign of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(x0 + sign * nx, y0 + sign * ny);
+        ctx.lineTo(x1 + sign * nx, y1 + sign * ny);
+        ctx.stroke();
+      }
+      if (s.kind === 'meteor' && s.confidence !== 'low') {
+        const ah = Math.max(8, 10 * scale);
+        const ux = (x1 - x0) / len, uy = (y1 - y0) / len;
+        ctx.beginPath();
+        ctx.moveTo(x1 + ux * ah, y1 + uy * ah);
+        ctx.lineTo(x1 - uy * ah * 0.6, y1 + ux * ah * 0.6);
+        ctx.lineTo(x1 + uy * ah * 0.6, y1 - ux * ah * 0.6);
+        ctx.closePath();
+        ctx.fill();
+      }
+      streakNames.push({ name: streakName(s), x: (x0 + x1) / 2, y: (y0 + y1) / 2,
+                         nx, ny });
+    }
   }
 
   // Markers first; their footprints seed the keep-clear zones.
@@ -1257,6 +1320,22 @@ function draw() {
       { x: s.x - w / 2, y: s.y + h },
     ], w, h, W, H);
     if (spot) ctx.fillText(s.name, spot.x, spot.y + satPx * 0.85);
+  }
+
+  // Streak names sit beside their line, on whichever side has room.
+  const streakPx = Math.max(12, 14 * scale);
+  ctx.font = `${streakPx}px system-ui`;
+  ctx.fillStyle = 'rgba(255, 120, 170, 0.9)';
+  for (const s of streakNames) {
+    const w = ctx.measureText(s.name).width;
+    const h = streakPx * 1.2;
+    const gap = 2.2;
+    const spot = placeText(placed, [
+      { x: s.x + s.nx * gap - w / 2, y: s.y + s.ny * gap - h / 2 },
+      { x: s.x - s.nx * gap - w / 2, y: s.y - s.ny * gap - h / 2 },
+      { x: s.x - w / 2, y: s.y + h },
+    ], w, h, W, H);
+    if (spot) ctx.fillText(s.name, spot.x, spot.y + streakPx * 0.85);
   }
 
   // Bright objects just outside the frame (#118): an arrow where the line
@@ -1471,6 +1550,7 @@ function render(id, job) {
     if (figures.length) parts.push(`${figures.length} constellation${figures.length === 1 ? '' : 's'}`);
     const crossings = ((job.result.satellites || {}).crossings || []).length;
     if (crossings) parts.push(`${crossings} satellite crossing${crossings === 1 ? '' : 's'}`);
+    for (const s of ((job.result.streaks || {}).streaks || [])) parts.push(streakSummary(s));
     const beyond = (job.result.beyond || []).length;
     if (beyond) parts.push(`${beyond} just outside the frame`);
     const notes = [];
@@ -1522,7 +1602,7 @@ function render(id, job) {
 // One entry per checkbox controlState() reads: a layer missing here still
 // gates draw() correctly but never triggers one, so its checkbox silently
 // does nothing. That is how the satellite toggle shipped inert.
-for (const layId of ['lay-stars', 'lay-solar', 'lay-dso', 'lay-con', 'lay-sat', 'lay-beyond'])
+for (const layId of ['lay-stars', 'lay-solar', 'lay-dso', 'lay-con', 'lay-sat', 'lay-streak', 'lay-beyond'])
   document.getElementById(layId).addEventListener('change', draw);
 
 // The photo's frame takes its width from the viewport-height cap, the
