@@ -28,6 +28,10 @@ export function makeCtx() {
                      strokeStyle: ctx.strokeStyle, dashed: ctx._dash.length > 0,
                      alpha: ctx.globalAlpha });
     },
+    closePath() { if (ctx._path) ctx._path.push(['closePath']); },
+    fill() {
+      ctx.ops.push({ op: 'fill', path: ctx._path || [], fillStyle: ctx.fillStyle });
+    },
     measureText(text) { return { width: text.length * 7 }; },
     fillText(text, x, y) {
       ctx.ops.push({ op: 'fillText', text, x, y, fillStyle: ctx.fillStyle });

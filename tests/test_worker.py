@@ -7,7 +7,7 @@ import json
 import pytest
 
 from app import (beyond, constellations, db, ephemeris, locate, lore, narrate,
-                 night, satellites, solver, verify, worker)
+                 night, satellites, solver, streaks, verify, worker)
 
 JOB = {"id": "abc123", "image_path": "/photos/x.jpg", "mode": "quick",
        "exif_json": json.dumps({"width": 100, "height": 100})}
@@ -44,6 +44,8 @@ def stub_solve(tmp_path, monkeypatch):
     monkeypatch.setattr(night, "annotate", lambda *a, **k: None)
     monkeypatch.setattr(locate, "annotate", lambda *a, **k: None)
     monkeypatch.setattr(lore, "annotate", lambda *a, **k: [])
+    # Streak detection reads the image and the WCS, neither of which exists.
+    monkeypatch.setattr(streaks, "annotate", lambda *a, **k: {"streaks": []})
 
 
 def test_bodies_merge_ahead_of_stars(monkeypatch):
@@ -111,6 +113,38 @@ def test_satellite_crossings_attach_to_the_result(monkeypatch):
     status, result, error = worker.process(JOB)
     assert status == "done" and error is None
     assert result["satellites"] == sats
+
+
+def test_streaks_attach_with_the_satellite_layer_in_hand(monkeypatch):
+    monkeypatch.setattr(ephemeris, "annotate_bodies",
+                        lambda *a: ([], {"time_source": None}))
+    sats = {"crossings": [], "objects_checked": 1, "exposure_seconds": 10.0,
+            "source": "gp"}
+    monkeypatch.setattr(satellites, "annotate", lambda *a, **k: sats)
+    seen = {}
+
+    def find(image_path, wcs_path, width, height, exif_info, sats_arg=None):
+        seen.update(image=image_path, wcs=wcs_path, sats=sats_arg)
+        return {"streaks": [{"start": [1.0, 1.0], "end": [90.0, 90.0],
+                             "kind": "meteor", "confidence": "medium"}]}
+    monkeypatch.setattr(streaks, "annotate", find)
+    status, result, error = worker.process(JOB)
+    assert status == "done" and error is None
+    assert result["streaks"]["streaks"][0]["kind"] == "meteor"
+    # The detector is handed the predicted crossings so it can name one.
+    assert seen == {"image": "/photos/x.jpg", "wcs": "/fake.wcs", "sats": sats}
+
+
+def test_streak_crash_does_not_fail_the_job(monkeypatch):
+    monkeypatch.setattr(ephemeris, "annotate_bodies",
+                        lambda *a: ([], {"time_source": None}))
+    def boom(*a, **k):
+        raise RuntimeError("hough overflowed")
+    monkeypatch.setattr(streaks, "annotate", boom)
+    status, result, error = worker.process(JOB)
+    assert status == "done" and error is None
+    assert result["streaks"] == {"streaks": [], "error": "streak detection failed"}
+    assert result["labels"] == STARS
 
 
 def test_satellite_crash_does_not_fail_the_job(monkeypatch):

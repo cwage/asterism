@@ -28,6 +28,8 @@ FIGURE_COLOR = (150, 170, 210, 90)
 FIGURE_TEXT = (150, 170, 210, 153)
 SATELLITE_COLOR = (140, 230, 190, 190)   # frontend track stroke
 SATELLITE_TEXT = (140, 230, 190, 217)
+STREAK_COLOR = (255, 120, 170, 217)      # frontend streak stroke
+STREAK_TEXT = (255, 120, 170, 230)
 BG = (11, 14, 20, 255)          # --bg
 ACCENT = (120, 200, 255, 255)   # --accent
 INK = (205, 214, 224, 255)      # --ink
@@ -70,6 +72,12 @@ def _caption(result):
     bodies = [l for l in labels if l.get("kind") in ("moon", "planet")]
     dsos = [l for l in labels if l.get("kind") == "dso"]
     bits = []
+    # A meteor leads the caption: it is the catch of the night, and
+    # nothing else in the frame is one-of-a-kind.
+    for streak in (result.get("streaks") or {}).get("streaks") or []:
+        if streak.get("kind") == "meteor" and streak.get("confidence") != "low":
+            bits.append("a " + streak_name(streak))
+            break
     if bodies:
         bits.append(", ".join(b["name"] for b in bodies))
     if dsos:
@@ -84,6 +92,20 @@ def _caption(result):
         extra = len(cons) - 3
         bits.append(names + (f" + {extra} more" if extra > 0 else ""))
     return " · ".join(bits)
+
+
+def streak_name(streak):
+    """What the overlay calls a detected streak: the verdict, and the
+    name when there is one; a low-confidence verdict is just a streak.
+    Mirrors streakName() in the frontend."""
+    kind = streak.get("kind")
+    if kind == "satellite" and streak.get("satellite"):
+        return streak["satellite"]["name"]
+    if kind == "meteor" and streak.get("shower"):
+        return f"{streak['shower']['name']} meteor"
+    if streak.get("confidence") == "low" or kind not in ("meteor", "satellite"):
+        return "streak"
+    return kind
 
 
 def _dashed_path(draw, points, color, width, dash=18.0, gap=12.0):
@@ -169,6 +191,29 @@ def render(image_path, result, share_host, out_path):
         if 0 <= mid[0] < CARD_WIDTH and 0 <= mid[1] < ph:
             sat_names.append((crossing["name"], mid[0], mid[1]))
 
+    # Streaks found in the pixels: a solid bracket either side of the
+    # line, an arrowhead at a meteor's terminal end, as the frontend draws.
+    streak_names = []
+    for streak in (result.get("streaks") or {}).get("streaks") or []:
+        (x0, y0), (x1, y1) = streak["start"], streak["end"]
+        x0, y0, x1, y1 = x0 * scale, y0 * scale, x1 * scale, y1 * scale
+        length = math.hypot(x1 - x0, y1 - y0)
+        if not length:
+            continue
+        nx, ny = -(y1 - y0) / length * 6, (x1 - x0) / length * 6
+        for sign in (-1, 1):
+            draw.line([x0 + sign * nx, y0 + sign * ny, x1 + sign * nx, y1 + sign * ny],
+                      fill=STREAK_COLOR, width=2)
+        if streak.get("kind") == "meteor" and streak.get("confidence") != "low":
+            ux, uy, ah = (x1 - x0) / length, (y1 - y0) / length, 10
+            draw.polygon([(x1 + ux * ah, y1 + uy * ah),
+                          (x1 - uy * ah * 0.6, y1 + ux * ah * 0.6),
+                          (x1 + uy * ah * 0.6, y1 - ux * ah * 0.6)],
+                         fill=STREAK_COLOR)
+        mid = ((x0 + x1) / 2, (y0 + y1) / 2)
+        if 0 <= mid[0] < CARD_WIDTH and 0 <= mid[1] < ph:
+            streak_names.append((streak_name(streak), mid[0], mid[1], nx, ny))
+
     labels = sorted(result.get("labels") or [], key=_priority)
     markers = []
     for l in labels:
@@ -231,6 +276,20 @@ def render(image_path, result, share_host, out_path):
         if spot:
             draw.text((spot[0], spot[1]), name, font=font_it,
                       fill=SATELLITE_TEXT, stroke_width=2,
+                      stroke_fill=(0, 0, 0, 140))
+
+    # Streak names beside their line, whichever side has room.
+    for name, sx, sy, nx, ny in streak_names:
+        tw = draw.textlength(name, font=font_it)
+        th = 22
+        spot = _place_text(placed, [
+            (sx + nx * 2.2 - tw / 2, sy + ny * 2.2 - th / 2),
+            (sx - nx * 2.2 - tw / 2, sy - ny * 2.2 - th / 2),
+            (sx - tw / 2, sy + th),
+        ], tw, th, CARD_WIDTH, ph)
+        if spot:
+            draw.text((spot[0], spot[1]), name, font=font_it,
+                      fill=STREAK_TEXT, stroke_width=2,
                       stroke_fill=(0, 0, 0, 140))
 
     # Bright objects just outside the frame (#118): an arrow at the edge

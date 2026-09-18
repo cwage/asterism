@@ -64,6 +64,14 @@ Rules:
   frame during the exposure. They were not detected in the pixels, so say
   they passed through, never that a streak is visible. Mention at most one,
   and only when the list is short enough for that to be interesting.
+- streaks lists lines found in the pixels themselves, each with a verdict
+  (meteor, satellite, or unknown), a confidence, and the measured reasons.
+  A meteor is the best catch in almost any frame: lead with it, say how
+  long it was and whether it belonged to a shower or was a sporadic, and
+  hedge in proportion to the confidence ("likely a meteor" at medium,
+  "a streak that may be a meteor" at low). An unknown streak is just that:
+  a streak, origin not settled. Never call a streak a meteor or a
+  satellite unless the verdict says so.
 - just_outside_frame lists bright objects the solve places outside the
   photo's edges, with how far and which way. They are not in the photo:
   you may mention one as being just off the edge, never as captured.
@@ -201,6 +209,18 @@ def _payload(result):
         "satellites_crossing": [
             c["name"] for c in
             (result.get("satellites") or {}).get("crossings") or []
+        ],
+        # Streaks detected in the pixels, with the verdict and its reasons
+        # so the model tells the story the numbers support.
+        "streaks": [
+            {k: v for k, v in {
+                "kind": s.get("kind"), "confidence": s.get("confidence"),
+                "length_deg": s.get("length_deg"),
+                "shower": (s.get("shower") or {}).get("name"),
+                "satellite": (s.get("satellite") or {}).get("name"),
+                "reasons": s.get("reasons"),
+            }.items() if v is not None}
+            for s in (result.get("streaks") or {}).get("streaks") or []
         ],
         # The model once narrated "the Pleiades just outside the frame"
         # with nothing to go on; now it is told (#118).

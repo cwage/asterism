@@ -174,3 +174,43 @@ def test_beyond_pointers_draw_at_the_edge_and_yield_to_labels(tmp_path, photo):
     m31 = {"name": "Andromeda Galaxy (M31)", "x": 1100, "y": 450, "mag": 3.6,
            "kind": "dso", "radius_px": 100}
     assert shaft_pixel({"labels": [m31], "beyond": [saturn]}) == plain
+
+
+STREAK = {"start": [300.0, 200.0], "end": [700.0, 500.0], "kind": "meteor",
+          "confidence": "medium", "length_deg": 5.2, "shower": None}
+
+
+def test_caption_leads_with_a_meteor():
+    text = card._caption(dict(RESULT, streaks={"streaks": [STREAK]}))
+    assert text.startswith("a meteor")
+    shower = dict(STREAK, shower={"name": "Perseids"})
+    assert card._caption({"labels": [], "streaks": {"streaks": [shower]}}) \
+        == "a Perseids meteor"
+    # An unresolved or doubtful streak is not a headline.
+    for doubtful in (dict(STREAK, kind="unknown"), dict(STREAK, confidence="low")):
+        assert card._caption(dict(RESULT, streaks={"streaks": [doubtful]})) \
+            == card._caption(RESULT)
+
+
+def test_render_draws_streaks(tmp_path, photo):
+    out = tmp_path / "card.png"
+    sat = {"start": [100.0, 700.0], "end": [1100.0, 720.0], "kind": "satellite",
+           "confidence": "high", "satellite": {"name": "ISS (ZARYA)"}}
+    result = dict(RESULT, streaks={"streaks": [STREAK, sat]})
+    card.render(str(photo), result, "host", str(out))
+    img = Image.open(out).convert("RGB")
+    # The bracket lines sit 6px either side of the streak, in its colour.
+    scale = card.CARD_WIDTH / 1200
+    mx, my = 500 * scale, 350 * scale
+    strip = [img.getpixel((int(mx), int(my + d))) for d in range(-12, 13)]
+    assert any(p[0] > 200 and 80 < p[1] < 160 and p[2] > 120 for p in strip)
+
+
+def test_streak_name():
+    assert card.streak_name(STREAK) == "meteor"
+    assert card.streak_name(dict(STREAK, shower={"name": "Geminids"})) == "Geminids meteor"
+    assert card.streak_name({"kind": "satellite", "confidence": "medium"}) == "satellite"
+    assert card.streak_name({"kind": "satellite", "confidence": "low"}) == "streak"
+    assert card.streak_name({"kind": "satellite", "satellite": {"name": "X"}}) == "X"
+    assert card.streak_name({"kind": "unknown"}) == "streak"
+    assert card.streak_name(dict(STREAK, confidence="low")) == "streak"
