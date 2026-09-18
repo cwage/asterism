@@ -153,6 +153,12 @@
   /* display:flex outranks the UA's [hidden]{display:none}, so the layer
      toggles were showing on the landing page with nothing to toggle. */
   #controls[hidden] { display: none; }
+  #toggle-overlay { min-height: 44px; min-width: 9rem; padding: 0.5rem 0.9rem;
+                    border: 1px solid var(--accent); border-radius: 8px;
+                    background: #20354a; color: var(--accent); cursor: pointer;
+                    font: inherit; font-size: 1rem; font-weight: 600; }
+  #toggle-overlay:hover { background: #2a4560; }
+  #toggle-overlay:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
   #controls label { display: inline-flex; align-items: center; gap: 0.35rem;
                     cursor: pointer; user-select: none; }
   #controls input[type="range"] { width: 110px; accent-color: var(--accent); }
@@ -368,6 +374,7 @@
 </div>
 <div id="wrap"><img id="photo" hidden><canvas id="overlay"></canvas></div>
 <div id="controls" hidden>
+  <button type="button" id="toggle-overlay" aria-controls="overlay">Hide overlay</button>
   <!-- Each toggle carries its layer's colour, so the controls double as
        the key to the overlay: what a blue ring, a gold ring, a coral
        arrow mean, without a separate legend block. -->
@@ -1517,6 +1524,7 @@ function copyButton(label, text) {
 function render(id, job) {
   renderFeed();  // a fresh solve (maybe this one) belongs in the strip
   shownJob = job;
+  setOverlayVisible(true);
   const img = document.getElementById('photo');
   const canvas = document.getElementById('overlay');
   img.onload = () => {
@@ -1598,6 +1606,16 @@ function render(id, job) {
   // idempotent, so firing it alongside a real load event is harmless.
   if (img.complete && img.naturalWidth) img.onload();
 }
+
+// Hide the entire canvas while keeping the chosen layers and magnitude limit.
+function setOverlayVisible(visible) {
+  document.getElementById('overlay').hidden = !visible;
+  document.getElementById('toggle-overlay').textContent = visible ? 'Hide overlay' : 'Show overlay';
+}
+
+document.getElementById('toggle-overlay').addEventListener('click', () => {
+  setOverlayVisible(document.getElementById('overlay').hidden);
+});
 
 // One entry per checkbox controlState() reads: a layer missing here still
 // gates draw() correctly but never triggers one, so its checkbox silently
