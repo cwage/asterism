@@ -1469,7 +1469,7 @@ function render(id, job) {
 // One entry per checkbox controlState() reads: a layer missing here still
 // gates draw() correctly but never triggers one, so its checkbox silently
 // does nothing. That is how the satellite toggle shipped inert.
-for (const layId of ['lay-stars', 'lay-solar', 'lay-dso', 'lay-con', 'lay-sat', 'lay-beyond'])
+for (const layId of ['lay-stars', 'lay-solar', 'lay-dso', 'lay-con', 'lay-sat', 'lay-streak', 'lay-beyond'])
   document.getElementById(layId).addEventListener('change', draw);
 
 // Feedback (#137): a report or a suggestion, filed as a GitHub issue with

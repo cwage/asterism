@@ -261,11 +261,14 @@ def _texture_mask(mask):
         density[:H // B, :W // B] = \
             mask[:H, :W].reshape(H // B, B, W // B, B).mean(axis=(1, 3))
     dense = density > TEXTURE_MAX_DENSITY
-    grown = dense.copy()
+    # Grown by slicing over a padded copy, not np.roll: a wrap-around
+    # would carry the ground at the bottom edge up into the sky at the top.
     r = TEXTURE_GROW
-    for dy in range(-r, r + 1):
-        for dx in range(-r, r + 1):
-            grown |= np.roll(np.roll(dense, dy, 0), dx, 1)
+    padded = np.pad(dense, r)
+    grown = np.zeros_like(dense)
+    for dy in range(2 * r + 1):
+        for dx in range(2 * r + 1):
+            grown |= padded[dy:dy + nh, dx:dx + nw]
     return np.kron(grown, np.ones((B, B), dtype=bool))[:h, :w]
 
 
@@ -778,11 +781,9 @@ def classify(streak, wcs, width, exif_info, crossings, when_utc):
                 reasons.append(
                     f"and {rate:.2f} degrees/s over the exposure is satellite pace")
     elif kind == "unknown":
+        reasons.append("brightness along the line fits neither a meteor nor a satellite cleanly")
         if too_fast:
-            kind, confidence = "meteor", "low"
-            reasons.append("brightness along the line is not a clean meteor curve")
-        else:
-            reasons.append("brightness along the line fits neither a meteor nor a satellite cleanly")
+            reasons.append("too fast for orbit, so not a satellite: a meteor, an aircraft, or something in the foreground")
     if streak.get("dashed"):
         reasons.append("broken along its length, as a stacked night-mode exposure leaves moving things")
     if streak.get("periodic_breaks") and kind != "unknown" and confidence != "high":

@@ -28,6 +28,10 @@ const JOB = {
         points: [[100, 700], [300, 720], [500, 740]],
       }],
     },
+    streaks: {
+      streaks: [{ start: [700, 600], end: [900, 650], kind: 'meteor',
+                  confidence: 'medium', length_deg: 4.0, shower: null }],
+    },
   },
 };
 
@@ -38,6 +42,7 @@ const LAYERS = [
   ['lay-dso', 'M31'],
   ['lay-con', 'Orion'],
   ['lay-sat', 'Iss (Zarya)'],
+  ['lay-streak', 'meteor'],
 ];
 
 function show(sandbox, els) {

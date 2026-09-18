@@ -219,6 +219,27 @@ def test_crossing_elsewhere_does_not_claim_the_streak(tmp_path):
     assert s["confidence"] != "high"
 
 
+def test_neither_shape_stays_unknown_even_when_too_fast_for_orbit():
+    wcs = synth.make_wcs(95.0, 40.0, 50.0, WIDTH, HEIGHT)
+    muddled = {"start": [300.0, 200.0], "end": [700.0, 500.0], "flatness": 0.5,
+               "taper_start": 0.02, "taper_end": 0.02, "dashed": False,
+               "periodic_breaks": 0}
+    s = streaks.classify(muddled, wcs, WIDTH, dict(EXIF, exposure_seconds=2.0), [], None)
+    assert s["kind"] == "unknown"
+    assert any("too fast for orbit" in r for r in s["reasons"])
+
+
+def test_texture_mask_does_not_wrap_around_the_frame():
+    # Dense support along the bottom edge must not grow into the top rows.
+    h, w = 8 * streaks.TEXTURE_BLOCK, 4 * streaks.TEXTURE_BLOCK
+    mask = np.zeros((h, w), dtype=bool)
+    mask[-streaks.TEXTURE_BLOCK:, :] = True
+    tex = streaks._texture_mask(mask)
+    assert tex[-1, :].all()
+    assert tex[-(streaks.TEXTURE_GROW + 1) * streaks.TEXTURE_BLOCK, 0]
+    assert not tex[:2 * streaks.TEXTURE_BLOCK, :].any()
+
+
 def test_no_wcs_still_reports_shape():
     streak = {"start": [0, 0], "end": [100, 0], "flatness": 0.5,
               "taper_start": 0.3, "taper_end": 0.02, "dashed": False}
