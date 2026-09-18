@@ -83,3 +83,54 @@ test('the magnitude slider redraws and reports its value', async () => {
   assert.ok(drew(ctx, 'Vega'), 'mag 0.03 survives it');
   assert.equal(els['mag-val'].textContent, '1');
 });
+
+test('the overlay button hides and restores annotations without changing the photo or layer settings', async () => {
+  const { sandbox, els } = loadPage();
+  const ctx = show(sandbox, els);
+  const button = els['toggle-overlay'];
+  const photoSrc = els.photo.src;
+  els['lay-solar'].checked = false;
+  await els['lay-solar'].dispatch('change');
+  els['mag-limit'].value = '1';
+  await els['mag-limit'].dispatch('input');
+  const settings = sandbox.controlState();
+
+  assert.equal(els.overlay.hidden, false);
+  assert.equal(button.textContent, 'Hide overlay');
+  await button.dispatch('click');
+  assert.equal(els.overlay.hidden, true);
+  assert.equal(button.textContent, 'Show overlay');
+  assert.equal(els.photo.hidden, false);
+  assert.equal(els.photo.src, photoSrc);
+  assert.deepEqual(sandbox.controlState(), settings);
+
+  // A control-triggered redraw must not bring a hidden overlay back.
+  await els['mag-limit'].dispatch('input');
+  assert.equal(els.overlay.hidden, true);
+
+  await button.dispatch('click');
+  assert.equal(els.overlay.hidden, false);
+  assert.equal(button.textContent, 'Hide overlay');
+  assert.equal(els.photo.src, photoSrc);
+  assert.deepEqual(sandbox.controlState(), settings);
+  assert.ok(drew(ctx, 'Vega'));
+  assert.ok(!drew(ctx, 'Mars'), 'the disabled layer stays off');
+  assert.ok(!drew(ctx, 'Faint'), 'the magnitude limit stays in effect');
+});
+
+test('opening another result restores the overlay and its button label', async () => {
+  const { sandbox, els } = loadPage();
+  show(sandbox, els);
+  await els['toggle-overlay'].dispatch('click');
+  assert.equal(els.overlay.hidden, true);
+
+  sandbox.clearResult();
+  sandbox.render('next-result', JOB);
+  els.photo.onload();
+
+  assert.equal(els.photo.src, '/jobs/next-result/image');
+  assert.equal(els.controls.hidden, false);
+  assert.equal(els.overlay.hidden, false);
+  assert.equal(els['toggle-overlay'].textContent, 'Hide overlay');
+  assert.ok(drew(els.overlay.ctx, 'Vega'));
+});
