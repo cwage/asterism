@@ -106,8 +106,17 @@ test('undoing a keep past the window takes the control away', async () => {
   assert.ok(!els.actions.children.includes(btn));
 });
 
-test('the disclosure and the feed heading say the window has an exception', () => {
-  const { html, sandbox, els } = loadPage();
-  assert.ok(html.includes('deleted after 1 week unless you keep them'));
+test('the disclosure says site retention has an exception', () => {
+  const { html } = loadPage();
+  assert.ok(html.includes('deleted from this site after 1 week unless kept'));
   assert.ok(html.includes('unless you choose to keep'));
+});
+
+test('the upload disclosure names X sharing before expansion and links the account', () => {
+  const { html } = loadPage();
+  const disclosure = html.match(/<details\b[^>]*class="disclosure"[^>]*>([\s\S]*?)<\/details>/)?.[1] ?? '';
+  const summary = disclosure.match(/<summary\b[^>]*>([\s\S]*?)<\/summary>/)?.[1] ?? '';
+  assert.match(summary, /\bshared\s+on\s+X\b/, 'sharing must be disclosed without expanding the details');
+  assert.match(disclosure, /<a\b[^>]*\bhref=["']https:\/\/x\.com\/asterismsky["'][^>]*>\s*@asterismsky\s*<\/a>/,
+    'the disclosure must link to the account that may post the photo');
 });
