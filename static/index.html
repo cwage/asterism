@@ -108,6 +108,7 @@
      a new visitor read (#74). One line by default, full text on demand. */
   .disclosure summary { cursor: pointer; }
   .disclosure p { margin: 0.5rem 0 0; }
+  .disclosure a { color: var(--accent); }
 
   #recent { margin: 1rem 0; border: 1px solid var(--line); border-radius: 8px;
               padding: 0.75rem; background: var(--panel); }
@@ -348,13 +349,20 @@
 </label>
 
 <details class="disclosure">
-  <summary>Uploads are public, and deleted after 1 week unless you keep them.</summary>
+  <summary>Uploads are public and may be shared on X (Twitter). Photos are
+  deleted from this site after 1 week unless kept.</summary>
   <p>Anyone with the result link can view your photo and its labels, and
-  successful solves appear in the "recently solved" feed on this page. GPS
-  metadata is removed from the stored photo (uploads with location data we
+  successful solves appear in the "recently solved" feed on this page.</p>
+  <p>By uploading, you give Asterism permission to post your photo, including
+  cropped versions or versions with astronomy labels, on its X (Twitter)
+  account, <a href="https://x.com/asterismsky">@asterismsky</a>.
+  Posts on X may remain after your photo is deleted from this site.
+  Undoing "keep" here does not remove a post on X.</p>
+  <p>GPS metadata is removed from the stored photo (uploads with location data we
   can't remove are rejected), coordinates shown in results are rounded to city
-  scale, and everything is deleted after 1 week — unless you choose to keep
-  your solve on the site from its result page, or it is one of the occasional
+  scale, and uploads and results are deleted from this site after 1 week —
+  unless you choose to keep your solve on the site from its result page,
+  or it is one of the occasional
   solves kept on as an example of what the site does. Photos are also sent to
   an AI service (Anthropic) to write the short description of what they
   show.</p>

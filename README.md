@@ -202,6 +202,17 @@ them if that changes.
 With no `ADMIN_TOKEN` configured the endpoint 404s for everyone — unset means
 absent, not open, so local dev and CI have nothing to poke at.
 
+## Sharing photos on X (Twitter)
+
+The upload disclosure tells visitors that uploading gives Asterism permission
+to post their photo, including cropped or annotated versions, to
+[@asterismsky](https://x.com/asterismsky). It also explains that posts on X
+can outlive the site's retention window and are not removed by undoing a keep.
+
+Posting is manual. Use photos uploaded after this disclosure goes live;
+earlier uploads were made under the previous notice and need separate
+permission. Keeping or featuring a solve does not post it to X.
+
 ## Featuring a solve
 
 Everything is deleted after `RETENTION_HOURS` (168 hours, or 1 week, by default),
