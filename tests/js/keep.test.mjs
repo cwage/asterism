@@ -108,6 +108,6 @@ test('undoing a keep past the window takes the control away', async () => {
 
 test('the disclosure and the feed heading say the window has an exception', () => {
   const { html, sandbox, els } = loadPage();
-  assert.ok(html.includes('deleted after 24 hours unless you keep them'));
+  assert.ok(html.includes('deleted after 1 week unless you keep them'));
   assert.ok(html.includes('unless you choose to keep'));
 });

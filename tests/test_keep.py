@@ -88,6 +88,24 @@ def test_keep_needs_a_solved_job_inside_the_window(fresh_db):
     assert e.value.status_code == 404
 
 
+@pytest.mark.parametrize("age_hours, keep_open", [(25, True), (167, True), (169, False)])
+def test_keep_window_lasts_one_week(fresh_db, age_hours, keep_open):
+    with db.get_conn() as conn:
+        _insert(conn, "mine")
+        conn.execute(
+            "UPDATE jobs SET created_at = datetime('now', ?) WHERE id = 'mine'",
+            (f"-{age_hours} hours",))
+
+    assert main.get_job("mine")["keep_open"] is keep_open
+    if keep_open:
+        assert main.keep_job("mine", _Req())["kept"] is True
+    else:
+        with pytest.raises(HTTPException) as e:
+            main.keep_job("mine", _Req())
+        assert e.value.status_code == 409
+        assert "closed" in e.value.detail
+
+
 def test_hidden_jobs_cannot_be_kept_and_hiding_clears_a_keep(fresh_db, admin, tmp_path):
     img = tmp_path / "bad.jpg"
     img.write_bytes(b"x")

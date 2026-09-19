@@ -15,7 +15,7 @@ from . import (beyond, constellations, db, dso, ephemeris, locate, lore,
 # instead of burning cpulimit tiers on daylight/food/pitch-black uploads.
 PRECHECK_MIN_STARS = int(os.environ.get("PRECHECK_MIN_STARS", "10"))
 
-RETENTION_HOURS = int(os.environ.get("RETENTION_HOURS", "24"))
+RETENTION_HOURS = int(os.environ.get("RETENTION_HOURS", "168"))
 SWEEP_INTERVAL_SECONDS = 900
 
 

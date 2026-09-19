@@ -348,12 +348,12 @@
 </label>
 
 <details class="disclosure">
-  <summary>Uploads are public, and deleted after 24 hours unless you keep them.</summary>
+  <summary>Uploads are public, and deleted after 1 week unless you keep them.</summary>
   <p>Anyone with the result link can view your photo and its labels, and
   successful solves appear in the "recently solved" feed on this page. GPS
   metadata is removed from the stored photo (uploads with location data we
   can't remove are rejected), coordinates shown in results are rounded to city
-  scale, and everything is deleted after 24 hours — unless you choose to keep
+  scale, and everything is deleted after 1 week — unless you choose to keep
   your solve on the site from its result page, or it is one of the occasional
   solves kept on as an example of what the site does. Photos are also sent to
   an AI service (Anthropic) to write the short description of what they
@@ -696,7 +696,7 @@ async function renderFeed() {
   if (!jobs.length) return;
   const title = document.createElement('p');
   title.className = 'title';
-  title.textContent = 'Recently solved by everyone (links live for 24 hours unless kept):';
+  title.textContent = 'Recently solved by everyone (links live for 1 week unless kept):';
   // The same strip as an Atom feed (#127), for following without visiting.
   const atom = document.createElement('a');
   atom.href = '/feed.atom';

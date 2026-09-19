@@ -42,7 +42,7 @@ KEEPS_PER_DAY = int(os.environ.get("KEEPS_PER_DAY", "6"))
 MAX_QUEUE_DEPTH = int(os.environ.get("MAX_QUEUE_DEPTH", "20"))
 
 # Expired links 404 identically to typos; say why that might be (#23).
-RETENTION_HOURS = int(os.environ.get("RETENTION_HOURS", "24"))
+RETENTION_HOURS = int(os.environ.get("RETENTION_HOURS", "168"))
 _GONE = f"no such job (results expire after {RETENTION_HOURS} hours)"
 
 # Moderation kill switch (#60). Uploads are anonymous and successful solves

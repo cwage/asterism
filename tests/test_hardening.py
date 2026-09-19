@@ -34,7 +34,8 @@ def test_rate_limit_window_slides(monkeypatch):
     assert not main._rate_limited("ip", now=3601.0)
 
 
-def test_sweep_expired_removes_old_jobs_and_files(tmp_path, monkeypatch):
+@pytest.mark.parametrize("retained_hours", [25, 167])
+def test_sweep_expired_removes_old_jobs_and_files(tmp_path, monkeypatch, retained_hours):
     monkeypatch.setattr(db, "DATA_DIR", str(tmp_path))
     monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "asterism.db"))
     db.init_db()
@@ -52,10 +53,11 @@ def test_sweep_expired_removes_old_jobs_and_files(tmp_path, monkeypatch):
     with db.get_conn() as conn:
         conn.execute(
             "INSERT INTO jobs (id, image_path, created_at) VALUES "
-            "('oldjob', ?, datetime('now', '-25 hours'))", (str(old_img),))
+            "('oldjob', ?, datetime('now', '-169 hours'))", (str(old_img),))
         conn.execute(
-            "INSERT INTO jobs (id, image_path) VALUES ('newjob', ?)",
-            (str(new_img),))
+            "INSERT INTO jobs (id, image_path, created_at) "
+            "VALUES ('newjob', ?, datetime('now', ?))",
+            (str(new_img), f"-{retained_hours} hours"))
 
     assert worker.sweep_expired() == 1
 
@@ -162,7 +164,7 @@ def test_sweep_survives_missing_files(tmp_path, monkeypatch):
     with db.get_conn() as conn:
         conn.execute(
             "INSERT INTO jobs (id, image_path, created_at) VALUES "
-            "('ghost', '/nonexistent/x.jpg', datetime('now', '-25 hours'))")
+            "('ghost', '/nonexistent/x.jpg', datetime('now', '-169 hours'))")
     assert worker.sweep_expired() == 1
     with db.get_conn() as conn:
         assert conn.execute("SELECT COUNT(*) AS n FROM jobs").fetchone()["n"] == 0
@@ -331,7 +333,7 @@ def test_sweep_collects_orphaned_upload_files(tmp_path, monkeypatch):
     db.init_db()
     uploads = tmp_path / "uploads"
     uploads.mkdir()
-    old = time.time() - 25 * 3600
+    old = time.time() - 169 * 3600
 
     ghost = uploads / "ghost.jpg"                 # crashed before the INSERT
     sidecar = uploads / "ghost2.jpg.orient"       # died mid-encode
@@ -345,7 +347,7 @@ def test_sweep_collects_orphaned_upload_files(tmp_path, monkeypatch):
     with db.get_conn() as conn:
         conn.execute(
             "INSERT INTO jobs (id, image_path, created_at, featured) VALUES "
-            "('kept', ?, datetime('now', '-25 hours'), 1)", (str(kept),))
+            "('kept', ?, datetime('now', '-169 hours'), 1)", (str(kept),))
 
     assert worker.sweep_expired() == 0            # no job expired
 
