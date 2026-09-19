@@ -204,9 +204,10 @@ absent, not open, so local dev and CI have nothing to poke at.
 
 ## Featuring a solve
 
-Everything is deleted after `RETENTION_HOURS`, which leaves the homepage feed
-empty whenever nobody has uploaded in a day — bad for a site that has to explain
-itself to someone arriving cold. Featuring a job (#67) exempts it from the
+Everything is deleted after `RETENTION_HOURS` (168 hours, or 1 week, by default),
+which leaves the homepage feed empty whenever nobody has uploaded in a week —
+bad for a site that has to explain itself to someone arriving cold.
+Featuring a job (#67) exempts it from the
 retention sweep, so a handful of good solves stay on as permanent examples:
 
 ```

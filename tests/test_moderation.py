@@ -246,7 +246,7 @@ def test_sweep_still_collects_hidden_jobs(fresh_db, admin, tmp_path):
     with db.get_conn() as conn:
         conn.execute(
             "INSERT INTO jobs (id, image_path, hidden, created_at) VALUES "
-            "('bad', ?, 1, datetime('now', '-25 hours'))", (str(upload),))
+            "('bad', ?, 1, datetime('now', '-169 hours'))", (str(upload),))
 
     assert worker.sweep_expired() == 1
     assert not upload.exists()
