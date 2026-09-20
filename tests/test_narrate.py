@@ -201,6 +201,49 @@ def test_payload_carries_just_outside_frame_as_phrases():
     assert narrate._payload(RESULT)["just_outside_frame"] == []
 
 
+def test_payload_places_labels_in_a_coarse_frame_region():
+    # Prod narrated a top-left M31 as "lower left": labels went to the
+    # model with no position at all, and it placed the galaxy anyway.
+    result = dict(RESULT, labels=[
+        {"name": "Andromeda Galaxy (M31)", "x": 900.0, "y": 545.5,
+         "mag": 3.6, "kind": "dso", "status": "projected"},
+        {"name": "Vega", "x": 1500.0, "y": 2000.0, "mag": 0.03,
+         "kind": "star", "status": "matched"},
+        {"name": "Deneb", "x": 3000.0, "y": 4000.0, "mag": 1.25,
+         "kind": "star", "status": "matched"},
+        {"name": "Altair", "x": 200.0, "y": 2000.0, "mag": 0.76,
+         "kind": "star", "status": "matched"},
+    ])
+    payload = narrate._payload(result, width=3024, height=4032)
+    assert [l["where"] for l in payload["labels"]] == [
+        "upper left", "center", "lower right", "left"]
+    # coordinates still never leave the app
+    assert "x" not in payload["labels"][0]
+    # no frame size, no placement — and no wrong one
+    assert "where" not in narrate._payload(result)["labels"][0]
+
+    client = FakeClient()
+    narrate.annotate(result, client=client, width=3024, height=4032)
+    sent = json.loads(client.calls[0]["messages"][0]["content"])
+    assert sent["labels"][0]["where"] == "upper left"
+    assert "use that word exactly" in narrate._SYSTEM
+    assert "Never place an object from the pixels" in narrate._SYSTEM
+
+
+def test_prompt_keeps_hidden_and_outside_frame_apart():
+    # Prod once narrated a hidden in-frame M31 as "just outside the visible
+    # pixels due to haze": the hidden rule's "(cloud or haze, usually)"
+    # became an asserted cause, and nothing fenced off the edge wording.
+    system = narrate._SYSTEM
+    hidden_rule = system[system.index('status "hidden"'):system.index("- kind")]
+    assert "usually" not in hidden_rule
+    assert "Do not give a reason" in hidden_rule
+    assert "never say haze, cloud, or washed out" in hidden_rule
+    assert '"off the edge" about a hidden object' in hidden_rule
+    outside_rule = system[system.index("- just_outside_frame"):system.index("- lore")]
+    assert "never as hidden" in outside_rule
+
+
 def test_night_notes_reach_the_model_as_facts():
     client = FakeClient()
     lines = ["Taken in twilight, about 40 minutes before the sky was fully dark.",

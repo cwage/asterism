@@ -384,7 +384,9 @@ def _label_everything(result, wcs_path, image_path, exif_info, job_id):
     # LLM narration (#12), best-effort: no API key or a failed call just
     # leaves the deterministic card caption in place.
     try:
-        narration = narrate.annotate(result, image_path=image_path)
+        narration = narrate.annotate(
+            result, image_path=image_path,
+            width=exif_info["width"], height=exif_info["height"])
         if narration:
             result["narration"] = narration
     except Exception:
