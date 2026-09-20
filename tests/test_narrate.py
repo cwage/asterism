@@ -62,18 +62,15 @@ def test_payload_is_trimmed_to_public_fields():
     narrate.annotate(RESULT, client=client)
     payload = json.loads(client.calls[0]["messages"][0]["content"])
     names = [l["name"] for l in payload["labels"]]
-    assert "Sirius" in names and "Andromeda Galaxy (M31)" in names
-    # statuses and types ride along so the model can be honest about clouds
-    m31 = next(l for l in payload["labels"] if "M31" in l["name"])
-    assert m31["status"] == "hidden" and m31["dso_type"] == "Gxy"
+    assert "Sirius" in names and "Jupiter" in names
+    # hidden labels (in frame, not found in the pixels) stay out: given
+    # one, the model kept writing it up as just outside the frame
+    assert "Andromeda Galaxy (M31)" not in names
     moon = next(l for l in payload["labels"] if l["name"] == "Moon")
     assert moon["moon_phase"] == 0.42
-    # internal statuses ("projected", "matched") collapse to "visible" so
-    # the model never reads a passed pixel check as "not seen"
-    assert moon["status"] == "visible"
-    sirius = next(l for l in payload["labels"] if l["name"] == "Sirius")
-    assert sirius["status"] == "visible"
-    assert {l["status"] for l in payload["labels"]} <= {"visible", "hidden"}
+    # and what remains carries no status at all: the internal "projected"
+    # and "matched" once read to the model as "computed but not seen"
+    assert not any("status" in l for l in payload["labels"])
     assert payload["constellations"] == ["Orion"]
     # satellite crossings (#11) ride along as names only
     assert payload["satellites_crossing"] == ["Iss (Zarya)"]
@@ -199,6 +196,71 @@ def test_payload_carries_just_outside_frame_as_phrases():
     # facts only: the edge geometry never leaves the app
     assert "edge_x" not in json.dumps(payload) and "ux" not in payload
     assert narrate._payload(RESULT)["just_outside_frame"] == []
+
+
+def test_payload_places_labels_in_a_coarse_frame_region():
+    # Prod narrated a top-left M31 as "lower left": labels went to the
+    # model with no position at all, and it placed the galaxy anyway.
+    result = dict(RESULT, labels=[
+        {"name": "Andromeda Galaxy (M31)", "x": 900.0, "y": 545.5,
+         "mag": 3.6, "kind": "dso", "status": "projected"},
+        {"name": "Vega", "x": 1500.0, "y": 2000.0, "mag": 0.03,
+         "kind": "star", "status": "matched"},
+        {"name": "Deneb", "x": 3000.0, "y": 4000.0, "mag": 1.25,
+         "kind": "star", "status": "matched"},
+        {"name": "Altair", "x": 200.0, "y": 2000.0, "mag": 0.76,
+         "kind": "star", "status": "matched"},
+    ])
+    payload = narrate._payload(result, width=3024, height=4032)
+    assert [l["where"] for l in payload["labels"]] == [
+        "upper left", "center", "lower right", "left"]
+    # coordinates still never leave the app
+    assert "x" not in payload["labels"][0]
+    # no frame size, no placement — and no wrong one
+    assert "where" not in narrate._payload(result)["labels"][0]
+
+    client = FakeClient()
+    narrate.annotate(result, client=client, width=3024, height=4032)
+    sent = json.loads(client.calls[0]["messages"][0]["content"])
+    assert sent["labels"][0]["where"] == "upper left"
+    assert "use that word exactly" in narrate._SYSTEM
+    assert "Never place an object from the pixels" in narrate._SYSTEM
+
+
+def test_hidden_labels_never_reach_the_model():
+    # Prod narrated a hidden in-frame M31 as "just outside the visible
+    # pixels due to haze", then as "just beyond the frame above" once it
+    # had a coarse position — whatever the prompt said. So the model is
+    # never told about hidden objects at all, and the prompt has no
+    # "hidden" status left to misread.
+    hidden_only = dict(RESULT, labels=[
+        {"name": "Andromeda Galaxy (M31)", "x": 30.0, "y": 10.0, "mag": 3.6,
+         "kind": "dso", "dso_type": "Gxy", "status": "hidden"},
+        {"name": "Capella", "x": 90.0, "y": 90.0, "mag": 0.08,
+         "kind": "star", "status": "hidden"}])
+    client = FakeClient()
+    assert narrate.annotate(hidden_only, client=client) is None
+    assert client.calls == []  # nothing seen, nothing to say
+    system = narrate._SYSTEM
+    assert 'status "hidden"' not in system
+    # stars are confirmed; the Moon and planets are only projected, and
+    # the prompt must not claim more than that
+    assert "the stars were confirmed in the pixels" in " ".join(system.split())
+    # A hidden DSO is still circled on the page, so it goes along as a
+    # plain fragment saying where the mark is — inside the photo. Hidden
+    # stars don't: "Capella didn't show" is nothing anyone needs to read.
+    payload = narrate._payload(hidden_only, width=100, height=100)
+    assert payload["also_in_frame"] == [
+        "Andromeda Galaxy (M31), marked in the upper left part of the photo"]
+    assert narrate._payload(RESULT, width=100, height=100)["also_in_frame"] == [
+        "Andromeda Galaxy (M31), marked in the left part of the photo"]
+    # no frame size: say it is marked, not where
+    assert narrate._payload(RESULT)["also_in_frame"] == [
+        "Andromeda Galaxy (M31), marked on the photo"]
+    also_rule = system[system.index("- also_in_frame"):system.index("- just_outside")]
+    assert "never say it is outside, beyond" in also_rule
+    outside_rule = system[system.index("- just_outside_frame"):system.index("- lore")]
+    assert "never as hidden" in outside_rule
 
 
 def test_night_notes_reach_the_model_as_facts():

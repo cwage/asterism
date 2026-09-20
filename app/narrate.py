@@ -51,11 +51,16 @@ identified in the frame and the constellations drawn.
 Rules:
 - Mention only objects present in the input. Never invent objects, and never
   state a fact (distance, type, lore) unless you are certain of it.
-- status "visible" means the object was confirmed in the pixels. Describe
-  it as seen. status "hidden" means the object was in frame but not
-  actually visible in the pixels (cloud or haze, usually). You may mention
-  at most one notable hidden object, clearly as being there but not visible
-  tonight. Never call a "visible" object hidden, faint, or washed out.
+- Every object in labels is in the frame: the stars were confirmed in
+  the pixels, and the Moon, planets, and deep-sky objects are placed
+  there by the solve. Describe each as captured; never call one hidden,
+  faint, or washed out. Objects that were in the field but did not show
+  up are not listed, so never say anything was missing, obscured, or
+  lost to the conditions.
+- where is the part of the frame the object sits in (upper left, center,
+  lower right, and so on). When you say where something is in the photo,
+  use that word exactly. Never place an object from the pixels or from
+  its neighbours, and never place one that has no where.
 - kind "dso" is a deep-sky object; dso_type: OC = open cluster,
   Gxy = galaxy, Neb/OC+Neb = nebula, GC = globular cluster.
 - Lower magnitude = brighter. Lead with the most notable catch: the Moon,
@@ -72,9 +77,17 @@ Rules:
   "a streak that may be a meteor" at low). An unknown streak is just that:
   a streak, origin not settled. Never call a streak a meteor or a
   satellite unless the verdict says so.
+- also_in_frame lists deep-sky objects whose spot the page marks on the
+  photo, though they were not confirmed in the pixels. Each says which
+  part of the photo. You may mention one, in those words: the photo takes
+  in that object, marked in that part of the frame, worth a closer look.
+  It is inside the photo: never say it is outside, beyond, or off the
+  edge, and never say it is hidden, missing, faint, or lost to haze or
+  cloud.
 - just_outside_frame lists bright objects the solve places outside the
   photo's edges, with how far and which way. They are not in the photo:
-  you may mention one as being just off the edge, never as captured.
+  you may mention one as being just off the edge, never as captured, and
+  never as hidden, faint, or lost to the conditions.
 - lore is the site's own sentence about each of the main constellations
   in frame. You may draw on its facts; never contradict them, and don't
   repeat a sentence word for word, since it is shown beside your text.
@@ -82,7 +95,8 @@ Rules:
   dark, the Moon's phase and whether it was up, how faint a star the photo
   recorded, and where on Earth the phone's tilt and the sky geometry place
   the camera. You may weave one into the text, keeping its numbers and
-  place names as given, and must never contradict them.
+  place names as given, and must never contradict them. Say nothing
+  about the weather or the sky's clarity that night_notes doesn't say.
 - You may also be shown the photo. The labels above stay the authority on
   sky objects — never claim a sky object from the pixels alone. You may
   mention the foreground scene (a treeline, a rooftop, someone silhouetted
@@ -185,22 +199,62 @@ def _offset_phrase(pointer):
     return f"{pointer['name']}, {beyond.format_deg(pointer['deg'])} {where}"
 
 
-def _payload(result):
+def _where(x, y, width, height):
+    """Which third of the frame a label sits in: 'upper left', 'center',
+    'lower right'. Coarse on purpose — the model once put a top-left M31
+    at "lower left" with no position to go on, and a finer grid would
+    just be a finer thing to misread."""
+    if not (width and height) or x is None or y is None:
+        return None
+    col = min(2, max(0, int(3 * x / width)))
+    row = min(2, max(0, int(3 * y / height)))
+    vert = ("upper", "", "lower")[row]
+    horiz = ("left", "", "right")[col]
+    return " ".join(w for w in (vert, horiz) if w) or "center"
+
+
+def _payload(result, width=None, height=None):
     """The trimmed, public-only view of the result the model gets to see.
 
-    Verification statuses collapse to visible/hidden: the internal
-    "projected" (Moon, planets, DSOs that passed the pixel check) read to
-    the model as "computed but not seen", and it narrated a plainly
-    visible M31 as lost to haze."""
+    Hidden labels (in frame, not found in the pixels) are left out
+    entirely. The model was allowed one, and three times running it wrote
+    the hidden object up as lying just outside the frame, or lost to haze
+    the input never mentioned — whatever the prompt said. The page shows
+    the hidden label itself, so the blurb simply not mentioning it
+    contradicts nothing. Everything that remains is treated as captured
+    (stars snapped to a peak; the Moon, planets, and DSOs placed by the
+    solve, with only DSOs pixel-checked), so no status field: the
+    internal "projected" once read to the model as "computed but not
+    seen", and it narrated a plainly visible M31 as lost to haze. Pixel positions
+    become a coarse frame region, since the model places things in the
+    text anyway."""
     labels = []
+    also_in_frame = []
     for lab in result.get("labels") or []:
-        status = "hidden" if lab.get("status") == "hidden" else "visible"
+        if lab.get("status") == "hidden":
+            # The page still circles a hidden DSO, dashed, at its spot,
+            # so the blurb may point there too — as a plain fragment
+            # like the outside-frame pointers, which the model has
+            # handled better than fields it had to interpret.
+            if lab.get("kind") == "dso":
+                where = _where(lab.get("x"), lab.get("y"), width, height)
+                if where is None:  # no frame size: marked, but not where
+                    part = "on the photo"
+                elif where == "center":
+                    part = "in the center of the photo"
+                else:
+                    part = f"in the {where} part of the photo"
+                also_in_frame.append(f"{lab.get('name')}, marked {part}")
+            continue
         entry = {"name": lab.get("name"), "kind": lab.get("kind", "star"),
-                 "mag": lab.get("mag"), "status": status}
+                 "mag": lab.get("mag")}
         if lab.get("dso_type"):
             entry["dso_type"] = lab["dso_type"]
         if lab.get("phase") is not None:
             entry["moon_phase"] = lab["phase"]
+        where = _where(lab.get("x"), lab.get("y"), width, height)
+        if where:
+            entry["where"] = where
         labels.append(entry)
     return {
         "labels": labels,
@@ -222,6 +276,7 @@ def _payload(result):
             }.items() if v is not None}
             for s in (result.get("streaks") or {}).get("streaks") or []
         ],
+        "also_in_frame": also_in_frame,
         # The model once narrated "the Pleiades just outside the frame"
         # with nothing to go on; now it is told (#118).
         "just_outside_frame": [
@@ -235,14 +290,15 @@ def _payload(result):
     }
 
 
-def annotate(result, image_path=None, client=None):
+def annotate(result, image_path=None, client=None, width=None, height=None):
     """Narration dict {caption, text, model} or None when unavailable.
+    width/height are the upright frame's pixel size, for placing labels.
     Raises on API/parse errors — the worker treats those as best-effort."""
     # Unverified labels carry no status fields, so the model couldn't be
     # honest about what was actually visible — skip the call entirely.
     if not (result.get("verification") or {}).get("verified"):
         return None
-    payload = _payload(result)
+    payload = _payload(result, width, height)
     if not payload["labels"]:
         return None
     client = _client_or_none(client)
