@@ -51,10 +51,12 @@ identified in the frame and the constellations drawn.
 Rules:
 - Mention only objects present in the input. Never invent objects, and never
   state a fact (distance, type, lore) unless you are certain of it.
-- Every object in labels was confirmed in the pixels. Describe it as
-  seen; never call it hidden, faint, or washed out. Objects that were in
-  the field but did not show up are not listed, so never say anything
-  was missing, obscured, or lost to the conditions.
+- Every object in labels is in the frame: the stars were confirmed in
+  the pixels, and the Moon, planets, and deep-sky objects are placed
+  there by the solve. Describe each as captured; never call one hidden,
+  faint, or washed out. Objects that were in the field but did not show
+  up are not listed, so never say anything was missing, obscured, or
+  lost to the conditions.
 - where is the part of the frame the object sits in (upper left, center,
   lower right, and so on). When you say where something is in the photo,
   use that word exactly. Never place an object from the pixels or from
@@ -219,10 +221,11 @@ def _payload(result, width=None, height=None):
     the hidden object up as lying just outside the frame, or lost to haze
     the input never mentioned — whatever the prompt said. The page shows
     the hidden label itself, so the blurb simply not mentioning it
-    contradicts nothing. Everything that remains was seen, so no status
-    field: the internal "projected" (Moon, planets, DSOs that passed the
-    pixel check) once read to the model as "computed but not seen", and
-    it narrated a plainly visible M31 as lost to haze. Pixel positions
+    contradicts nothing. Everything that remains is treated as captured
+    (stars snapped to a peak; the Moon, planets, and DSOs placed by the
+    solve, with only DSOs pixel-checked), so no status field: the
+    internal "projected" once read to the model as "computed but not
+    seen", and it narrated a plainly visible M31 as lost to haze. Pixel positions
     become a coarse frame region, since the model places things in the
     text anyway."""
     labels = []
@@ -235,10 +238,13 @@ def _payload(result, width=None, height=None):
             # handled better than fields it had to interpret.
             if lab.get("kind") == "dso":
                 where = _where(lab.get("x"), lab.get("y"), width, height)
-                part = f"the {where} part" if where and where != "center" \
-                    else "the center"
-                also_in_frame.append(
-                    f"{lab.get('name')}, marked in {part} of the photo")
+                if where is None:  # no frame size: marked, but not where
+                    part = "on the photo"
+                elif where == "center":
+                    part = "in the center of the photo"
+                else:
+                    part = f"in the {where} part of the photo"
+                also_in_frame.append(f"{lab.get('name')}, marked {part}")
             continue
         entry = {"name": lab.get("name"), "kind": lab.get("kind", "star"),
                  "mag": lab.get("mag")}

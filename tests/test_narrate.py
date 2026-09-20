@@ -243,7 +243,9 @@ def test_hidden_labels_never_reach_the_model():
     assert client.calls == []  # nothing seen, nothing to say
     system = narrate._SYSTEM
     assert 'status "hidden"' not in system
-    assert "Every object in labels was confirmed in the pixels" in system
+    # stars are confirmed; the Moon and planets are only projected, and
+    # the prompt must not claim more than that
+    assert "the stars were confirmed in the pixels" in " ".join(system.split())
     # A hidden DSO is still circled on the page, so it goes along as a
     # plain fragment saying where the mark is — inside the photo. Hidden
     # stars don't: "Capella didn't show" is nothing anyone needs to read.
@@ -252,6 +254,9 @@ def test_hidden_labels_never_reach_the_model():
         "Andromeda Galaxy (M31), marked in the upper left part of the photo"]
     assert narrate._payload(RESULT, width=100, height=100)["also_in_frame"] == [
         "Andromeda Galaxy (M31), marked in the left part of the photo"]
+    # no frame size: say it is marked, not where
+    assert narrate._payload(RESULT)["also_in_frame"] == [
+        "Andromeda Galaxy (M31), marked on the photo"]
     also_rule = system[system.index("- also_in_frame"):system.index("- just_outside")]
     assert "never say it is outside, beyond" in also_rule
     outside_rule = system[system.index("- just_outside_frame"):system.index("- lore")]
