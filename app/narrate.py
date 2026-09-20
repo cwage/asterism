@@ -51,16 +51,10 @@ identified in the frame and the constellations drawn.
 Rules:
 - Mention only objects present in the input. Never invent objects, and never
   state a fact (distance, type, lore) unless you are certain of it.
-- status "visible" means the object was confirmed in the pixels. Describe
-  it as seen. status "hidden" means the object's position is inside the
-  frame but nothing registered there in the pixels. You may mention at
-  most one notable hidden object, as being in the field but not showing
-  up in this photo. Do not give a reason: the input does not know whether
-  it was cloud, a rooftop, glare, or simply too faint for the exposure, so
-  never say haze, cloud, or washed out about a hidden object. Never say
-  "outside", "beyond", or "off the edge" about a hidden object either;
-  those words belong to just_outside_frame only. Never call a "visible"
-  object hidden, faint, or washed out.
+- Every object in labels was confirmed in the pixels. Describe it as
+  seen; never call it hidden, faint, or washed out. Objects that were in
+  the field but did not show up are not listed, so never say anything
+  was missing, obscured, or lost to the conditions.
 - where is the part of the frame the object sits in (upper left, center,
   lower right, and so on). When you say where something is in the photo,
   use that word exactly. Never place an object from the pixels or from
@@ -81,6 +75,13 @@ Rules:
   "a streak that may be a meteor" at low). An unknown streak is just that:
   a streak, origin not settled. Never call a streak a meteor or a
   satellite unless the verdict says so.
+- also_in_frame lists deep-sky objects whose spot the page marks on the
+  photo, though they were not confirmed in the pixels. Each says which
+  part of the photo. You may mention one, in those words: the photo takes
+  in that object, marked in that part of the frame, worth a closer look.
+  It is inside the photo: never say it is outside, beyond, or off the
+  edge, and never say it is hidden, missing, faint, or lost to haze or
+  cloud.
 - just_outside_frame lists bright objects the solve places outside the
   photo's edges, with how far and which way. They are not in the photo:
   you may mention one as being just off the edge, never as captured, and
@@ -213,16 +214,34 @@ def _where(x, y, width, height):
 def _payload(result, width=None, height=None):
     """The trimmed, public-only view of the result the model gets to see.
 
-    Verification statuses collapse to visible/hidden: the internal
-    "projected" (Moon, planets, DSOs that passed the pixel check) read to
-    the model as "computed but not seen", and it narrated a plainly
-    visible M31 as lost to haze. Pixel positions become a coarse frame
-    region, since the model places things in the text anyway."""
+    Hidden labels (in frame, not found in the pixels) are left out
+    entirely. The model was allowed one, and three times running it wrote
+    the hidden object up as lying just outside the frame, or lost to haze
+    the input never mentioned — whatever the prompt said. The page shows
+    the hidden label itself, so the blurb simply not mentioning it
+    contradicts nothing. Everything that remains was seen, so no status
+    field: the internal "projected" (Moon, planets, DSOs that passed the
+    pixel check) once read to the model as "computed but not seen", and
+    it narrated a plainly visible M31 as lost to haze. Pixel positions
+    become a coarse frame region, since the model places things in the
+    text anyway."""
     labels = []
+    also_in_frame = []
     for lab in result.get("labels") or []:
-        status = "hidden" if lab.get("status") == "hidden" else "visible"
+        if lab.get("status") == "hidden":
+            # The page still circles a hidden DSO, dashed, at its spot,
+            # so the blurb may point there too — as a plain fragment
+            # like the outside-frame pointers, which the model has
+            # handled better than fields it had to interpret.
+            if lab.get("kind") == "dso":
+                where = _where(lab.get("x"), lab.get("y"), width, height)
+                part = f"the {where} part" if where and where != "center" \
+                    else "the center"
+                also_in_frame.append(
+                    f"{lab.get('name')}, marked in {part} of the photo")
+            continue
         entry = {"name": lab.get("name"), "kind": lab.get("kind", "star"),
-                 "mag": lab.get("mag"), "status": status}
+                 "mag": lab.get("mag")}
         if lab.get("dso_type"):
             entry["dso_type"] = lab["dso_type"]
         if lab.get("phase") is not None:
@@ -251,6 +270,7 @@ def _payload(result, width=None, height=None):
             }.items() if v is not None}
             for s in (result.get("streaks") or {}).get("streaks") or []
         ],
+        "also_in_frame": also_in_frame,
         # The model once narrated "the Pleiades just outside the frame"
         # with nothing to go on; now it is told (#118).
         "just_outside_frame": [

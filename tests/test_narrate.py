@@ -62,18 +62,15 @@ def test_payload_is_trimmed_to_public_fields():
     narrate.annotate(RESULT, client=client)
     payload = json.loads(client.calls[0]["messages"][0]["content"])
     names = [l["name"] for l in payload["labels"]]
-    assert "Sirius" in names and "Andromeda Galaxy (M31)" in names
-    # statuses and types ride along so the model can be honest about clouds
-    m31 = next(l for l in payload["labels"] if "M31" in l["name"])
-    assert m31["status"] == "hidden" and m31["dso_type"] == "Gxy"
+    assert "Sirius" in names and "Jupiter" in names
+    # hidden labels (in frame, not found in the pixels) stay out: given
+    # one, the model kept writing it up as just outside the frame
+    assert "Andromeda Galaxy (M31)" not in names
     moon = next(l for l in payload["labels"] if l["name"] == "Moon")
     assert moon["moon_phase"] == 0.42
-    # internal statuses ("projected", "matched") collapse to "visible" so
-    # the model never reads a passed pixel check as "not seen"
-    assert moon["status"] == "visible"
-    sirius = next(l for l in payload["labels"] if l["name"] == "Sirius")
-    assert sirius["status"] == "visible"
-    assert {l["status"] for l in payload["labels"]} <= {"visible", "hidden"}
+    # and what remains carries no status at all: the internal "projected"
+    # and "matched" once read to the model as "computed but not seen"
+    assert not any("status" in l for l in payload["labels"])
     assert payload["constellations"] == ["Orion"]
     # satellite crossings (#11) ride along as names only
     assert payload["satellites_crossing"] == ["Iss (Zarya)"]
@@ -230,16 +227,33 @@ def test_payload_places_labels_in_a_coarse_frame_region():
     assert "Never place an object from the pixels" in narrate._SYSTEM
 
 
-def test_prompt_keeps_hidden_and_outside_frame_apart():
-    # Prod once narrated a hidden in-frame M31 as "just outside the visible
-    # pixels due to haze": the hidden rule's "(cloud or haze, usually)"
-    # became an asserted cause, and nothing fenced off the edge wording.
+def test_hidden_labels_never_reach_the_model():
+    # Prod narrated a hidden in-frame M31 as "just outside the visible
+    # pixels due to haze", then as "just beyond the frame above" once it
+    # had a coarse position — whatever the prompt said. So the model is
+    # never told about hidden objects at all, and the prompt has no
+    # "hidden" status left to misread.
+    hidden_only = dict(RESULT, labels=[
+        {"name": "Andromeda Galaxy (M31)", "x": 30.0, "y": 10.0, "mag": 3.6,
+         "kind": "dso", "dso_type": "Gxy", "status": "hidden"},
+        {"name": "Capella", "x": 90.0, "y": 90.0, "mag": 0.08,
+         "kind": "star", "status": "hidden"}])
+    client = FakeClient()
+    assert narrate.annotate(hidden_only, client=client) is None
+    assert client.calls == []  # nothing seen, nothing to say
     system = narrate._SYSTEM
-    hidden_rule = system[system.index('status "hidden"'):system.index("- kind")]
-    assert "usually" not in hidden_rule
-    assert "Do not give a reason" in hidden_rule
-    assert "never say haze, cloud, or washed out" in hidden_rule
-    assert '"off the edge" about a hidden object' in hidden_rule
+    assert 'status "hidden"' not in system
+    assert "Every object in labels was confirmed in the pixels" in system
+    # A hidden DSO is still circled on the page, so it goes along as a
+    # plain fragment saying where the mark is — inside the photo. Hidden
+    # stars don't: "Capella didn't show" is nothing anyone needs to read.
+    payload = narrate._payload(hidden_only, width=100, height=100)
+    assert payload["also_in_frame"] == [
+        "Andromeda Galaxy (M31), marked in the upper left part of the photo"]
+    assert narrate._payload(RESULT, width=100, height=100)["also_in_frame"] == [
+        "Andromeda Galaxy (M31), marked in the left part of the photo"]
+    also_rule = system[system.index("- also_in_frame"):system.index("- just_outside")]
+    assert "never say it is outside, beyond" in also_rule
     outside_rule = system[system.index("- just_outside_frame"):system.index("- lore")]
     assert "never as hidden" in outside_rule
 
