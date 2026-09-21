@@ -295,8 +295,8 @@ def render(image_path, result, share_host, out_path):
     # Bright objects just outside the frame (#118): an arrow at the edge
     # crossing, pointing out, with the name and distance inside the tail.
     # Last in line for space, like the canvas: a pointer never displaces a
-    # label for something in the shot, and one whose arrow would sit on a
-    # marker or a label is dropped whole.
+    # label for something in the shot. Both arrow and text must fit before
+    # drawing either or reserving any space.
     for p in result.get("beyond") or []:
         hx = min(max(p["edge_x"] * scale, 0), CARD_WIDTH - 1)
         hy = min(max(p["edge_y"] * scale, 0), ph - 1)
@@ -306,7 +306,23 @@ def render(image_path, result, share_host, out_path):
                  abs(hx - tx) + 10, abs(hy - ty) + 10)
         if any(_rects_overlap(r, arrow) for r in placed):
             continue
-        placed.append(arrow)
+        text = f"{p['name']} {beyond.format_deg(p['deg'])}"
+        tw = draw.textlength(text, font=font_ptr)
+        th = 29
+        upper = min(ty - th / 2, arrow[1]) - 5 - th
+        lower = max(ty + th / 2, arrow[1] + arrow[3]) + 5
+        left, right = arrow[0] - 5 - tw, arrow[0] + arrow[2] + 5
+        spots = {
+            "right": [(tx - 5 - tw, ty - th / 2), (tx - tw, lower), (tx - tw, upper)],
+            "left": [(tx + 5, ty - th / 2), (tx, lower), (tx, upper)],
+            "above": [(tx - tw / 2, ty + 5), (right, ty), (left, ty)],
+            "below": [(tx - tw / 2, ty - 5 - th), (right, ty - th), (left, ty - th)],
+        }
+        spot = _place_text([*placed, arrow], spots.get(p.get("side"), spots["right"]),
+                           tw, th, CARD_WIDTH, ph)
+        if not spot:
+            continue
+        placed.extend((arrow, spot))
         color = BEYOND_COLOR
         draw.line([(tx, ty), (hx, hy)], fill=color, width=3)
         a = math.atan2(uy, ux)
@@ -314,22 +330,8 @@ def render(image_path, result, share_host, out_path):
             draw.line([(hx, hy), (hx - 13 * math.cos(a + da),
                                   hy - 13 * math.sin(a + da))],
                       fill=color, width=3)
-        text = f"{p['name']} {beyond.format_deg(p['deg'])}"
-        tw = draw.textlength(text, font=font_ptr)
-        th = 29
-        spots = {
-            "right": [(tx - 5 - tw, ty - th / 2), (tx - tw, ty + 5),
-                      (tx - tw, ty - 5 - th)],
-            "left": [(tx + 5, ty - th / 2), (tx, ty + 5), (tx, ty - 5 - th)],
-            "above": [(tx - tw / 2, ty + 5), (tx + 5, ty), (tx - 5 - tw, ty)],
-            "below": [(tx - tw / 2, ty - 5 - th), (tx + 5, ty - th),
-                      (tx - 5 - tw, ty - th)],
-        }
-        spot = _place_text(placed, spots.get(p.get("side"), spots["right"]),
-                           tw, th, CARD_WIDTH, ph)
-        if spot:
-            draw.text((spot[0], spot[1]), text, font=font_ptr, fill=color,
-                      stroke_width=2, stroke_fill=(0, 0, 0, 160))
+        draw.text((spot[0], spot[1]), text, font=font_ptr, fill=color,
+                  stroke_width=2, stroke_fill=(0, 0, 0, 160))
 
     # Footer: brand, caption, provenance.
     draw.text((28, ph + 18), "asterism", font=font_title, fill=ACCENT)
