@@ -1356,8 +1356,8 @@ function draw() {
   // Bright objects just outside the frame (#118): an arrow where the line
   // from frame centre leaves the edge, pointing out, with the name and how
   // far. Last in line for space, so a pointer never displaces a label for
-  // something actually in the shot; one whose arrow would sit on a marker
-  // or a label at the edge is dropped whole.
+  // something actually in the shot. The arrow and its text must both fit,
+  // or the entire pointer is dropped without reserving any space.
   if (state.beyond) {
     // A step larger than the star labels and in their own colour: the
     // pointers are the one thing on the overlay that is not in the photo.
@@ -1376,7 +1376,23 @@ function draw() {
       const arrow = { x: Math.min(hx, tx) - gap, y: Math.min(hy, ty) - gap,
                       w: Math.abs(hx - tx) + 2 * gap, h: Math.abs(hy - ty) + 2 * gap };
       if (placed.some(r => rectsOverlap(r, arrow))) continue;
-      placed.push(arrow);
+      const text = `${p.name} ${formatDeg(p.deg)}`;
+      const w = ctx.measureText(text).width;
+      const h = ptrPx * 1.2;
+      // Alternate rows clear both the arrow and the original text row.
+      // A longer name can then fit above/below a star beside the tail.
+      const upper = Math.min(ty - h / 2, arrow.y) - gap - h;
+      const lower = Math.max(ty + h / 2, arrow.y + arrow.h) + gap;
+      const left = arrow.x - gap - w, right = arrow.x + arrow.w + gap;
+      const spots = {
+        right: [{ x: tx - gap - w, y: ty - h / 2 }, { x: tx - w, y: lower }, { x: tx - w, y: upper }],
+        left: [{ x: tx + gap, y: ty - h / 2 }, { x: tx, y: lower }, { x: tx, y: upper }],
+        above: [{ x: tx - w / 2, y: ty + gap }, { x: right, y: ty }, { x: left, y: ty }],
+        below: [{ x: tx - w / 2, y: ty - gap - h }, { x: right, y: ty - h }, { x: left, y: ty - h }],
+      };
+      const spot = placeText([...placed, arrow], spots[p.side] || spots.right, w, h, W, H);
+      if (!spot) continue;
+      placed.push(arrow, spot);
       const a = Math.atan2(p.uy, p.ux);
       ctx.beginPath();
       ctx.moveTo(tx, ty);
@@ -1386,18 +1402,7 @@ function draw() {
       ctx.moveTo(hx, hy);
       ctx.lineTo(hx - head * Math.cos(a + 0.5), hy - head * Math.sin(a + 0.5));
       ctx.stroke();
-      const text = `${p.name} ${formatDeg(p.deg)}`;
-      const w = ctx.measureText(text).width;
-      const h = ptrPx * 1.2;
-      // Text sits inside the tail, on whichever side has room.
-      const spots = {
-        right: [{ x: tx - gap - w, y: ty - h / 2 }, { x: tx - w, y: ty + gap }, { x: tx - w, y: ty - gap - h }],
-        left: [{ x: tx + gap, y: ty - h / 2 }, { x: tx, y: ty + gap }, { x: tx, y: ty - gap - h }],
-        above: [{ x: tx - w / 2, y: ty + gap }, { x: tx + gap, y: ty }, { x: tx - gap - w, y: ty }],
-        below: [{ x: tx - w / 2, y: ty - gap - h }, { x: tx + gap, y: ty - h }, { x: tx - gap - w, y: ty - h }],
-      };
-      const spot = placeText(placed, spots[p.side] || spots.right, w, h, W, H);
-      if (spot) ctx.fillText(text, spot.x, spot.y + ptrPx * 0.85);
+      ctx.fillText(text, spot.x, spot.y + ptrPx * 0.85);
     }
   }
   ctx.globalAlpha = 1;

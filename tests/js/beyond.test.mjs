@@ -75,6 +75,33 @@ test('a pointer whose arrow would land on a marker is dropped whole', () => {
   assert.ok(t.includes('Pleiades (M45) 12°'), 'the others still draw');
 });
 
+test('a long pointer label moves to another row around a star', () => {
+  const { sandbox, els } = loadPage();
+  const pointer = { ...SIRIUS, name: 'Andromeda Galaxy (M31)', kind: 'dso',
+                    edge_y: 400, deg: 7.8 };
+  const ctx = sandbox.document.getElementById('overlay').getContext('2d');
+  // Font widths vary across browsers. Here the full name reaches a star
+  // beside the arrow, as on the 0d0fb65e solve with its Matar label.
+  ctx.measureText = text => ({ width: text.startsWith('Andromeda') ? 270 : text.length * 7 });
+  show(sandbox, els, job({ beyond: [pointer],
+    labels: [{ name: 'Star', x: 300, y: 400, mag: 1, kind: 'star' }] }));
+  assert.ok(texts(ctx).includes('Andromeda Galaxy (M31) 8°'));
+  assert.ok(texts(ctx).includes('Star'));
+  assert.ok(reaches(ctx, 0, 400));
+});
+
+test('an unplaceable pointer leaves no arrow or reservation for the next pointer', () => {
+  const { sandbox, els } = loadPage();
+  const tooWide = { ...SIRIUS, name: 'Andromeda Galaxy (M31)', kind: 'dso' };
+  const ctx = sandbox.document.getElementById('overlay').getContext('2d');
+  ctx.measureText = text => ({ width: text.startsWith('Andromeda') ? 2000 : text.length * 7 });
+  show(sandbox, els, job({ labels: [], beyond: [tooWide] }));
+  assert.ok(!reaches(ctx, 0, 600), 'no anonymous arrow when the text cannot fit');
+  show(sandbox, els, job({ labels: [], beyond: [tooWide, SIRIUS] }));
+  assert.deepEqual(texts(ctx), ['Sirius 3°']);
+  assert.ok(reaches(ctx, 0, 600), 'the rejected pointer must leave the edge available');
+});
+
 test('the star list names them with distance and side', () => {
   const { sandbox } = loadPage();
   assert.ok(sandbox.starListText(job()).endsWith(

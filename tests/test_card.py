@@ -2,7 +2,7 @@
 Self-contained: synthetic photo + result JSON, no real jobs involved."""
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from app import card
 
@@ -174,6 +174,43 @@ def test_beyond_pointers_draw_at_the_edge_and_yield_to_labels(tmp_path, photo):
     m31 = {"name": "Andromeda Galaxy (M31)", "x": 1100, "y": 450, "mag": 3.6,
            "kind": "dso", "radius_px": 100}
     assert shaft_pixel({"labels": [m31], "beyond": [saturn]}) == plain
+
+
+def test_pointer_text_moves_clear_of_a_star(tmp_path, photo, monkeypatch):
+    # The ordinary text row is occupied, but a row above or below is free.
+    # Record the real renderer's text calls without changing font metrics.
+    drawn = []
+    original_text = ImageDraw.ImageDraw.text
+
+    def record_text(self, xy, text, *args, **kwargs):
+        drawn.append(text)
+        return original_text(self, xy, text, *args, **kwargs)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", record_text)
+    pointer = {"name": "Andromeda Galaxy (M31)", "kind": "dso", "mag": 3.6,
+               "edge_x": 0, "edge_y": 450, "ux": -1, "uy": 0,
+               "deg": 7.8, "side": "left"}
+    result = {"labels": [{"name": "Star", "x": 187.5, "y": 450,
+                          "kind": "star", "mag": 1}], "beyond": [pointer]}
+    card.render(str(photo), result, "host", str(tmp_path / "card.png"))
+    assert "Star" in drawn
+    assert "Andromeda Galaxy (M31) 8°" in drawn
+
+
+def test_pointer_without_room_for_text_leaves_no_arrow_or_reservation(tmp_path, photo):
+    pointer = {"name": "Andromeda Galaxy (M31) " * 20, "kind": "dso", "mag": 3.6,
+               "edge_x": 0, "edge_y": 450, "ux": -1, "uy": 0,
+               "deg": 7.8, "side": "left"}
+    short = dict(pointer, name="M31")
+
+    def pixels(pointers):
+        path = tmp_path / "card.png"
+        card.render(str(photo), {"labels": [], "beyond": pointers}, "host", str(path))
+        with Image.open(path) as image:
+            return image.tobytes()
+
+    assert pixels([pointer]) == pixels([])
+    assert pixels([pointer, short]) == pixels([short])
 
 
 STREAK = {"start": [300.0, 200.0], "end": [700.0, 500.0], "kind": "meteor",
