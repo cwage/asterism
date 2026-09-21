@@ -10,7 +10,9 @@ of the nearest edge.
 
 Projection uses the plain gnomonic core of the WCS (wcs_world2pix, not
 all_world2pix): the SIP distortion polynomial is fitted inside the frame
-and diverges outside it. The pointer sits where the line from frame centre
+and diverges outside it. The full transform first excludes objects inside
+the actual image, where distortion can pull a body across the plain
+projection's edge. The pointer sits where the line from frame centre
 to the object crosses the edge, and the distance quoted is the true sky
 separation between that crossing point and the object, so it does not
 inherit the projection's stretch. Anything further than MAX_TANGENT_DEG
@@ -127,6 +129,12 @@ def annotate(wcs_path, width, height, exif_info):
     for obj in candidates(exif_info):
         if _separation_deg(ra0, dec0, obj["ra"], obj["dec"]) > MAX_TANGENT_DEG:
             continue
+        try:
+            ix, iy = wcs.all_world2pix(obj["ra"], obj["dec"], 0)
+            if 0 <= ix < width and 0 <= iy < height:
+                continue  # use the same frame boundary as the label layers
+        except Exception:
+            pass  # off-frame SIP inversion can fail; the tangent core still works
         try:
             x, y = wcs.wcs_world2pix(obj["ra"], obj["dec"], 0)
             x, y = float(x), float(y)

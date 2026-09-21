@@ -77,7 +77,7 @@ def test_cloud_hidden_star_flagged_and_interpolated(tmp_path):
     assert np.hypot(hidden["x"] - tx, hidden["y"] - ty) < 10.0
 
 
-def test_bodies_are_warp_corrected_but_not_snapped(warped_image):
+def test_planet_without_its_own_source_keeps_the_warp_correction(warped_image):
     path, _ = warped_image
     body = {"name": "Jupiter", "x": 590.0, "y": 430.0, "mag": -2.0,
             "kind": "planet"}
@@ -86,6 +86,62 @@ def test_bodies_are_warp_corrected_but_not_snapped(warped_image):
     assert jupiter["status"] == "projected"
     dx, dy = warp(590.0, 430.0)
     assert np.hypot(jupiter["x"] - (590.0 + dx), jupiter["y"] - (430.0 + dy)) < 6.0
+
+
+def test_planet_near_edge_snaps_to_dominant_source_without_moving_stars(tmp_path):
+    # The Saturn failure: the planet is inside the frame, but its source
+    # is further from the projection than the ordinary star snap allows.
+    # A much fainter, closer source must not steal the label.
+    path = tmp_path / "saturn.jpg"
+    target = (985.0, 34.0)
+    synth.render_points(str(path), PREDICTED + [target, (995.0, 9.0)], WIDTH, HEIGHT,
+                        amps=[180.0] * (len(PREDICTED) + 1) + [25.0])
+    body = {"name": "Saturn", "x": 1000.0, "y": 6.0, "mag": 0.6, "kind": "planet"}
+    stars, figures, original = verify.apply(str(path), star_labels(PREDICTED), [])
+    labels, out_figures, meta = verify.apply(str(path), [body] + star_labels(PREDICTED), [])
+    assert labels[0]["status"] == "matched"
+    assert np.hypot(labels[0]["x"] - target[0], labels[0]["y"] - target[1]) < 2.0
+    assert labels[1:] == stars
+    assert out_figures == figures
+    assert meta == original  # planets must not inflate star counts or warp statistics
+    assert body["x"] == 1000.0  # the input/cached ephemeris stays untouched
+
+
+@pytest.mark.parametrize("points,amps", [
+    ([], []),                                      # nothing detected
+    ([(985.0, 34.0)], [25.0]),                      # too faint for a secure match
+    ([(985.0, 34.0), (1015.0, 34.0)], [180., 160.]), # ambiguous bright sources
+    ([(1035.0, 40.0)], [180.0]),                    # window corner, outside radius
+])
+def test_planet_keeps_projection_without_a_secure_source(tmp_path, points, amps):
+    path = tmp_path / "uncertain-planet.jpg"
+    synth.render_points(str(path), PREDICTED + points, WIDTH, HEIGHT,
+                        amps=[180.0] * len(PREDICTED) + amps)
+    body = {"name": "Saturn", "x": 1000.0, "y": 6.0, "mag": 0.6, "kind": "planet"}
+    labels, _, _ = verify.apply(str(path), star_labels(PREDICTED) + [body], [])
+    assert labels[-1]["status"] == "projected"
+    assert labels[-1]["x"] == pytest.approx(body["x"], abs=2)
+    assert labels[-1]["y"] == pytest.approx(body["y"], abs=2)
+
+
+def test_planet_does_not_claim_a_matched_star(tmp_path):
+    path = tmp_path / "near-star.jpg"
+    synth.render_points(str(path), PREDICTED, WIDTH, HEIGHT)
+    body = {"name": "Saturn", "x": 1035.0, "y": 130.0, "mag": 0.6, "kind": "planet"}
+    labels, _, meta = verify.apply(str(path), [body] + star_labels(PREDICTED), [])
+    assert labels[0]["status"] == "projected"
+    assert meta["stars_matched"] == len(PREDICTED)
+
+
+def test_planet_needs_verified_stars_and_moon_never_snaps(tmp_path):
+    path = tmp_path / "bodies.jpg"
+    synth.render_points(str(path), [(985.0, 34.0)] + PREDICTED, WIDTH, HEIGHT)
+    body = {"name": "Saturn", "x": 1000.0, "y": 6.0, "mag": 0.6, "kind": "planet"}
+    labels, _, _ = verify.apply(str(path), [body], [])
+    assert labels[0]["status"] == "projected"
+    moon = dict(body, name="Moon", kind="moon")
+    labels, _, _ = verify.apply(str(path), star_labels(PREDICTED) + [moon], [])
+    assert labels[-1]["status"] == "projected"
 
 
 def test_constellation_segments_follow_the_field(warped_image):

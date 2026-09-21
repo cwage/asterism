@@ -8,10 +8,12 @@ import math
 import os
 import time
 
+import numpy as np
 import pytest
 from astropy.io import fits
+from astropy.wcs import Sip
 
-from app import beyond
+from app import beyond, ephemeris
 from tests import synth
 
 WIDTH, HEIGHT = 2000, 1500
@@ -72,6 +74,28 @@ def test_in_frame_far_and_over_the_horizon_objects_are_skipped(
         _obj("Behind", 270.0, 0.0),     # antipode: the projection means nothing
     ])
     assert beyond.annotate(equator_wcs_file, WIDTH, HEIGHT, {}) == []
+
+
+def test_distortion_does_not_put_an_in_frame_planet_in_beyond(tmp_path, monkeypatch):
+    # Saturn in c98582b0: the plain TAN projection puts it above the top
+    # edge, while the full SIP projection correctly includes it in labels.
+    wcs = synth.make_wcs(ra=90.0, dec=0.0, fov_deg=FOV, width=WIDTH, height=HEIGHT)
+    a, b = np.zeros((3, 3)), np.zeros((3, 3))
+    b[0, 2] = -0.00005
+    wcs.sip = Sip(a, b, None, None, wcs.wcs.crpix)
+    wcs.wcs.ctype = ["RA---TAN-SIP", "DEC--TAN-SIP"]
+    ra, dec = map(float, wcs.all_pix2world(1400.0, 10.0, 0))
+    assert float(wcs.wcs_world2pix(ra, dec, 0)[1]) < 0
+    path = tmp_path / "distorted.wcs"
+    fits.PrimaryHDU(header=wcs.to_header(relax=True)).writeto(path)
+    saturn = _obj("Saturn", ra, dec, mag=0.6, kind="planet")
+    monkeypatch.setattr(ephemeris, "compute_bodies", lambda *a: [saturn])
+    _with_candidates(monkeypatch, [saturn, _obj("Off", 103.0, 0.0)])
+    exif = {"datetime_original": "2026:08:07 02:27:50", "offset_time_original": "-03:00"}
+    (label,), _ = ephemeris.annotate_bodies(str(path), WIDTH, HEIGHT, exif)
+    assert label["name"] == "Saturn" and label["y"] == pytest.approx(10, abs=0.1)
+    out = beyond.annotate(str(path), WIDTH, HEIGHT, exif)
+    assert [p["name"] for p in out] == ["Off"]
 
 
 def test_sides_are_the_photos_not_the_skys(equator_wcs_file, monkeypatch):
