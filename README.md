@@ -48,6 +48,9 @@ Final home: `asterism.quietlife.net`.
   get an extended-source check instead of point snapping (#50): core
   brightness against a surrounding annulus (or resolved member stars for
   clusters), so a label never circles "Andromeda Galaxy" over bare sky-glow.
+  Planets snap only when one nearby point source clearly dominates and is
+  not already matched to a star; otherwise they keep their projected
+  position. The Moon keeps its projected position because it is extended.
 - Satellite crossings (#11): when the photo carries both a timestamp and
   GPS, Space-Track element sets (`SPACETRACK_USER`/`SPACETRACK_PASS`) are
   propagated with sgp4 across the EXIF exposure window and projected

@@ -10,6 +10,10 @@ near each predicted position, fit a smooth residual field over the
 confident matches, re-place every label through that field, then snap
 each star label to its source — or mark it hidden when nothing is there.
 
+Planets can snap to a single dominant source within the same search radius,
+but never contribute to the star-derived field. Ambiguous or missing sources
+leave the planet at its corrected projection; the extended Moon never snaps.
+
 DSOs are extended, so they are never snapped to a point source; instead
 their pixels are checked photometrically (#50) — core aperture against a
 surrounding annulus, or resolved member stars for clusters — and a DSO
@@ -460,6 +464,41 @@ def _dso_visible(img, lab, x, y, width):
     return _dso_glow_visible(img, x, y, r)
 
 
+def _snap_planets(img, labels, search_r, snap_r, star_amps):
+    """Refine planet markers only where the pixels give a clear answer.
+
+    Near an ultrawide frame's edge the star fit can be sparse: Saturn in
+    job c98582b0 missed its source by 61px on a 3000px image. The ordinary
+    star snap radius is too tight there. Search the full correction window,
+    but demand one dominant peak, comparable to the verified stars, and
+    refuse a peak already identified as a star or another planet.
+    """
+    stars = [lab for lab in labels
+             if lab.get("kind") == "star" and lab.get("status") == "matched"]
+    if len(stars) < MIN_FIELD_MATCHES:
+        return
+    amp_floor = CANDIDATE_AMP_FRAC * float(np.median(star_amps))
+    occupied = [(lab["x"], lab["y"]) for lab in stars]
+    for lab in labels:
+        if lab.get("kind") != "planet":
+            continue
+        x, y = lab["x"], lab["y"]
+        peaks = [p for p in _peaks_near(img, x, y, search_r)
+                 if math.hypot(p[0] - x, p[1] - y) <= search_r]
+        if not peaks:
+            continue
+        best = max(peaks, key=lambda p: p[2])
+        credible = [p for p in peaks if p[2] >= best[2] * CANDIDATE_AMP_FRAC]
+        if best[2] < amp_floor or len(credible) != 1:
+            continue
+        if any(math.hypot(best[0] - sx, best[1] - sy) <= snap_r
+               for sx, sy in occupied):
+            continue
+        lab["x"], lab["y"] = round(best[0], 1), round(best[1], 1)
+        lab["status"] = "matched"
+        occupied.append((lab["x"], lab["y"]))
+
+
 def apply(image_path, labels, figures, deep=None):
     """Verify and correct labels/figures against the image. Returns
     (labels, figures, meta). Never raises on a bad image: the originals
@@ -519,7 +558,7 @@ def apply(image_path, labels, figures, deep=None):
         lab = dict(lab)
         dx, dy = field_at(lab["x"], lab["y"])
         cx, cy = lab["x"] + dx, lab["y"] + dy
-        if peaks is None:  # moon/planet/DSO: correct for warp, nothing to snap
+        if peaks is None:  # planets get a separate snap after the stars settle
             lab["status"] = "projected"
             lab["x"], lab["y"] = round(cx, 1), round(cy, 1)
             # A DSO label must not circle empty sky-glow (#50): check the
@@ -551,10 +590,14 @@ def apply(image_path, labels, figures, deep=None):
                 lab["status"] = "hidden"
                 lab["x"], lab["y"] = round(cx, 1), round(cy, 1)
 
+    star_amps = [amp for lab, _, _, amp in snaps if lab["status"] == "matched"]
+    _snap_planets(img, out, search_r, snap_r, star_amps)
+
     corrections = [np.hypot(lab["x"] - ox, lab["y"] - oy)
                    for lab, (ox, oy), _, _ in snaps
                    if lab["status"] == "matched"]
-    matched = sum(1 for lab in out if lab.get("status") == "matched")
+    matched = sum(1 for lab in out if lab.get("status") == "matched"
+                  and lab.get("kind") == "star")
     hidden = sum(1 for lab in out if lab.get("status") == "hidden"
                  and lab.get("kind") == "star")
     dsos_hidden = sum(1 for lab in out if lab.get("status") == "hidden"

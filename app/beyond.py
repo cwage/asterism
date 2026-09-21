@@ -10,7 +10,11 @@ of the nearest edge.
 
 Projection uses the plain gnomonic core of the WCS (wcs_world2pix, not
 all_world2pix): the SIP distortion polynomial is fitted inside the frame
-and diverges outside it. The pointer sits where the line from frame centre
+and diverges outside it. The full transform decides which side of the
+actual image boundary an object occupies when it converges. If it puts
+an object outside while TAN puts it inside, its coordinates also set the
+arrow direction, so the pointer faces outward. Otherwise the tangent
+core supplies the outside coordinates. The pointer sits where the line from frame centre
 to the object crosses the edge, and the distance quoted is the true sky
 separation between that crossing point and the object, so it does not
 inherit the projection's stretch. Anything further than MAX_TANGENT_DEG
@@ -127,6 +131,16 @@ def annotate(wcs_path, width, height, exif_info):
     for obj in candidates(exif_info):
         if _separation_deg(ra0, dec0, obj["ra"], obj["dec"]) > MAX_TANGENT_DEG:
             continue
+        full_outside = None
+        try:
+            ix, iy = wcs.all_world2pix(obj["ra"], obj["dec"], 0)
+            ix, iy = float(ix), float(iy)
+            if math.isfinite(ix) and math.isfinite(iy):
+                if 0 <= ix < width and 0 <= iy < height:
+                    continue  # use the same frame boundary as the label layers
+                full_outside = (ix, iy)
+        except Exception:
+            pass  # off-frame SIP inversion can fail; the tangent core still works
         try:
             x, y = wcs.wcs_world2pix(obj["ra"], obj["dec"], 0)
             x, y = float(x), float(y)
@@ -135,7 +149,12 @@ def annotate(wcs_path, width, height, exif_info):
         if not (math.isfinite(x) and math.isfinite(y)):
             continue
         if 0 <= x < width and 0 <= y < height:
-            continue  # in the frame: the layers above label it
+            if full_outside is None:
+                continue  # no usable full transform: trust the tangent core
+            # Distortion pushed it outside. Extending a ray to the TAN
+            # point would put the arrowhead beyond the object and reverse
+            # its direction, so use the converged outside coordinates.
+            x, y = full_outside
         ex, ey, side = _edge_crossing(cx, cy, x, y, width, height)
         # The crossing point lies inside the fitted region, so the
         # distortion-aware transform is the accurate one for it.
