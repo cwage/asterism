@@ -290,19 +290,51 @@ def test_no_advice_without_evidence(monkeypatch):
     assert "advice" not in result["failure"]
 
 
-def test_quick_mode_runs_only_the_first_tier(monkeypatch):
+def test_quick_mode_without_exif_runs_every_fallback_tier(monkeypatch):
+    """No focal length means no hint to size the pass to, so the quick pass
+    runs the whole fallback plan (#160). At one tier it stopped at (30, 90)
+    and a screenshot, a re-encode or an astro camera's output — the photos
+    the telephoto bracket was written for — got a failure page without the
+    narrower brackets ever running."""
+    seen = {}
+    def record(image_path, out_dir, exif_info, tiers=None, quick=False):
+        seen["tiers"] = tiers
+        seen["quick"] = quick
+        return {"success": False, "total_seconds": 3.0, "log_tail": "",
+                "attempts": [{"fov_bounds": list(t), "seconds": 1.0,
+                              "success": False, "thorough": False}
+                             for t in tiers]}
+    monkeypatch.setattr(solver, "solve_tiered", record)
+    status, result, error = worker.process(JOB)  # no EXIF focal in JOB
+    assert seen["tiers"] == solver.FALLBACK_TIERS
+    # The extra tiers are the capped pass alone, not a second full budget.
+    assert seen["quick"] is True
+    assert status == "failed"
+    # Trimmed attempts retire nothing, so "try harder" still has somewhere
+    # to go — every tier gets its full budget in deep mode.
+    assert result["failure"] == {"reason": "no_match", "can_deepen": True,
+                                 "guess_unavailable": "no_timestamp"}
+
+
+def test_an_exif_hint_still_bounds_the_quick_pass(monkeypatch):
+    """The no-EXIF widening must not leak into the hinted path: with a focal
+    length the quick pass stays on the EXIF brackets and leaves the three
+    fallbacks to deep mode, or every hinted upload pays for tiers its own
+    scale estimate already ruled out."""
     seen = {}
     def record(image_path, out_dir, exif_info, tiers=None, quick=False):
         seen["tiers"] = tiers
         return {"success": False, "total_seconds": 1.0, "log_tail": "",
-                "attempts": [{"fov_bounds": [30.0, 90.0], "seconds": 1.0,
-                              "success": False}]}
+                "attempts": [{"fov_bounds": [47.17, 94.33], "seconds": 1.0,
+                              "success": False, "thorough": False}]}
     monkeypatch.setattr(solver, "solve_tiered", record)
-    status, result, error = worker.process(JOB)
-    assert seen["tiers"] == [solver.FALLBACK_TIERS[0]]  # no EXIF focal in JOB
-    assert status == "failed"
-    assert result["failure"] == {"reason": "no_match", "can_deepen": True,
-                                 "guess_unavailable": "no_timestamp"}
+    job = dict(JOB)
+    job["exif_json"] = json.dumps({"width": 100, "height": 100,
+                                   "focal_35mm": 27.0,
+                                   "fov_bounds": [47.17, 94.33]})
+    worker.process(job)
+    assert seen["tiers"] == [(47.17, 94.33)]
+    assert solver.FALLBACK_TIERS[0] not in seen["tiers"]
 
 
 def test_quick_mode_runs_every_exif_tier(monkeypatch):

@@ -81,8 +81,17 @@ def test_split_exif_tiers_lead_the_plan():
         solver.FALLBACK_TIERS
 
 
-def test_quick_tiers_without_exif_take_the_likeliest_fallback():
-    assert solver.quick_tiers({"focal_35mm": None}) == [solver.FALLBACK_TIERS[0]]
+def test_quick_tiers_cover_the_whole_fallback_plan_without_exif():
+    """No focal length, no hint to size the pass to — so every fallback
+    bracket runs (#160). At one tier the telephoto bracket was unreachable
+    outside deep mode, which is the population it was written for:
+    screenshots, re-encodes and astro cameras carry no focal length."""
+    assert solver.quick_tiers({"focal_35mm": None}) == solver.FALLBACK_TIERS
+    # Ultrawide past index coverage drops its EXIF tier (#46) and lands in
+    # the same case: a hint that cannot be used is not a hint.
+    assert solver.quick_tiers({"focal_35mm": 11.0,
+                               "fov_bounds": (82.0, 164.0)}) == \
+        solver.FALLBACK_TIERS
 
 
 def test_quick_tiers_stop_at_the_exif_brackets():

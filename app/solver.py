@@ -37,10 +37,14 @@ CAPPED_PASS_CPULIMIT = int(os.environ.get("SOLVE_CAPPED_CPULIMIT", "15"))
 # The quick pass answers "will this solve?" while an uploader watches a
 # ticker, so it gets a hard ceiling instead of thoroughness: the full
 # unbounded budget only on the most likely tier, and the capped pass alone
-# on the rest — worst case ~60s of CPU to a verdict (2026-08-19: the
-# unthrottled two-pass quick pass held one upload for six minutes, with
-# two more people queued behind it). Deep mode re-runs every tier with the
-# full budget, so nothing is lost, only deferred behind an explicit click.
+# on the rest — worst case ~60s of CPU to a verdict on the two EXIF tiers,
+# and ~105-145s of wall clock on the three fallbacks a photo without EXIF
+# gets (#160, measured): source extraction runs per attempt, outside the
+# cpulimit, so three tiers cost more than three cpulimits. Set against
+# 2026-08-19's unthrottled two-pass quick pass, which held one upload for
+# six minutes with two more people queued behind it. Deep mode re-runs every
+# tier with the full budget, so nothing is lost, only deferred behind an
+# explicit click.
 QUICK_UNBOUNDED_CPULIMIT = int(os.environ.get("SOLVE_QUICK_CPULIMIT", "30"))
 
 # Confidence floor for accepting a solve (#71). solve-field's exit code is not
@@ -222,7 +226,8 @@ def _solve_once(image_path, out_dir, fov_bounds, objs, cpulimit):
 # telephoto tier is about photos whose EXIF didn't survive (screenshots,
 # re-encodes) — with a focal length present, tier_plan hints the scale
 # directly and never needs it. It runs last because a miss costs a full
-# CPU_LIMIT, and only deep mode gets past the first tier.
+# CPU_LIMIT; quick mode reaches it only on the photos it was written for,
+# the ones with no EXIF tiers to size the pass to instead (#160).
 FALLBACK_TIERS = [(30.0, 90.0), (8.0, 35.0), (2.5, 10.0)]
 
 # Widest field the shipped indexes (4108-4119, quads to ~30 deg) can
@@ -278,15 +283,14 @@ def quick_tiers(exif_info, plan=None):
     rather than charging every hinted upload for tiers its own scale
     estimate already ruled out.
 
-    Without one, just the most likely fallback.
-
-    Lives here rather than in the worker because the bench has to ask the
-    same question to measure it: it used to run the full plan under the
-    quick budget, which is neither mode the site ships.
+    Without one there is nothing to size the pass to, so it runs the whole
+    fallback plan (#160). Lives here rather than in the worker because the
+    bench has to ask the same question to measure it: it used to run the
+    full plan under the quick budget, which is neither mode the site ships.
     """
     if plan is None:
         plan = tier_plan(exif_info)
-    return plan[:len(exif_tiers(exif_info))] or plan[:1]
+    return plan[:len(exif_tiers(exif_info))] or plan
 
 
 def solve_tiered(image_path, out_dir, exif_info, tiers=None, quick=False):
