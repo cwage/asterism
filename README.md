@@ -16,8 +16,10 @@ Final home: `asterism.quietlife.net`.
   the resulting WCS with astropy, and projects a bright-star catalog (HYG) into
   pixel coordinates. Failures are gated (#4): a ~1s star-count pre-check
   rejects zero-star uploads instantly, and a quick solve tries only the
-  likeliest scale tier — the client can then POST `/jobs/{id}/deepen` to
-  opt into the slower fallback tiers. A solve is only accepted if its match
+  scale tiers EXIF points at — the client can then POST `/jobs/{id}/deepen`
+  to opt into the rest. With no focal length to point anywhere, the quick
+  pass runs the whole fallback plan on a capped budget instead (#160):
+  a screenshot or an astro camera's output has no hint to be bounded by. A solve is only accepted if its match
   clears a confidence floor (#71): solve-field exits 0 and writes a WCS even
   for matches built from a handful of stars, which point somewhere confidently
   wrong, so `SOLVE_MIN_LOGODDS`/`SOLVE_MIN_MATCHES` are checked against

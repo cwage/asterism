@@ -421,11 +421,18 @@ def process(job):
                 f"only {n} star-like sources detected — cloudy, daylight, "
                 "or not a sky photo"
             )
-        # Checkpoint 2: quick mode tries the EXIF-derived tiers — the
-        # uncropped bracket plus the sensor-crop extension, so a hidden-crop
-        # phone shot (#57) solves without a "try harder" click. Without
-        # EXIF, just the most likely fallback.
-        tiers = plan[:len(solver.exif_tiers(exif_info))] or plan[:1]
+        # Checkpoint 2: the brackets a quick pass can afford. Without EXIF
+        # that is now the whole fallback plan rather than its first bracket
+        # (#160). Measured 2026-09-22 on 12 corpus frames re-saved without
+        # EXIF: a failing quick verdict goes from ~54-75s to ~102-145s of
+        # wall clock. That is more than the cpulimits imply, because every
+        # tier re-extracts sources from a 12MP frame before solve-field's
+        # clock starts — the per-attempt overhead is paid three times.
+        # Only a photo that misses the first bracket pays anything: the
+        # ones that solve at 30-90 are untouched, and the ones that miss
+        # are either recovered by a narrower bracket (which is the point)
+        # or were going to fail at every scale.
+        tiers = solver.quick_tiers(exif_info, plan)
     else:
         # Deep mode: whatever the quick pass didn't already try with the
         # full budget. Quick attempts run trimmed (thorough=False, see
