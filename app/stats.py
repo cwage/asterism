@@ -135,7 +135,8 @@ SOLVE_COLUMNS = ("job_id", "created_at", "status", "mode", "reason", "logodds",
                  "nmatch", "ndistract", "stars_detected", "attempts",
                  "thorough_attempts", "timed_out", "tier_lo", "tier_hi", "seconds",
                  "exif_fov_deg", "fitted_fov_deg", "stars_matched", "stars_hidden",
-                 "warped", "limiting_mag", "time_source", "has_tilt", "make")
+                 "warped", "limiting_mag", "wasted_seconds", "time_source",
+                 "has_tilt", "make")
 
 
 def solve_record(job, status, result, exif_info=None, device=None):
@@ -175,6 +176,12 @@ def solve_record(job, status, result, exif_info=None, device=None):
         "stars_hidden": verification.get("stars_hidden"),
         "warped": None if "warped" not in verification else int(bool(verification["warped"])),
         "limiting_mag": depth.get("limiting_mag"),
+        # Seconds spent on tiers that did not land. `seconds` is the
+        # total, so the cost of a wrong scale bracket was invisible —
+        # and that is the CPU_LIMIT/FALLBACK_TIERS question a post-hoc
+        # sweep can never answer (#99).
+        "wasted_seconds": round(sum(a.get("seconds") or 0 for a in attempts
+                                    if not a.get("success")), 2) or None,
         "time_source": (result.get("ephemeris") or {}).get("time_source"),
         "has_tilt": int(bool(exif_info.get("gravity"))),
         "make": device.get("make"),

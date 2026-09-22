@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS solve_stats (
     stars_hidden INTEGER,
     warped INTEGER,
     limiting_mag REAL,
+    wasted_seconds REAL,
     time_source TEXT,
     has_tilt INTEGER,
     make TEXT
@@ -131,3 +132,12 @@ def init_db():
         conn.execute(
             "CREATE INDEX IF NOT EXISTS jobs_content_hash ON jobs (content_hash)"
         )
+        # Same for solve_stats, which is younger than the databases it
+        # has to open (#99).
+        stat_cols = [r[1] for r in conn.execute("PRAGMA table_info(solve_stats)")]
+        if "wasted_seconds" not in stat_cols:
+            try:
+                conn.execute("ALTER TABLE solve_stats ADD COLUMN wasted_seconds REAL")
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e):
+                    raise
