@@ -55,8 +55,13 @@ def run_one(path, quick=False):
     # The precheck the worker runs before the solver is invoked at all, so
     # PRECHECK_MIN_STARS can be swept alongside the acceptance gate.
     stars = verify.count_stars(path)
+    # Quick mode is the worker's quick pass, tier sizing included: running
+    # the full plan on the quick budget measures a mode the site does not
+    # ship, and hides the tier-coverage question entirely (#160).
+    tiers = solver.quick_tiers(info) if quick else None
     with tempfile.TemporaryDirectory() as out_dir:
-        result = solver.solve_tiered(path, out_dir, info, quick=quick)
+        result = solver.solve_tiered(path, out_dir, info, tiers=tiers,
+                                     quick=quick)
     return {
         "name": name,
         "success": bool(result["success"]),

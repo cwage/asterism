@@ -425,7 +425,7 @@ def process(job):
         # uncropped bracket plus the sensor-crop extension, so a hidden-crop
         # phone shot (#57) solves without a "try harder" click. Without
         # EXIF, just the most likely fallback.
-        tiers = plan[:len(solver.exif_tiers(exif_info))] or plan[:1]
+        tiers = solver.quick_tiers(exif_info, plan)
     else:
         # Deep mode: whatever the quick pass didn't already try with the
         # full budget. Quick attempts run trimmed (thorough=False, see

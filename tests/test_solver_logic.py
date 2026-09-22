@@ -81,6 +81,35 @@ def test_split_exif_tiers_lead_the_plan():
         solver.FALLBACK_TIERS
 
 
+def test_quick_tiers_without_exif_take_the_likeliest_fallback():
+    assert solver.quick_tiers({"focal_35mm": None}) == [solver.FALLBACK_TIERS[0]]
+
+
+def test_quick_tiers_stop_at_the_exif_brackets():
+    """With a usable hint the fallbacks wait for deep mode, or every hinted
+    upload pays a capped pass for scales its own EXIF already ruled out."""
+    info = {"focal_35mm": 27.0, "fov_bounds": (23.6, 80.9),
+            "fov_tiers": [[47.2, 80.9], [23.6, 47.2]]}
+    assert solver.quick_tiers(info) == [(47.2, 80.9), (23.6, 47.2)]
+    assert not set(solver.FALLBACK_TIERS) & set(solver.quick_tiers(info))
+
+
+def test_quick_tiers_are_a_prefix_of_the_plan():
+    """The quick pass never runs a bracket the deep plan would not, and
+    never reorders them: deep mode subtracts what quick already tried by
+    matching fov_bounds, so a tier outside the plan would be retried
+    forever or skipped silently."""
+    for info in ({"focal_35mm": None},
+                 {"focal_35mm": 27.0, "fov_bounds": (47.17, 94.33)},
+                 {"focal_35mm": 11.0, "fov_bounds": (82.0, 164.0)},
+                 {"focal_35mm": 27.0, "fov_bounds": (23.6, 80.9),
+                  "fov_tiers": [[47.2, 80.9], [23.6, 47.2]]}):
+        plan = solver.tier_plan(info)
+        quick = solver.quick_tiers(info)
+        assert quick == plan[:len(quick)]
+        assert quick, "a quick pass with no tiers reports failure unsolved"
+
+
 def test_exif_tiers_empty_without_a_hint():
     assert solver.exif_tiers({"focal_35mm": None}) == []
     # Ultrawide beyond index coverage: no EXIF tiers at all (#46).

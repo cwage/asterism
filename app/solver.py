@@ -269,6 +269,26 @@ def tier_plan(exif_info):
     return tiers
 
 
+def quick_tiers(exif_info, plan=None):
+    """The scale brackets a quick pass runs, given what EXIF offers.
+
+    With a focal length: the EXIF-derived brackets only — the uncropped one
+    plus the sensor-crop extension, so a hidden-crop phone shot (#57) solves
+    without a "try harder" click, while the fallbacks wait for deep mode
+    rather than charging every hinted upload for tiers its own scale
+    estimate already ruled out.
+
+    Without one, just the most likely fallback.
+
+    Lives here rather than in the worker because the bench has to ask the
+    same question to measure it: it used to run the full plan under the
+    quick budget, which is neither mode the site ships.
+    """
+    if plan is None:
+        plan = tier_plan(exif_info)
+    return plan[:len(exif_tiers(exif_info))] or plan[:1]
+
+
 def solve_tiered(image_path, out_dir, exif_info, tiers=None, quick=False):
     """Run solve() over successively broader scale guesses until one sticks.
     Returns the last solve() result, with an `attempts` summary appended.
