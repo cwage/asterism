@@ -425,10 +425,11 @@ the run has already recorded, so candidate values can be tried against a
 saved bench run without re-solving anything:
 
 ```
-docker compose run --rm -T worker python -u -m app.bench /photos --sample 40 --json /photos/base.json
-docker compose run --rm worker python -m app.bench --sweep /photos/base.json --logodds 20,25,30
+docker compose run --rm -T worker python -u -m app.bench /photos --sample 40 --json /data/base.json
+docker compose run --rm worker python -m app.bench --sweep /data/base.json --logodds 20,25,30
 ```
 
+The corpus mount is read-only; saved runs go under `/data`, which is not.
 The sweep prints the pass rate at each value and names the photos that flip.
 Loosening is exact; tightening is a lower bound, because a tier the run
 stopped at would have kept going under a stricter gate. The same report runs
@@ -439,7 +440,7 @@ change what the solver does, so a sweep cannot answer them. Save a run on
 each side and compare:
 
 ```
-docker compose run --rm worker python -m app.bench --compare /photos/base.json /photos/after.json
+docker compose run --rm worker python -m app.bench --compare /data/base.json /data/after.json
 ```
 
 That one also reports total seconds, which is the cost half of the argument.

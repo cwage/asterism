@@ -315,3 +315,34 @@ def test_an_early_tiers_match_is_not_lost_to_a_later_empty_one(fresh_db):
     assert rec["logodds"] == 22.1 and rec["nmatch"] == 7
     assert thresholds.from_solve_stats(
         dict(rec, status="failed"))["gate_rejected"] is True
+
+
+def test_an_accepted_solve_without_metrics_is_not_scored_as_a_failure():
+    """solver.match_stats is best-effort: a solve that wrote a WCS but no
+    readable match table is accepted on purpose, so `low_confidence` is
+    inert and no gate value could have rejected it. Scoring it as a
+    no-match failure reported it lost at every threshold, including the
+    one it actually ran under."""
+    rec = thresholds.from_bench(_photo(
+        "nometrics.jpg", success=True,
+        attempts=[_attempt(success=True)]))  # succeeded, no match table
+    assert rec["matches"] == [] and rec["logodds"] is None
+    assert thresholds.solved_at(rec, 25.0, 8, 10) is True
+    assert thresholds.solved_at(rec, 999.0, 99, 10) is True
+    # the star precheck is a separate gate and still applies
+    assert thresholds.solved_at(rec, 25.0, 8, 500) is False
+    out = thresholds.sweep([rec], 25.0, 8, 10)
+    assert out["passed"] == 1 and out["lost"] == []
+
+
+def test_a_failure_without_metrics_stays_a_failure():
+    rec = thresholds.from_bench(_photo("blank.jpg", attempts=[_attempt()]))
+    assert thresholds.solved_at(rec, 0.0, 0, 0) is False
+
+
+def test_the_same_holds_for_a_production_row():
+    rec = thresholds.from_solve_stats(
+        {"job_id": "j", "status": "done", "logodds": None, "nmatch": None,
+         "stars_detected": 90})
+    assert thresholds.solved_at(rec, 25.0, 8, 10) is True
+    assert rec["gate_rejected"] is False

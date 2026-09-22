@@ -93,6 +93,14 @@ def solved_at(rec, min_logodds, min_matches, min_stars):
         logodds, nmatch = rec.get("logodds"), rec.get("nmatch")
         candidates = ([{"logodds": logodds, "nmatch": nmatch}]
                       if logodds is not None and nmatch is not None else [])
+    if not candidates:
+        # No numbers, so the gate never judged this one and a candidate
+        # value cannot change it. `solver.match_stats` is best-effort: a
+        # solve that wrote a WCS but no readable match table is accepted
+        # deliberately, and `low_confidence = bool(stats) and ...` is inert
+        # without stats, so such a solve stands at every threshold. A
+        # failure with no match stands too — no gate recovers it.
+        return bool(rec.get("solved"))
     return any(c["logodds"] is not None and c["nmatch"] is not None
                and c["logodds"] >= min_logodds and c["nmatch"] >= min_matches
                for c in candidates)

@@ -10,9 +10,11 @@ tried over a saved run in a second instead of hours.
 
 Usage (in the container):
 
-    python -u -m app.bench /photos --sample 40 --json /photos/base.json
-    python -m app.bench --sweep /photos/base.json --logodds 20,25,30
-    python -m app.bench --compare /photos/base.json /photos/after.json
+    python -u -m app.bench /photos --sample 40 --json /data/base.json
+    python -m app.bench --sweep /data/base.json --logodds 20,25,30
+    python -m app.bench --compare /data/base.json /data/after.json
+
+The corpus mount is read-only, so saved runs go under /data, which is not.
 
 The corpus is an astrophotography dataset, a different population from
 casual phone uploads: it bounds a threshold question, it does not settle
