@@ -428,7 +428,10 @@ def process(job):
         # wall clock. That is more than the cpulimits imply, because every
         # tier re-extracts sources from a 12MP frame before solve-field's
         # clock starts — the per-attempt overhead is paid three times.
-        # Only photos that were going to fail anyway pay it.
+        # Only a photo that misses the first bracket pays anything: the
+        # ones that solve at 30-90 are untouched, and the ones that miss
+        # are either recovered by a narrower bracket (which is the point)
+        # or were going to fail at every scale.
         tiers = solver.quick_tiers(exif_info, plan)
     else:
         # Deep mode: whatever the quick pass didn't already try with the
