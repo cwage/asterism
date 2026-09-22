@@ -28,11 +28,20 @@ import hmac
 import json
 import secrets
 
+from . import solver
+
 SALT_PREFIX = "salt:"
 # 64 bits of a 256-bit HMAC: collisions between the handful of addresses
 # the site sees in a day are not a concern, and a short token reads better
 # in a query result.
 HASH_CHARS = 16
+
+
+def worker_min_stars():
+    """The pre-solve gate's value, imported lazily: worker imports stats,
+    so naming it at module level would close the cycle."""
+    from .worker import PRECHECK_MIN_STARS
+    return PRECHECK_MIN_STARS
 
 
 def _today(conn, now=None):
@@ -135,7 +144,8 @@ SOLVE_COLUMNS = ("job_id", "created_at", "status", "mode", "reason", "logodds",
                  "nmatch", "ndistract", "stars_detected", "attempts",
                  "thorough_attempts", "timed_out", "tier_lo", "tier_hi", "seconds",
                  "exif_fov_deg", "fitted_fov_deg", "stars_matched", "stars_hidden",
-                 "warped", "limiting_mag", "time_source", "has_tilt", "make")
+                 "warped", "limiting_mag", "wasted_seconds", "gate_logodds",
+                 "gate_matches", "gate_stars", "time_source", "has_tilt", "make")
 
 
 def solve_record(job, status, result, exif_info=None, device=None):
@@ -145,8 +155,16 @@ def solve_record(job, status, result, exif_info=None, device=None):
     result = result or {}
     exif_info = exif_info or {}
     device = device or {}
-    match = result.get("match") or {}
     attempts = result.get("attempts") or []
+    # `result["match"]` is the *last* attempt's, so an early tier's
+    # low-confidence match was lost whenever a later tier matched nothing
+    # at all — and a gate-rejected solve is exactly the row a threshold
+    # argument needs (#99). Prefer the winner, then the closest miss.
+    scored = [a for a in attempts if a.get("match")]
+    won_match = next((a["match"] for a in scored if a.get("success")), None)
+    best_miss = (max(scored, key=lambda a: a["match"].get("logodds") or 0.0)["match"]
+                 if scored else None)
+    match = won_match or best_miss or result.get("match") or {}
     won = next((a for a in attempts if a.get("success")), None)
     verification = result.get("verification") or {}
     depth = verification.get("depth") or {}
@@ -175,6 +193,18 @@ def solve_record(job, status, result, exif_info=None, device=None):
         "stars_hidden": verification.get("stars_hidden"),
         "warped": None if "warped" not in verification else int(bool(verification["warped"])),
         "limiting_mag": depth.get("limiting_mag"),
+        # Seconds spent on tiers that did not land. `seconds` is the
+        # total, so the cost of a wrong scale bracket was invisible —
+        # and that is the CPU_LIMIT/FALLBACK_TIERS question a post-hoc
+        # sweep can never answer (#99).
+        "wasted_seconds": round(sum(a.get("seconds") or 0 for a in attempts
+                                    if not a.get("success")), 2) or None,
+        # The gates this row ran under. Without them the numbers stop being
+        # interpretable the moment a threshold moves: a sweep over old rows
+        # could not tell loosening from tightening (#99).
+        "gate_logodds": solver.MIN_LOGODDS,
+        "gate_matches": solver.MIN_MATCHES,
+        "gate_stars": worker_min_stars(),
         "time_source": (result.get("ephemeris") or {}).get("time_source"),
         "has_tilt": int(bool(exif_info.get("gravity"))),
         "make": device.get("make"),
