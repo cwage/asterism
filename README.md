@@ -418,6 +418,34 @@ set them from accumulates. Read it back with:
 fly ssh console -C "python3 -c 'from app import db, stats; import json; conn = db.get_conn(); print(json.dumps(stats.solve_history(conn, 30), indent=1))'"
 ```
 
+### Moving a threshold
+
+`MIN_LOGODDS`, `MIN_MATCHES` and `PRECHECK_MIN_STARS` are applied to numbers
+the run has already recorded, so candidate values can be tried against a
+saved bench run without re-solving anything:
+
+```
+docker compose run --rm -T worker python -u -m app.bench /photos --sample 40 --json /photos/base.json
+docker compose run --rm worker python -m app.bench --sweep /photos/base.json --logodds 20,25,30
+```
+
+The sweep prints the pass rate at each value and names the photos that flip.
+Loosening is exact; tightening is a lower bound, because a tier the run
+stopped at would have kept going under a stricter gate. The same report runs
+over production rows with `--history 30`.
+
+The tier bounds in `FALLBACK_TIERS`, `SOLVE_CPULIMIT` and `SOURCE_DEPTH`
+change what the solver does, so a sweep cannot answer them. Save a run on
+each side and compare:
+
+```
+docker compose run --rm worker python -m app.bench --compare /photos/base.json /photos/after.json
+```
+
+That one also reports total seconds, which is the cost half of the argument.
+`solve_stats.wasted_seconds` is the production view of it: the seconds spent
+on tiers that did not land.
+
 Within the retention window the live rows answer the sharper question — which
 of the last day's uploads came from the same address:
 

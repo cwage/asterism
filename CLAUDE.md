@@ -25,6 +25,21 @@
   synthetic (`tests/synth.py`) — keep it that way.
 - Full-corpus bench takes hours (~45s/image, ~200s per failure). Sample instead.
 
+## Thresholds are measured, not guessed (#99)
+- Any change to `MIN_LOGODDS`, `MIN_MATCHES`, `PRECHECK_MIN_STARS`,
+  `FALLBACK_TIERS`, `SOLVE_CPULIMIT` or `SOURCE_DEPTH` reports what it does
+  to corpus pass rate — not what it does to the one photo that prompted it.
+  `MIN_LOGODDS`/`MIN_MATCHES` were set from six photos and were wrong within
+  a day (#86).
+- The first three are post-hoc gates: sweep them over a saved run, no
+  re-solve needed. `python -m app.bench --sweep run.json --logodds 20,25,30`.
+- The last three change what the solver does: save a run on each side and
+  `--compare`. Quote the seconds too, not just the pass rate.
+- Paste the sweep or compare output in the PR. See README, "Moving a
+  threshold". The corpus is an astrophotography dataset, a different
+  population from casual phone uploads: it bounds the question, it does not
+  settle it.
+
 ## Deploy workflow
 - Deploy BEFORE merging: `fly deploy` from the feature branch, verify it works
   in prod, and only then merge the PR. main stays pristine as the rollback
