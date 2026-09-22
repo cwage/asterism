@@ -222,3 +222,96 @@ def test_the_success_status_is_done_not_solved():
     assert thresholds.from_solve_stats({"status": "done"})["solved"] is True
     assert thresholds.from_solve_stats({"status": "failed"})["solved"] is False
     assert thresholds.from_solve_stats({"status": "solved"})["solved"] is False
+
+
+# --- what the review caught ------------------------------------------
+
+def test_a_sweep_considers_every_matched_attempt():
+    """The gate has two axes, so ranking attempts on log-odds alone drops
+    the one that would have cleared a candidate on match count. Neither
+    of these clears 25/8; only the lower-log-odds one clears 20/8."""
+    rec = thresholds.from_bench(_photo("x.jpg", attempts=[
+        _attempt(logodds=24.0, nmatch=100), _attempt(logodds=100.0, nmatch=1)]))
+    assert thresholds.solved_at(rec, 20.0, 8, 10) is True
+    assert thresholds.solved_at(rec, 25.0, 8, 10) is False
+    # and the representative kept for display is still the best miss
+    assert rec["logodds"] == 100.0
+
+
+def test_solved_at_still_reads_a_record_without_the_attempt_list():
+    """Hand-built records and older saved runs have no `matches`."""
+    rec = {"name": "x", "solved": True, "stars_detected": 40,
+           "logodds": 26.0, "nmatch": 9}
+    assert thresholds.solved_at(rec, 25.0, 8, 10) is True
+    assert thresholds.solved_at(rec, 30.0, 8, 10) is False
+
+
+def test_gate_rejection_is_not_a_reason_string():
+    """_describe_failure writes no_match, timeout, partial_timeout or
+    no_stars — never low_confidence. Keying on that string made the
+    matched-but-rejected line permanently empty."""
+    from app import worker
+
+    for reason in ("no_match", "timeout", "partial_timeout"):
+        rec = thresholds.from_solve_stats(
+            {"status": "failed", "reason": reason, "logodds": 22.1,
+             "nmatch": 7, "stars_detected": 57})
+        assert rec["gate_rejected"] is True, reason
+    # a failure with no numbers at all was never judged by the gate
+    assert thresholds.from_solve_stats(
+        {"status": "failed", "reason": "no_stars", "logodds": None,
+         "nmatch": None})["gate_rejected"] is False
+    # a solve is not a rejection
+    assert thresholds.from_solve_stats(
+        {"status": "done", "logodds": 70.6, "nmatch": 19})["gate_rejected"] is False
+    # pin the vocabulary this depends on, so a new reason string is noticed
+    tried = [{"timed_out": False, "fov_bounds": [30.0, 90.0]}]
+    ran_out = [{"timed_out": True, "fov_bounds": [8.0, 35.0]}]
+    assert worker._describe_failure(tried)[0] == "no_match"
+    assert worker._describe_failure(ran_out)[0] == "timeout"
+    assert worker._describe_failure(tried + ran_out)[0] == "partial_timeout"
+
+
+def test_no_baseline_means_no_exactness_claim():
+    """Production rows can span a threshold change, or predate the gate
+    columns. Claiming exactness against this build's constants would be
+    the tool lying about its own footing."""
+    assert thresholds.sweep(_recs(), 20.0, 7, 10)["exact"] is None
+    assert thresholds.sweep(_recs(), 20.0, 7, 10, baseline={
+        "min_logodds": 25.0, "min_matches": 8, "min_stars": 10})["exact"] is True
+
+
+def test_a_row_records_the_gates_it_ran_under(fresh_db):
+    from app import db, solver, stats
+
+    conn = db.get_conn()
+    result = {"success": True, "total_seconds": 4.0, "attempts": [
+        {"fov_bounds": [30.0, 90.0], "seconds": 4.0, "success": True,
+         "match": {"logodds": 70.6, "nmatch": 19, "ndistract": 0}}]}
+    rec = stats.record_solve(conn, _Row({"id": "j3", "created_at": "x",
+                                         "mode": "quick"}), "done", result)
+    assert rec["gate_logodds"] == solver.MIN_LOGODDS
+    assert rec["gate_matches"] == solver.MIN_MATCHES
+    row = dict(conn.execute("SELECT * FROM solve_stats WHERE job_id='j3'").fetchone())
+    assert row["gate_logodds"] == solver.MIN_LOGODDS
+    assert row["gate_stars"] == stats.worker_min_stars()
+
+
+def test_an_early_tiers_match_is_not_lost_to_a_later_empty_one(fresh_db):
+    """result["match"] is the last attempt's. A gate-rejected match on
+    tier one followed by a tier that matched nothing used to store None,
+    losing exactly the row a threshold argument needs."""
+    from app import db, stats
+
+    conn = db.get_conn()
+    result = {"success": False, "total_seconds": 60.0, "match": None,
+              "attempts": [
+                  {"fov_bounds": [30.0, 90.0], "seconds": 20.0, "success": False,
+                   "match": {"logodds": 22.1, "nmatch": 7, "ndistract": 3}},
+                  {"fov_bounds": [8.0, 35.0], "seconds": 40.0, "success": False},
+              ], "failure": {"reason": "no_match"}}
+    rec = stats.record_solve(conn, _Row({"id": "j4", "created_at": "x",
+                                         "mode": "deep"}), "failed", result)
+    assert rec["logodds"] == 22.1 and rec["nmatch"] == 7
+    assert thresholds.from_solve_stats(
+        dict(rec, status="failed"))["gate_rejected"] is True

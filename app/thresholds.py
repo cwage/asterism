@@ -25,9 +25,15 @@ def from_bench(rec):
     """Normalize one bench photo record."""
     attempts = rec.get("attempts") or []
     matched = [a for a in attempts if a.get("match")]
-    # The winning attempt when there was one, else the closest miss: the
-    # gate rejects on either number, so rank by log-odds and let the
-    # sweep decide what the match count would have done.
+    # Every matched attempt, not the best one: the gate has two axes, so
+    # ranking on log-odds alone throws away the attempt that would have
+    # cleared a candidate on match count. (24, 100) and (100, 1) both miss
+    # 25/8, but only the first clears 20/8, and it is not the higher
+    # log-odds. Keeping all of them is what makes a two-axis sweep honest.
+    candidates = [{"logodds": a["match"].get("logodds"),
+                   "nmatch": a["match"].get("nmatch")} for a in matched]
+    # The representative for display and for the margin distribution: the
+    # winner if there was one, else the closest miss on log-odds.
     best = next((a for a in matched if a.get("success")), None)
     if best is None and matched:
         best = max(matched, key=lambda a: a["match"].get("logodds") or 0.0)
@@ -38,23 +44,37 @@ def from_bench(rec):
         "stars_detected": rec.get("stars_detected"),
         "logodds": match.get("logodds"),
         "nmatch": match.get("nmatch"),
+        "matches": candidates,
         "seconds": rec.get("total_seconds"),
         "gate_rejected": bool(matched) and not any(a.get("success") for a in attempts),
     }
 
 
 def from_solve_stats(row):
-    """Normalize one `solve_stats` row (`stats.solve_history`)."""
+    """Normalize one `solve_stats` row (`stats.solve_history`).
+
+    A row carries one match, not the per-attempt list a bench run keeps,
+    so a sweep over production is coarser than one over the corpus.
+    """
+    # The worker's success status is "done" (worker.process); reading this
+    # as "solved" silently scores every real solve as a failure.
+    solved = row.get("status") == "done"
+    logodds, nmatch = row.get("logodds"), row.get("nmatch")
     return {
         "name": row.get("job_id"),
-        # The worker's success status is "done" (worker.process); reading
-        # this as "solved" silently scores every real solve as a failure.
-        "solved": row.get("status") == "done",
+        "solved": solved,
         "stars_detected": row.get("stars_detected"),
-        "logodds": row.get("logodds"),
-        "nmatch": row.get("nmatch"),
+        "logodds": logodds,
+        "nmatch": nmatch,
+        "matches": ([{"logodds": logodds, "nmatch": nmatch}]
+                    if logodds is not None and nmatch is not None else []),
         "seconds": row.get("seconds"),
-        "gate_rejected": row.get("reason") == "low_confidence",
+        # Not a reason string: _describe_failure only ever writes no_match,
+        # timeout, partial_timeout or no_stars, so testing for
+        # "low_confidence" made this permanently False and quietly emptied
+        # the matched-but-rejected line. A failed job that nonetheless has
+        # numbers is exactly a job the gate turned down.
+        "gate_rejected": (not solved) and logodds is not None and nmatch is not None,
     }
 
 
@@ -68,10 +88,14 @@ def solved_at(rec, min_logodds, min_matches, min_stars):
     stars = rec.get("stars_detected")
     if stars is not None and stars < min_stars:
         return False
-    logodds, nmatch = rec.get("logodds"), rec.get("nmatch")
-    if logodds is None or nmatch is None:
-        return False
-    return logodds >= min_logodds and nmatch >= min_matches
+    candidates = rec.get("matches")
+    if candidates is None:  # a record built by hand, or an older run file
+        logodds, nmatch = rec.get("logodds"), rec.get("nmatch")
+        candidates = ([{"logodds": logodds, "nmatch": nmatch}]
+                      if logodds is not None and nmatch is not None else [])
+    return any(c["logodds"] is not None and c["nmatch"] is not None
+               and c["logodds"] >= min_logodds and c["nmatch"] >= min_matches
+               for c in candidates)
 
 
 def sweep(records, min_logodds, min_matches, min_stars, baseline=None):
@@ -81,6 +105,11 @@ def sweep(records, min_logodds, min_matches, min_stars, baseline=None):
     than the run on any axis the answer is a lower bound, because tiers
     that the run stopped short of would have kept going under the stricter
     gate and might have landed. Loosening is exact.
+
+    `baseline=None` means the gates these records ran under are not known —
+    production rows written before the gate columns existed, or a window
+    spanning a threshold change. Then `exact` is None: neither claim can be
+    made, and saying "exact" would be the tool lying about its own footing.
     """
     flips = {"gained": [], "lost": []}
     passed = 0
@@ -97,7 +126,7 @@ def sweep(records, min_logodds, min_matches, min_stars, baseline=None):
         "total": len(records), "passed": passed,
         "rate": round(passed / len(records), 3) if records else 0.0,
         "gained": flips["gained"], "lost": flips["lost"],
-        "exact": True,
+        "exact": None,
     }
     if baseline:
         out["exact"] = (min_logodds <= baseline.get("min_logodds", min_logodds)

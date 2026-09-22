@@ -79,6 +79,9 @@ CREATE TABLE IF NOT EXISTS solve_stats (
     warped INTEGER,
     limiting_mag REAL,
     wasted_seconds REAL,
+    gate_logodds REAL,
+    gate_matches INTEGER,
+    gate_stars INTEGER,
     time_source TEXT,
     has_tilt INTEGER,
     make TEXT
@@ -135,9 +138,11 @@ def init_db():
         # Same for solve_stats, which is younger than the databases it
         # has to open (#99).
         stat_cols = [r[1] for r in conn.execute("PRAGMA table_info(solve_stats)")]
-        if "wasted_seconds" not in stat_cols:
-            try:
-                conn.execute("ALTER TABLE solve_stats ADD COLUMN wasted_seconds REAL")
-            except sqlite3.OperationalError as e:
-                if "duplicate column" not in str(e):
-                    raise
+        for name, decl in (("wasted_seconds", "REAL"), ("gate_logodds", "REAL"),
+                           ("gate_matches", "INTEGER"), ("gate_stars", "INTEGER")):
+            if name not in stat_cols:
+                try:
+                    conn.execute(f"ALTER TABLE solve_stats ADD COLUMN {name} {decl}")
+                except sqlite3.OperationalError as e:
+                    if "duplicate column" not in str(e):
+                        raise

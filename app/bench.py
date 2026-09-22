@@ -127,7 +127,7 @@ def report_records(recs, cur):
     """Shared by the corpus and by production rows, so a threshold
     argument reads the same whichever it is quoting (#99)."""
     m = thresholds.margins(recs)
-    print(f"\nthresholds in this run: logodds>={cur['min_logodds']} "
+    print(f"\ngates: logodds>={cur['min_logodds']} "
           f"matches>={cur['min_matches']} stars>={cur['min_stars']} "
           f"cpulimit={cur['cpulimit']}")
     if m["n"]:
@@ -156,10 +156,12 @@ def sweep_cmd(path, logodds=None, matches=None, stars=None):
     _sweep_table(recs, base, logodds, matches, stars)
 
 
-def _sweep_table(recs, base, logodds=None, matches=None, stars=None):
-    los = logodds or [base["min_logodds"]]
-    nms = matches or [base["min_matches"]]
-    sts = stars or [base["min_stars"]]
+def _sweep_table(recs, base, logodds=None, matches=None, stars=None,
+                 fallback=None):
+    defaults = base or fallback or {}
+    los = logodds or [defaults["min_logodds"]]
+    nms = matches or [defaults["min_matches"]]
+    sts = stars or [defaults["min_stars"]]
     print(f"\n{'logodds':>8} {'matches':>8} {'stars':>6} {'passed':>8} {'rate':>7}  flips")
     for lo in los:
         for nm in nms:
@@ -171,12 +173,22 @@ def _sweep_table(recs, base, logodds=None, matches=None, stars=None):
                 if out["lost"]:
                     flips.append(f"-{len(out['lost'])}: "
                                  + ", ".join(out["lost"][:3]))
-                mark = "" if out["exact"] else "  (lower bound: stricter than the run)"
+                if out["exact"] is None:
+                    mark = "  (exactness unknown: these rows' gates are not recorded)"
+                elif out["exact"]:
+                    mark = ""
+                else:
+                    mark = "  (lower bound: stricter than the run)"
                 print(f"{lo:>8} {nm:>8} {st:>6} {out['passed']:>8} "
                       f"{out['rate']:>7.1%}  {' '.join(flips)}{mark}")
-    print("\nLoosening is exact. Tightening is a lower bound: a tier the run "
-          "stopped at would have kept going under a stricter gate, and might "
-          "have landed. Tier bounds and CPU limits need --compare, not a sweep.")
+    if base is None:
+        print("\nThese records do not say what gates they ran under, so no "
+              "exactness claim is made for them either way.")
+    else:
+        print("\nLoosening is exact. Tightening is a lower bound: a tier the "
+              "run stopped at would have kept going under a stricter gate, and "
+              "might have landed.")
+    print("Tier bounds and CPU limits need --compare, not a sweep.")
 
 
 def history_cmd(days=None, logodds=None, matches=None, stars=None):
@@ -189,16 +201,33 @@ def history_cmd(days=None, logodds=None, matches=None, stars=None):
     from . import db, stats
 
     conn = db.get_conn()
-    recs = [thresholds.from_solve_stats(r) for r in stats.solve_history(conn, days)]
+    rows = stats.solve_history(conn, days)
+    recs = [thresholds.from_solve_stats(r) for r in rows]
     if not recs:
         print("no rows in solve_stats yet")
         return
-    cur = thresholds.current()
     window = f"the last {days} days" if days else "all retained rows"
     print(f"{len(recs)} finished jobs over {window}")
-    report_records(recs, cur)
+
+    # The gates each row ran under, not this process's constants: a window
+    # can span a threshold change, and rows written before the gate columns
+    # existed carry none at all. Where they disagree there is no baseline to
+    # judge a candidate against, and the sweep says so instead of guessing.
+    gates = {(r.get("gate_logodds"), r.get("gate_matches"), r.get("gate_stars"))
+             for r in rows}
+    base = None
+    if len(gates) == 1:
+        lo, nm, st = gates.pop()
+        if None not in (lo, nm, st):
+            base = {"min_logodds": lo, "min_matches": nm, "min_stars": st}
+    cur = thresholds.current()
+    report_records(recs, dict(base, cpulimit=cur["cpulimit"]) if base else cur)
+    if base is None:
+        print("(those are this build's gates: the rows do not all record their "
+              "own, so some of them ran under others)")
     if logodds or matches or stars:
-        _sweep_table(recs, cur, logodds, matches, stars)
+        _sweep_table(recs, base, logodds, matches, stars,
+                     fallback=thresholds.current())
 
 
 def compare_cmd(before_path, after_path):
