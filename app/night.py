@@ -284,7 +284,12 @@ def _moon_line(moon, sun):
             return (f"The Moon was {phrase} but below the horizon, so it took "
                     "nothing from the sky.")
         return f"The Moon was {phrase} and below the horizon."
-    return f"The Moon was {phrase}."
+    # Altitude unknown: either no location was worked out, or the region
+    # estimate straddles the horizon. Say so rather than stopping at the
+    # phase — the narrator read that half-sentence as the Moon being
+    # absent, a condition nothing here measured.
+    return (f"The Moon was {phrase}, though there is no telling from this "
+            "photo whether it had risen.")
 
 
 def _depth_line(depth):

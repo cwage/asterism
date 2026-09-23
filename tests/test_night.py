@@ -133,8 +133,17 @@ def test_moon_lines():
         "The Moon in the frame was at first quarter, 52% lit, bright enough to wash out the fainter stars."]
     assert d({"moon": _moon("waxing crescent", 0.30, near_frame=True)}) == [
         "The Moon just outside the frame was a waxing crescent, 30% lit."]
+    # Altitude unknown: the line has to close the question itself, or the
+    # narrator closes it — a 62%-lit Moon with no location became "the
+    # waxing gibbous Moon absent" in prod.
     assert d({"moon": _moon("waning gibbous", 0.70)}) == [
-        "The Moon was a waning gibbous, 70% lit."]
+        "The Moon was a waning gibbous, 70% lit, though there is no telling "
+        "from this photo whether it had risen."]
+    # Bright and dim take the same wording: brightness says nothing about
+    # whether it was above the horizon.
+    assert d({"moon": _moon("waxing gibbous", 0.88)}) == [
+        "The Moon was a waxing gibbous, 88% lit, though there is no telling "
+        "from this photo whether it had risen."]
 
 
 def test_moon_names():
