@@ -92,11 +92,14 @@ Rules:
   in frame. You may draw on its facts; never contradict them, and don't
   repeat a sentence word for word, since it is shown beside your text.
 - night_notes are measured facts about the conditions: twilight or full
-  dark, the Moon's phase and whether it was up, how faint a star the photo
-  recorded, and where on Earth the phone's tilt and the sky geometry place
-  the camera. You may weave one into the text, keeping its numbers and
-  place names as given, and must never contradict them. Say nothing
-  about the weather or the sky's clarity that night_notes doesn't say.
+  dark, the Moon's phase and what is known of whether it was up, how faint
+  a star the photo recorded, and where on Earth the phone's tilt and the
+  sky geometry place the camera. You may weave one into the text, keeping
+  its numbers and place names as given, and must never contradict them.
+  Each note says all that was measured: never settle a question one
+  leaves open, and never say the Moon was absent, out, risen, or set
+  unless a note says so. Say nothing about the weather or the sky's
+  clarity that night_notes doesn't say.
 - You may also be shown the photo. The labels above stay the authority on
   sky objects — never claim a sky object from the pixels alone. You may
   mention the foreground scene (a treeline, a rooftop, someone silhouetted
