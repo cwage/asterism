@@ -278,6 +278,18 @@ def test_night_notes_reach_the_model_as_facts():
     assert json.loads(client.calls[0]["messages"][0]["content"])["night_notes"] == []
 
 
+def test_the_prompt_leaves_an_open_moon_question_open():
+    # night.py ends the unknown-altitude line on the uncertainty; this is
+    # the backstop for it. Prod turned "a waxing gibbous, 62% lit" into
+    # "the waxing gibbous Moon absent" when the note stopped at the phase.
+    system = " ".join(narrate._SYSTEM.split())
+    assert "never settle a question one leaves open" in system
+    assert "never say the Moon was absent, out, risen, or set" in system
+    # the prompt must not promise up-ness it may not get: this exact
+    # wording is what taught the model a phase-only note meant "not up"
+    assert "the Moon's phase and whether it was up" not in system
+
+
 def test_the_place_line_rides_with_the_night_notes():
     client = FakeClient()
     line = "The phone recorded its tilt, so sky geometry puts this near 36°N, 74°E: northern Pakistan."
