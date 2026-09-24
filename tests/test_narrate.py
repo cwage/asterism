@@ -57,6 +57,12 @@ def test_returns_the_caption():
     # a caption, never a paragraph: the paragraph kept adding its own
     # astronomy however the prompt was tightened
     assert narrate._FORMAT["schema"]["required"] == ["caption"]
+    # prod captioned a Saturn/Vega/M31 frame "Saturn and Vega above
+    # northern constellations including Andromeda": the galaxy lost to a
+    # category. Deep-sky objects outrank stars, and categories are out.
+    system = " ".join(narrate._SYSTEM.split())
+    assert 'any deep-sky object in labels (kind "dso") come before stars' in system
+    assert "never a category" in system
 
 
 def test_payload_is_trimmed_to_what_a_caption_names():

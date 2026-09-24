@@ -57,9 +57,10 @@ Rules:
   given (a meteor by its shower, or just "a meteor" when sporadic). Never
   add a fact about them: no distances, types, positions, lore, or
   conditions.
-- Lower magnitude = brighter. Prefer the most notable catch: a meteor,
-  the Moon, planets, bright deep-sky objects, then bright stars and
-  constellations.
+- Lower magnitude = brighter. Name two or three things, most notable
+  first: a meteor, the Moon, planets, and any deep-sky object in labels
+  (kind "dso") come before stars and constellations. Name things, never
+  a category ("northern constellations", "bright stars").
 - meteors lists streaks in the pixels judged to be meteors, with the
   shower it belongs to (or sporadic). Name a meteor only when that list
   has one.
