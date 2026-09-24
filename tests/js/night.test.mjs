@@ -29,12 +29,12 @@ test('night lines render one paragraph each, in the worker\'s order', () => {
   assert.deepEqual(els.night.children.map(p => p.textContent), LINES);
 });
 
-test('the copied description carries the night lines after the narration', () => {
+test('the copied description carries the night lines after the caption', () => {
   const { sandbox } = loadPage();
+  // a stored paragraph from before it was dropped is never copied
   const job = { ...JOB, result: { ...JOB.result,
     narration: { caption: 'Vega overhead', text: 'Vega rides high tonight.' } } };
-  assert.equal(sandbox.describeText(job),
-               'Vega overhead\n\nVega rides high tonight.\n\n' + LINES.join(' '));
+  assert.equal(sandbox.describeText(job), 'Vega overhead\n\n' + LINES.join(' '));
   // the lines alone are still a description worth copying
   assert.equal(sandbox.describeText(JOB), LINES.join(' '));
 });

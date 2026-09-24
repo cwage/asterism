@@ -29,9 +29,6 @@ test('a failure narration leads the failure panel', () => {
   assert.equal(els.failbox.hidden, false);
   assert.equal(els.advice.children[0].textContent,
                'That appears to be a sandwich.');
-  // The success-narration panel stays out of the failure page entirely
-  // (untouched, so the harness never even created it).
-  assert.ok(!els.narration || els.narration.textContent === '');
 });
 
 test('the solver detail is demoted to a footnote in the panel', () => {

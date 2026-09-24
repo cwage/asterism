@@ -1,8 +1,8 @@
 # asterism
 
 Annotate a night-sky phone photo: upload a shot, plate-solve it with
-astrometry.net, and get back labels for every star (and eventually planet,
-satellite, and a bit of narration) in the frame.
+astrometry.net, and get back labels for every star, planet, deep-sky
+object and satellite in the frame.
 
 Final home: `asterism.quietlife.net`.
 
@@ -62,21 +62,23 @@ Final home: `asterism.quietlife.net`.
   scope. TLE sets are cached per UTC date under `data/tle/`, so a night of
   uploads costs one query.
 - With an `ANTHROPIC_API_KEY` configured (Fly secret in prod), each solved
-  photo also gets a short LLM-written "what you captured" narration (#12,
-  Claude Haiku over the label list — never the photo): a writeup on the
-  results page and a one-line caption that replaces the deterministic one
-  on the share card. Best-effort: no key or a failed call just skips it.
-  The results page puts the caption and narration on the clipboard in one
-  tap for a post or alt text, and the label list in another (#124).
+  photo also gets a one-line LLM caption (#12, Claude Haiku over the label
+  list and the photo): the headline on the results page, and the caption
+  on the share card in place of the deterministic one. Best-effort: no key
+  or a failed call just skips it. It used to write a paragraph as well;
+  that kept adding its own astronomy (Deneb at the "center" of Cygnus)
+  through three rounds of prompt fixes, and everything true in it was
+  already on the page, so it was dropped. The results page puts the
+  caption, night lines and lore on the clipboard in one tap for a post or
+  alt text, and the label list in another (#124).
 - Bright objects just outside the frame (#118): stars to magnitude 2, the
   Moon and planets, and the showpiece deep-sky objects are projected through
   the same WCS and, when one lands within 15° of an edge, drawn as a coral
   arrow at the edge with the name and how far off it lies — on the page and
   the card, at most six, never displacing a label for something in the shot.
-  Directions are the photo's own (left, right, above, below). The narration
-  gets them as facts, so it stops guessing what lies off the edge.
+  Directions are the photo's own (left, right, above, below).
 - What the night was like (#121) and how deep the photo reached (#122):
-  a sentence or two of measured context under the narration. The Sun's
+  a sentence or two of measured context under the caption. The Sun's
   altitude at the EXIF instant says whether the shot was in twilight and
   about how long before full dark; the Moon's phase, and whether it was
   up, says what lit the sky. Without GPS these are judged across every
@@ -88,15 +90,14 @@ Final home: `asterism.quietlife.net`.
   limiting magnitude is where the detection rate falls through half of
   the bright end's, with a star-free control beside every test so a noisy
   frame reports nothing rather than something flattering, and no answer
-  at all when even the bright stars are mostly hidden. The sentences are built in the worker
-  so the page, the copied description and the narration (which gets them
-  as facts) all say the same thing.
+  at all when even the bright stars are mostly hidden. The sentences are
+  built in the worker so the page and the copied description say the
+  same thing.
 - A sentence of lore for the constellations in frame (#123): one
   reliable sentence per constellation, from a table in `app/lore.py`
   (original prose from the standard mythology and naming history, so no
   licence rides along), shown for the two constellations whose brightest
-  confirmed star is brightest. The narration gets them as facts it may
-  draw on and must not contradict.
+  confirmed star is brightest.
 - Roughly where on Earth (#115), without GPS: iPhones record the gravity
   vector at capture in the MakerNote, which says where the zenith sits
   relative to the frame; the WCS turns that into the zenith's sky
@@ -526,6 +527,6 @@ The original roadmap, all four steps of it now shipped:
    longitude guess, else UTC — and the results report which one was used.
 3. **Fly.io deploy**: single app, web + worker processes, indexes baked into
    the image. ✅
-4. **Differentiators**: satellite/streak ID from archived TLEs, LLM narration,
+4. **Differentiators**: satellite/streak ID from archived TLEs, LLM captions,
    shareable cards. ✅ Streak *detection* stayed out of scope — satellite
    tracks are computed from TLEs and drawn dashed to say so.

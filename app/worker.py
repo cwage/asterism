@@ -341,8 +341,7 @@ def _label_everything(result, wcs_path, image_path, exif_info, job_id):
     result["streaks"] = found
 
     # Bright objects just outside the frame (#118), best-effort like the
-    # layers above, and before the narration so the model is told what
-    # lies off the edge instead of guessing.
+    # layers above.
     try:
         pointers = beyond.annotate(
             wcs_path, exif_info["width"], exif_info["height"], exif_info
@@ -353,8 +352,7 @@ def _label_everything(result, wcs_path, image_path, exif_info, job_id):
     result["beyond"] = pointers
 
     # What the night was like (#121) and how faint the photo reached
-    # (#122): sentences built from the layers above, ahead of the
-    # narration so the model gets them as facts rather than guesses.
+    # (#122): sentences built from the layers above.
     try:
         result["night"] = night.annotate(
             exif_info, wcs_path, labels, pointers, verification
@@ -381,12 +379,10 @@ def _label_everything(result, wcs_path, image_path, exif_info, job_id):
         print(f"worker: place estimate failed for {job_id}\n{traceback.format_exc()}")
         result["place"] = None
 
-    # LLM narration (#12), best-effort: no API key or a failed call just
+    # LLM caption (#12), best-effort: no API key or a failed call just
     # leaves the deterministic card caption in place.
     try:
-        narration = narrate.annotate(
-            result, image_path=image_path,
-            width=exif_info["width"], height=exif_info["height"])
+        narration = narrate.annotate(result, image_path=image_path)
         if narration:
             result["narration"] = narration
     except Exception:

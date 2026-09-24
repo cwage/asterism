@@ -100,7 +100,7 @@ def candidates(exif_info):
 def format_deg(deg):
     """'8°', '0.4°': whole degrees, except under one degree where a tenth
     is the difference between "on the edge" and "just past it". Ties round
-    half-up, so the card and the narration agree with the page, whose
+    half-up, so the card agrees with the page, whose
     Math.round does the same (Python's round is ties-to-even)."""
     if deg < 1:
         return f"{deg:.1f}°"

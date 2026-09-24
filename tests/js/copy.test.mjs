@@ -1,7 +1,7 @@
-// Copy controls (#124): the narration as a caption or alt text, and the
-// label list, one tap each. The text builders are checked on their own,
-// then the buttons are clicked the way a browser would and the clipboard
-// shim in the harness records what landed.
+// Copy controls (#124): the words under the photo as a caption or alt
+// text, and the label list, one tap each. The text builders are checked
+// on their own, then the buttons are clicked the way a browser would and
+// the clipboard shim in the harness records what landed.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadPage } from './harness.mjs';
@@ -23,7 +23,8 @@ const JOB = {
       { name: 'Lyra', abbr: 'Lyr', segments: [[100, 500, 300, 550]] },
       { name: 'Cygnus', abbr: 'Cyg', segments: [[600, 500, 800, 550]] },
     ],
-    narration: { caption: 'Saturn beside Vega', text: 'Saturn sits below Vega tonight.', model: 'm' },
+    lore: [{ abbr: 'Lyr', name: 'Lyra', line: 'Lyra is the lyre of Orpheus.' }],
+    narration: { caption: 'Saturn beside Vega', model: 'm' },
   },
 };
 
@@ -33,13 +34,14 @@ function show(sandbox, els, job = JOB) {
   return els.actions.children;
 }
 
-test('describeText is the caption and the narration, blank line between', () => {
+test('describeText is the caption and the lore, blank line between', () => {
   const { sandbox } = loadPage();
   assert.equal(sandbox.describeText(JOB),
-               'Saturn beside Vega\n\nSaturn sits below Vega tonight.');
-  // a caption alone, or text alone, is still worth copying
-  assert.equal(sandbox.describeText({ result: { narration: { text: 'Just text.' } } }),
-               'Just text.');
+               'Saturn beside Vega\n\nLyra is the lyre of Orpheus.');
+  // a caption alone is still worth copying; a stored paragraph from
+  // before it was dropped is not
+  assert.equal(sandbox.describeText({ result: { narration: { caption: 'Just a caption.', text: 'Old text.' } } }),
+               'Just a caption.');
   assert.equal(sandbox.describeText({ result: { labels: [] } }), '');
 });
 
@@ -63,6 +65,9 @@ test('a solved result gets both copy buttons beside the card link', async () => 
   const { sandbox, els, clipboard } = loadPage();
   const [card, describe, stars] = show(sandbox, els);
   assert.ok(card.href.includes('/jobs/abc/card'));
+  // the caption is the headline; there is no paragraph panel to fill
+  assert.equal(els.headline.textContent, 'Saturn beside Vega');
+  assert.equal(els.narration, undefined);
   assert.equal(describe.textContent, 'copy description');
   assert.equal(stars.textContent, 'copy star list');
 
@@ -95,9 +100,9 @@ test('a second tap inside the moment restarts it rather than cutting it short', 
   assert.equal(describe.textContent, 'copy description');
 });
 
-test('no narration means no description button, the star list stays', () => {
+test('nothing to describe means no description button, the star list stays', () => {
   const { sandbox, els } = loadPage();
-  const job = { ...JOB, result: { ...JOB.result, narration: undefined } };
+  const job = { ...JOB, result: { ...JOB.result, narration: undefined, lore: undefined } };
   const children = show(sandbox, els, job);
   assert.equal(children.length, 2);
   assert.equal(children[1].textContent, 'copy star list');

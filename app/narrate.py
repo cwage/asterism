@@ -1,14 +1,21 @@
-"""LLM narration (#12): turn the solved result into a short "what you
-captured" writeup for the results page, plus a one-line caption that
-replaces the deterministic one on the share card. Failed solves get a
-shorter note about what the photo appears to be instead (#109).
+"""LLM caption (#12): a one-line headline for the results page and the
+share card, naming the best of what the solve labeled. Failed solves get
+a short note about what the photo appears to be instead (#109).
+
+The caption is all the model writes for a solved photo. It used to write
+a two-to-four sentence "what you captured" paragraph too, and after a
+run of prompt and payload fixes (#112, #156, #162) that paragraph still
+kept putting its own astronomy in: Deneb at the "center" of Cygnus,
+"dawn twilight" read off a sun-altitude range. Everything true in it
+already sat on the page as the labels, the night lines and the lore,
+which are deterministic, so the paragraph went and the caption stayed.
 
 Best-effort like the ephemeris and DSO layers: no API key, a network
-failure, or a malformed reply just means no narration. The prompt sees a
+failure, or a malformed reply just means no caption. The prompt sees a
 trimmed copy of the already-public result JSON (object names, kinds,
-magnitudes, statuses) plus the photo itself — the upload-page disclosure
-says photos are sent to an AI service for this — but never pixel
-positions or coordinates.
+magnitudes) plus the photo itself — the upload-page disclosure says
+photos are sent to an AI service for this — but never pixel positions
+or coordinates.
 """
 
 import base64
@@ -17,8 +24,6 @@ import json
 import os
 
 from PIL import Image
-
-from . import beyond
 
 MODEL = os.environ.get("NARRATE_MODEL", "claude-haiku-4-5")
 MAX_CAPTION_CHARS = 90  # the card footer is one line
@@ -36,83 +41,38 @@ _FORMAT = {
         "type": "object",
         "properties": {
             "caption": {"type": "string"},
-            "text": {"type": "string"},
         },
-        "required": ["caption", "text"],
+        "required": ["caption"],
         "additionalProperties": False,
     },
 }
 
 _SYSTEM = """\
-You write about plate-solved night-sky photos for the person who took them,
-often on a phone. You get the structured result of a solve: the objects
-identified in the frame and the constellations drawn.
+You write a one-line caption for a plate-solved night-sky photo. You get
+the objects the solve identified in the frame and the constellations
+drawn, and you may be shown the photo.
 
 Rules:
-- Mention only objects present in the input. Never invent objects, and never
-  state a fact (distance, type, lore) unless you are certain of it.
-- Every object in labels is in the frame: the stars were confirmed in
-  the pixels, and the Moon, planets, and deep-sky objects are placed
-  there by the solve. Describe each as captured; never call one hidden,
-  faint, or washed out. Objects that were in the field but did not show
-  up are not listed, so never say anything was missing, obscured, or
-  lost to the conditions.
-- where is the part of the frame the object sits in (upper left, center,
-  lower right, and so on). When you say where something is in the photo,
-  use that word exactly. Never place an object from the pixels or from
-  its neighbours, and never place one that has no where.
-- kind "dso" is a deep-sky object; dso_type: OC = open cluster,
-  Gxy = galaxy, Neb/OC+Neb = nebula, GC = globular cluster.
-- Lower magnitude = brighter. Lead with the most notable catch: the Moon,
-  planets, bright deep-sky objects, then bright stars and constellations.
-- satellites_crossing lists satellites computed to have passed through the
-  frame during the exposure. They were not detected in the pixels, so say
-  they passed through, never that a streak is visible. Mention at most one,
-  and only when the list is short enough for that to be interesting.
-- streaks lists lines found in the pixels themselves, each with a verdict
-  (meteor, satellite, or unknown), a confidence, and the measured reasons.
-  A meteor is the best catch in almost any frame: lead with it, say how
-  long it was and whether it belonged to a shower or was a sporadic, and
-  hedge in proportion to the confidence ("likely a meteor" at medium,
-  "a streak that may be a meteor" at low). An unknown streak is just that:
-  a streak, origin not settled. Never call a streak a meteor or a
-  satellite unless the verdict says so.
-- also_in_frame lists deep-sky objects whose spot the page marks on the
-  photo, though they were not confirmed in the pixels. Each says which
-  part of the photo. You may mention one, in those words: the photo takes
-  in that object, marked in that part of the frame, worth a closer look.
-  It is inside the photo: never say it is outside, beyond, or off the
-  edge, and never say it is hidden, missing, faint, or lost to haze or
-  cloud.
-- just_outside_frame lists bright objects the solve places outside the
-  photo's edges, with how far and which way. They are not in the photo:
-  you may mention one as being just off the edge, never as captured, and
-  never as hidden, faint, or lost to the conditions.
-- lore is the site's own sentence about each of the main constellations
-  in frame. You may draw on its facts; never contradict them, and don't
-  repeat a sentence word for word, since it is shown beside your text.
-- night_notes are measured facts about the conditions: twilight or full
-  dark, the Moon's phase and what is known of whether it was up, how faint
-  a star the photo recorded, and where on Earth the phone's tilt and the
-  sky geometry place the camera. You may weave one into the text, keeping
-  its numbers and place names as given, and must never contradict them.
-  Each note says all that was measured: never settle a question one
-  leaves open, and never say the Moon was absent, out, risen, or set
-  unless a note says so. Say nothing about the weather or the sky's
-  clarity that night_notes doesn't say.
-- You may also be shown the photo. The labels above stay the authority on
-  sky objects — never claim a sky object from the pixels alone. You may
-  mention the foreground scene (a treeline, a rooftop, someone silhouetted
-  watching the sky) when it adds warmth.
-- Never describe people beyond noting a presence: no appearance, age, or
-  identity. Never read or repeat text visible in the image.
-- Warm, plain tone. No emoji, no exclamation marks, no hype.
+- Name only what labels, constellations, or meteors list, spelled as
+  given (a meteor by its shower, or just "a meteor" when sporadic). Never
+  add a fact about them: no distances, types, positions, lore, or
+  conditions.
+- Lower magnitude = brighter. Name two or three things, most notable
+  first: a meteor, the Moon, planets, and any deep-sky object in labels
+  (kind "dso") come before stars and constellations. Name things, never
+  a category ("northern constellations", "bright stars").
+- meteors lists streaks in the pixels judged to be meteors, with the
+  shower it belongs to (or sporadic). Name a meteor only when that list
+  has one.
+- The labels are the authority on sky objects: never name one from the
+  pixels alone. You may add the foreground scene from the photo (over a
+  treeline, above a rooftop) when there is one.
+- Never describe people, and never read or repeat text visible in the
+  image.
+- Plain words. No emoji, no exclamation marks, no hype.
 
 Return JSON:
-- caption: one line for the photo card — at most eight words, no trailing
-  period, naming the best objects in the frame.
-- text: two to four sentences for the results page — what the photo
-  captured, plus one well-known fact about the most notable object.
+- caption: at most eight words, no trailing period.
 """
 
 
@@ -193,115 +153,40 @@ def _client_or_none(client):
     return anthropic.Anthropic(timeout=TIMEOUT_SECONDS, max_retries=1)
 
 
-def _offset_phrase(pointer):
-    """'Saturn, 8° to the right' — a just-outside-the-frame pointer (#118)
-    as a sentence fragment, so the model has the fact and not the
-    geometry."""
-    side = pointer.get("side")
-    where = {"left": "to the left", "right": "to the right"}.get(side, side)
-    return f"{pointer['name']}, {beyond.format_deg(pointer['deg'])} {where}"
-
-
-def _where(x, y, width, height):
-    """Which third of the frame a label sits in: 'upper left', 'center',
-    'lower right'. Coarse on purpose — the model once put a top-left M31
-    at "lower left" with no position to go on, and a finer grid would
-    just be a finer thing to misread."""
-    if not (width and height) or x is None or y is None:
-        return None
-    col = min(2, max(0, int(3 * x / width)))
-    row = min(2, max(0, int(3 * y / height)))
-    vert = ("upper", "", "lower")[row]
-    horiz = ("left", "", "right")[col]
-    return " ".join(w for w in (vert, horiz) if w) or "center"
-
-
-def _payload(result, width=None, height=None):
+def _payload(result):
     """The trimmed, public-only view of the result the model gets to see.
 
-    Hidden labels (in frame, not found in the pixels) are left out
-    entirely. The model was allowed one, and three times running it wrote
-    the hidden object up as lying just outside the frame, or lost to haze
-    the input never mentioned — whatever the prompt said. The page shows
-    the hidden label itself, so the blurb simply not mentioning it
-    contradicts nothing. Everything that remains is treated as captured
-    (stars snapped to a peak; the Moon, planets, and DSOs placed by the
-    solve, with only DSOs pixel-checked), so no status field: the
-    internal "projected" once read to the model as "computed but not
-    seen", and it narrated a plainly visible M31 as lost to haze. Pixel positions
-    become a coarse frame region, since the model places things in the
-    text anyway."""
+    Hidden labels (in frame, not found in the pixels) are left out: the
+    caption names what the photo shows. Streaks ride along only as
+    meteors the detector stood behind — a caption has no room to hedge."""
     labels = []
-    also_in_frame = []
     for lab in result.get("labels") or []:
         if lab.get("status") == "hidden":
-            # The page still circles a hidden DSO, dashed, at its spot,
-            # so the blurb may point there too — as a plain fragment
-            # like the outside-frame pointers, which the model has
-            # handled better than fields it had to interpret.
-            if lab.get("kind") == "dso":
-                where = _where(lab.get("x"), lab.get("y"), width, height)
-                if where is None:  # no frame size: marked, but not where
-                    part = "on the photo"
-                elif where == "center":
-                    part = "in the center of the photo"
-                else:
-                    part = f"in the {where} part of the photo"
-                also_in_frame.append(f"{lab.get('name')}, marked {part}")
             continue
         entry = {"name": lab.get("name"), "kind": lab.get("kind", "star"),
                  "mag": lab.get("mag")}
         if lab.get("dso_type"):
             entry["dso_type"] = lab["dso_type"]
-        if lab.get("phase") is not None:
-            entry["moon_phase"] = lab["phase"]
-        where = _where(lab.get("x"), lab.get("y"), width, height)
-        if where:
-            entry["where"] = where
         labels.append(entry)
     return {
         "labels": labels,
         "constellations": [c["name"] for c in result.get("constellations") or []],
-        "time_utc": (result.get("ephemeris") or {}).get("time_utc"),
-        "satellites_crossing": [
-            c["name"] for c in
-            (result.get("satellites") or {}).get("crossings") or []
-        ],
-        # Streaks detected in the pixels, with the verdict and its reasons
-        # so the model tells the story the numbers support.
-        "streaks": [
-            {k: v for k, v in {
-                "kind": s.get("kind"), "confidence": s.get("confidence"),
-                "length_deg": s.get("length_deg"),
-                "shower": (s.get("shower") or {}).get("name"),
-                "satellite": (s.get("satellite") or {}).get("name"),
-                "reasons": s.get("reasons"),
-            }.items() if v is not None}
+        "meteors": [
+            {"shower": (s.get("shower") or {}).get("name") or "sporadic"}
             for s in (result.get("streaks") or {}).get("streaks") or []
+            if s.get("kind") == "meteor" and s.get("confidence") in ("high", "medium")
         ],
-        "also_in_frame": also_in_frame,
-        # The model once narrated "the Pleiades just outside the frame"
-        # with nothing to go on; now it is told (#118).
-        "just_outside_frame": [
-            _offset_phrase(p) for p in result.get("beyond") or []
-        ],
-        # The conditions (#121, #122) as the sentences the page shows, so
-        # the model can echo them and never has to derive them.
-        "night_notes": list((result.get("night") or {}).get("lines") or [])
-        + [line for line in [(result.get("place") or {}).get("line")] if line],
-        "lore": [entry["line"] for entry in result.get("lore") or []],
     }
 
 
-def annotate(result, image_path=None, client=None, width=None, height=None):
-    """Narration dict {caption, text, model} or None when unavailable.
-    width/height are the upright frame's pixel size, for placing labels.
+def annotate(result, image_path=None, client=None):
+    """Narration dict {caption, model} or None when unavailable.
     Raises on API/parse errors — the worker treats those as best-effort."""
     # Unverified labels carry no status fields, so the model couldn't be
     # honest about what was actually visible — skip the call entirely.
     if not (result.get("verification") or {}).get("verified"):
         return None
-    payload = _payload(result, width, height)
+    payload = _payload(result)
     if not payload["labels"]:
         return None
     client = _client_or_none(client)
@@ -325,11 +210,9 @@ def annotate(result, image_path=None, client=None, width=None, height=None):
     data = json.loads(next(b.text for b in response.content
                            if b.type == "text"))
     caption = " ".join(str(data.get("caption", "")).split())
-    text = " ".join(str(data.get("text", "")).split())
-    if not caption or not text:
+    if not caption:
         return None
-    return {"caption": caption[:MAX_CAPTION_CHARS], "text": text,
-            "model": MODEL}
+    return {"caption": caption[:MAX_CAPTION_CHARS], "model": MODEL}
 
 
 def _failure_payload(result):

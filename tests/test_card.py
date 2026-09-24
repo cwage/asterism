@@ -70,10 +70,10 @@ def test_caption_empty_result():
 
 def test_llm_caption_wins_when_present():
     result = dict(RESULT, narration={"caption": "Saturn beside a waxing Moon",
-                                     "text": "…", "model": "test"})
+                                     "model": "test"})
     assert card._caption(result) == "Saturn beside a waxing Moon"
     # an empty LLM caption falls back to the deterministic one
-    result["narration"] = {"caption": "", "text": "…", "model": "test"}
+    result["narration"] = {"caption": "", "model": "test"}
     assert "Moon" in card._caption(result)
 
 
