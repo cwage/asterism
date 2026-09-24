@@ -6,8 +6,8 @@ the photo looks the way it does. The Moon's illumination is already
 computed for the label layer; this adds the Sun's altitude (twilight or
 full dark), whether the Moon was up, and, from the verification pass, the
 faintest magnitude the phone actually recorded. Each becomes one plain
-sentence, rendered here so the page, the copied description and the
-narration all quote the same words.
+sentence, rendered here so the page and the copied description quote
+the same words.
 
 Location honesty. With GPS the Sun and Moon altitudes are exact. With only
 a clock offset the observer could be anywhere in a timezone band, so both

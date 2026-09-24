@@ -216,18 +216,14 @@
   #actions button.copy:hover { background: #1a2230; }
 
   /* The words under the photo read as one caption, not a stack of panels:
-     a headline (the share card's caption), the narration, then the night's
-     conditions and the constellation lore each a step quieter. Nothing
+     a headline (the share card's caption), then the night's conditions
+     and the constellation lore a step quieter. Nothing
      here has a box, so the photo stays the one framed thing on the page.
      Every part is empty before a solve and takes no room. */
   #caption { max-width: 70ch; }
   #headline { margin: 0.9rem 0 0.3rem; font-size: 1.15rem; font-weight: 600;
               line-height: 1.3; color: var(--ink); }
   #headline:empty { display: none; }
-  #narration { margin: 0.9rem 0 0; font-size: 0.95rem; line-height: 1.5;
-               color: var(--ink); }
-  #headline:not(:empty) + #narration { margin-top: 0; }
-  #narration:empty { display: none; }
   /* The night's conditions (#121, #122): one plain sentence each. */
   #night { margin: 0.6rem 0 0; font-size: 0.9rem; line-height: 1.45;
            color: var(--dim); }
@@ -399,7 +395,6 @@
 </div>
 <div id="caption">
   <p id="headline"></p>
-  <div id="narration"></div>
   <div id="night"></div>
   <div id="lore"></div>
 </div>
@@ -826,7 +821,6 @@ function clearResult() {
   document.getElementById('fail-detail').textContent = '';
   document.getElementById('fail-actions').replaceChildren();
   document.getElementById('headline').textContent = '';
-  document.getElementById('narration').textContent = '';
   document.getElementById('night').replaceChildren();
   document.getElementById('lore').replaceChildren();
   document.getElementById('controls').hidden = true;
@@ -1409,12 +1403,16 @@ function draw() {
 }
 
 // The words to go with the photo (#124). Uploads come back through
-// Instagram often enough that the narration is what people want for a
-// caption or alt text, and selecting it out of the page on a phone is a
-// chore. Both builders are pure so the tests can read them directly.
+// Instagram often enough that the words under the photo are what people
+// want for a caption or alt text, and selecting them out of the page on a
+// phone is a chore. Both builders are pure so the tests can read them
+// directly.
 function describeText(job) {
-  const n = (job.result && job.result.narration) || {};
-  return [n.caption, n.text, nightLines(job).join(' ')].filter(Boolean).join('\n\n');
+  const r = job.result || {};
+  const caption = (r.narration || {}).caption;
+  const lore = (r.lore || []).map(entry => entry.line);
+  return [caption, nightLines(job).join(' '), lore.join(' ')]
+    .filter(Boolean).join('\n\n');
 }
 
 // What the night was like and how faint the photo reached (#121, #122):
@@ -1430,8 +1428,8 @@ function nightLines(job) {
 
 // '8°', '0.4°': whole degrees, except under one degree where a tenth is
 // the difference between "on the edge" and "just past it". Math.round is
-// half-up, and the server side formats the same way, so the page, the
-// card and the narration all quote one number.
+// half-up, and the server side formats the same way, so the page and the
+// card quote one number.
 function formatDeg(deg) {
   return (deg < 1 ? deg.toFixed(1) : Math.round(deg)) + '°';
 }
@@ -1587,12 +1585,9 @@ function render(id, job) {
     }
     status(`solved in ${job.solve_seconds}s — labeled ${parts.join(', ')}`
            + (notes.length ? ` (${notes.join('; ')})` : ''), id);
-    // LLM narration (#12): the worker's "what you captured" writeup.
-    const narration = job.result.narration;
-    document.getElementById('narration').textContent =
-      (narration && narration.text) || '';
     // The share card's caption (#13) doubles as the headline under the
     // photo: the line that pulls the eye from the picture into the words.
+    const narration = job.result.narration;
     document.getElementById('headline').textContent =
       (narration && narration.caption) || '';
     document.getElementById('night').replaceChildren(...nightLines(job).map(line => {

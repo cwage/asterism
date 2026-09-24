@@ -1,13 +1,12 @@
 """One sentence of lore per constellation (#123).
 
-Labels give Bayer designations and proper names, and the narration gives
-a paragraph, but a non-astronomer looking at "Aquila" on their photo has
-nothing to hold onto. This is one reliable sentence per constellation,
-the same every time, keyed by IAU abbreviation: the name, what it is,
-and its best-known star where it has one. Original prose from the
-standard mythology and naming history (Ptolemy's figures, the Dutch
-navigators of the 1590s, Hevelius, Lacaille), so there is no licence to
-carry and nothing to attribute.
+Labels give Bayer designations and proper names, but a non-astronomer
+looking at "Aquila" on their photo has nothing to hold onto. This is one
+reliable sentence per constellation, the same every time, keyed by IAU
+abbreviation: the name, what it is, and its best-known star where it has
+one. Original prose from the standard mythology and naming history
+(Ptolemy's figures, the Dutch navigators of the 1590s, Hevelius,
+Lacaille), so there is no licence to carry and nothing to attribute.
 """
 
 LORE = {

@@ -1,5 +1,5 @@
 """Public "recently solved" feed: done jobs only, newest first, capped,
-with the narration caption riding along when the worker produced one.
+with the LLM caption riding along when the worker produced one.
 Served twice: as JSON for the homepage strip and as Atom (#127) for
 feed readers."""
 
@@ -44,7 +44,7 @@ def test_feed_lists_done_jobs_newest_first(fresh_db):
 
     jobs = main.feed()["jobs"]
     assert [j["id"] for j in jobs] == ["newer", "older"]
-    # caption only when narration exists; never a null placeholder
+    # caption only when the worker wrote one; never a null placeholder
     assert jobs[0]["caption"] == "Jupiter rising"
     assert "caption" not in jobs[1]
     # nothing beyond id/created_at/caption leaks (no exif, no result)
@@ -101,6 +101,7 @@ def test_atom_feed_mirrors_the_strip(fresh_db):
     with db.get_conn() as conn:
         _insert(conn, "older", "done", "2026-08-13 21:00:00",
                 {"labels": []})
+        # a row from when the narration still wrote a paragraph
         _insert(conn, "newer", "done", "2026-08-13 22:00:00",
                 {"labels": [], "narration": {"caption": "Jupiter <rising>",
                                              "text": "A bright & steady dot.",
@@ -136,10 +137,12 @@ def test_atom_feed_mirrors_the_strip(fresh_db):
     content = newer.find("a:content", ATOM)
     assert content.get("type") == "html"
     assert 'src="https://asterism.example/jobs/newer/card"' in content.text
-    # narration and caption are HTML-escaped inside the html content
+    # the caption is HTML-escaped inside the html content
     assert "Jupiter &lt;rising&gt;" in content.text
-    assert "A bright &amp; steady dot." in content.text
-    # no narration: the card alone, no empty paragraph after it
+    # the card alone: a stored paragraph from before it was dropped
+    # stays out of the feed
+    assert "steady dot" not in content.text
+    assert content.text.count("<p>") == 1
     older = entries[1].findtext("a:content", namespaces=ATOM)
     assert "/jobs/older/card" in older
     assert older.count("<p>") == 1

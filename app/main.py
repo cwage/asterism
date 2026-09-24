@@ -547,8 +547,8 @@ FEED_LIMIT = 24
 def _recent_solves():
     """The public "recently solved" list behind /feed and /feed.atom:
     successful solves across everyone, newest first, capped, for as long
-    as retention keeps them. Hidden jobs (#60) never appear. The narration
-    (#12) rides along when the worker produced one."""
+    as retention keeps them. Hidden jobs (#60) never appear. The LLM
+    caption (#12) rides along when the worker produced one."""
     with db.get_conn() as conn:
         rows = conn.execute(
             "SELECT id, created_at, result_json FROM jobs "
@@ -562,8 +562,7 @@ def _recent_solves():
         narration = result.get("narration") or {}
         solves.append({"id": row["id"], "created_at": row["created_at"],
                        "caption": narration.get("caption"),
-                       "sky_tags": sky_tags.for_result(result),
-                       "text": narration.get("text")})
+                       "sky_tags": sky_tags.for_result(result)})
     return solves
 
 
@@ -611,8 +610,8 @@ def feed_atom(request: Request):
     share card (#13) rides inline and as an enclosure, and the entry
     links to the result page. Entries expire with retention, which is
     fine: a reader keeps what it fetched, and a featured solve simply
-    stays valid. Built with ElementTree so captions and narration are
-    escaped by something that knows XML, not by hand."""
+    stays valid. Built with ElementTree so captions are escaped by
+    something that knows XML, not by hand."""
     base = str(request.base_url).rstrip("/")
     solves = _recent_solves()
     root = ET.Element("feed", xmlns=ATOM_NS)
@@ -647,8 +646,6 @@ def feed_atom(request: Request):
         # type="html": readers that ignore enclosures still show the card.
         body = (f'<p><img src="{html.escape(card_url)}" '
                 f'alt="{html.escape(title)}"></p>')
-        if solve["text"]:
-            body += f"<p>{html.escape(solve['text'])}</p>"
         ET.SubElement(entry, "content", type="html").text = body
     return AtomResponse('<?xml version="1.0" encoding="utf-8"?>\n'
                         + ET.tostring(root, encoding="unicode"))

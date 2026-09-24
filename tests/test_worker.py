@@ -94,8 +94,7 @@ def test_constellations_crash_does_not_fail_the_job(monkeypatch):
 def test_narration_attaches_when_available(monkeypatch):
     monkeypatch.setattr(ephemeris, "annotate_bodies",
                         lambda *a: ([], {"time_source": None}))
-    narration = {"caption": "Sirius blazing in Orion's wake",
-                 "text": "Your photo caught Sirius.", "model": "test"}
+    narration = {"caption": "Sirius blazing in Orion's wake", "model": "test"}
     monkeypatch.setattr(narrate, "annotate", lambda *a, **k: narration)
     status, result, error = worker.process(JOB)
     assert status == "done" and error is None
@@ -271,13 +270,11 @@ def test_solved_narration_gets_the_image_path(monkeypatch):
     seen = {}
     def record(result, image_path=None, **kw):
         seen["image_path"] = image_path
-        seen["frame"] = (kw.get("width"), kw.get("height"))
         return None
     monkeypatch.setattr(narrate, "annotate", record)
     status, result, error = worker.process(JOB)
     assert status == "done"
     assert seen["image_path"] == JOB["image_path"]
-    assert seen["frame"] == (100, 100)  # the upright frame, for placing labels
 
 
 def test_no_advice_without_evidence(monkeypatch):
@@ -460,21 +457,14 @@ def test_beyond_pointers_ride_along_and_never_sink_the_job(monkeypatch):
     assert result["beyond"] == []
 
 
-def test_night_context_is_stored_and_handed_to_the_narrator(monkeypatch):
+def test_night_context_is_stored(monkeypatch):
     lines = ["The Moon was new, so it added no light to the sky."]
-    seen = {}
     monkeypatch.setattr(
         night, "annotate",
         lambda exif, wcs, labels, pointers, verification: {"lines": list(lines)})
-
-    def narrate_stub(result, image_path=None, client=None, **kw):
-        seen["night"] = result.get("night")  # built before the narration runs
-        return None
-    monkeypatch.setattr(narrate, "annotate", narrate_stub)
     status, result, error = worker.process(JOB)
     assert status == "done" and error is None
     assert result["night"] == {"lines": lines}
-    assert seen["night"] == {"lines": lines}
 
 
 def test_night_context_failure_never_sinks_a_solve(monkeypatch):
