@@ -53,7 +53,8 @@ the objects the solve identified in the frame and the constellations
 drawn, and you may be shown the photo.
 
 Rules:
-- Name only objects in labels or constellations, spelled as given. Never
+- Name only what labels, constellations, or meteors list, spelled as
+  given (a meteor by its shower, or just "a meteor" when sporadic). Never
   add a fact about them: no distances, types, positions, lore, or
   conditions.
 - Lower magnitude = brighter. Prefer the most notable catch: a meteor,

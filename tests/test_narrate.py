@@ -215,3 +215,7 @@ def test_only_confident_meteors_reach_the_model():
     assert payload["meteors"] == [{"shower": "sporadic"}, {"shower": "Perseids"}]
     assert "profile" not in json.dumps(payload)
     assert narrate._payload(RESULT)["meteors"] == []
+    # the rule that limits what the caption names must admit the meteors,
+    # or it cancels the rule that asks for them
+    system = " ".join(narrate._SYSTEM.split())
+    assert "Name only what labels, constellations, or meteors list" in system
