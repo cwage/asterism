@@ -1532,6 +1532,22 @@ function copyButton(label, text) {
   return btn;
 }
 
+// The fly-around page (/fly): the same stars at their real distances, seen
+// from outside. It works out where the camera was from the solve's named
+// stars and needs three of them to do it, so a solve with fewer is not
+// offered a page that could only say it cannot start.
+const FLY_MIN_STARS = 3;
+function flyable(job) {
+  return (job.result.labels || []).filter(l => l.kind === 'star').length >= FLY_MIN_STARS;
+}
+function flyLink(id) {
+  const a = document.createElement('a');
+  a.href = '/fly?job=' + encodeURIComponent(id);
+  a.textContent = '✦ see these stars from outside';
+  a.className = 'cardlink';
+  return a;
+}
+
 function render(id, job) {
   renderFeed();  // a fresh solve (maybe this one) belongs in the strip
   shownJob = job;
@@ -1553,6 +1569,7 @@ function render(id, job) {
     const actions = [cardLink];
     if (describeText(job)) actions.push(copyButton('copy description', () => describeText(job)));
     if (starListText(job)) actions.push(copyButton('copy star list', () => starListText(job)));
+    if (flyable(job)) actions.push(flyLink(id));
     // Keep control (#113): on offer inside the window, and always shown
     // for a kept solve so the keep can be withdrawn.
     if (job.keep_open || job.kept) actions.push(keepButton(id, job));

@@ -104,7 +104,10 @@ test('nothing to describe means no description button, the star list stays', () 
   const { sandbox, els } = loadPage();
   const job = { ...JOB, result: { ...JOB.result, narration: undefined, lore: undefined } };
   const children = show(sandbox, els, job);
-  assert.equal(children.length, 2);
+  // The copy buttons, not everything on offer: the row has other things
+  // in it (the card, the view from outside) that are not this test's.
+  const copies = children.filter((c) => c.className === 'copy');
+  assert.deepEqual(copies.map((c) => c.textContent), ['copy star list']);
   assert.equal(children[1].textContent, 'copy star list');
 });
 
