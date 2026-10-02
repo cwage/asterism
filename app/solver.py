@@ -363,6 +363,23 @@ def _bayer_name(row):
     return f"{letter}{m.group(2).translate(_SUPERSCRIPTS)} {con}"
 
 
+def star_name(row):
+    """The name a star is labelled with: its proper name, else its Bayer
+    designation, else None. The Sun has none. The fly-around page joins a
+    solve's labels back to the catalog by this name (fly.py), so there is
+    one rule for it and it lives here."""
+    name = (row.get("proper") or "").strip()
+    if name == "Sol":
+        return None
+    if name:
+        return name
+    # Unnamed secondary components (Castor B and friends) would duplicate
+    # their primary's designation at the same pixel.
+    if (row.get("comp") or "1").strip() not in ("", "1"):
+        return None
+    return _bayer_name(row)
+
+
 def load_catalog():
     """HYG database rows for bright stars, brightest first: proper-named
     stars plus Bayer designations for the bright stars without one.
@@ -374,15 +391,7 @@ def load_catalog():
     stars = []
     with open(path, newline="") as f:
         for row in csv.DictReader(f):
-            name = (row.get("proper") or "").strip()
-            if name == "Sol":
-                continue
-            if not name:
-                # Unnamed secondary components (Castor B and friends) would
-                # duplicate their primary's designation at the same pixel.
-                if (row.get("comp") or "1").strip() not in ("", "1"):
-                    continue
-                name = _bayer_name(row)
+            name = star_name(row)
             if not name:
                 continue
             try:

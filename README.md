@@ -476,6 +476,93 @@ sending the file again. A messaging-app copy has different bytes and is a
 different photo here, on purpose: near-duplicate detection is its own feature,
 and the WCS-overlap link (#119) covers the interesting half of it.
 
+## From outside
+
+A solved photo's result page links to `/fly?job=<id>`: the same stars at
+their real distances, seen from outside. It opens on the photo, lined up
+with the catalog; then the camera rises and backs away behind Earth until
+Earth, the Sun and the photo are in one shot with the photo's nearer stars
+beyond, circles them once, and comes home, on a loop. The flat figures
+turn out to be a fan of stars strung along hundreds of light-years of
+depth, with Earth at its point and the photo a slice across it. Dragging
+turns it; the wheel, or a pinch, moves in and out.
+
+It costs the solver nothing: the page is static files under `static/fly/`
+and everything is drawn in the visitor's browser (three.js, vendored by
+`scripts/vendor-three.sh` and checked in).
+
+- **Where the stars are.** HYG carries each star's position in parsecs.
+  `app/fly.py` packs all of them into `stars.bin` and an index of names and
+  constellation figures, built on first request and kept under `data/fly/`.
+  The star file's URL carries a hash of its contents, so it is cached for
+  good and a changed catalog is a new URL.
+- **Where the camera was.** A job's result has each labelled star's name
+  and pixel, not the WCS. `static/fly/fit.mjs` fits a pinhole camera to
+  those pairs (one rotation, one focal length), which is why the result
+  page offers the link only to solves with three named stars or more. The
+  names are joined to the catalog by the solver's own rule
+  (`solver.star_name`).
+- **The photo** is a sheet in the scene at its typical named star's
+  distance, sized so that from Earth it covers exactly the camera's field;
+  each star's line from Earth passes through it at that star's place in
+  the picture. It fades as the view of it turns oblique and is not drawn
+  from behind; its outline and the four edges from Earth to its corners
+  stay.
+
+How the camera leaves Earth took four tries, and each wrong version looked
+fine in stills. The constraints, which `tests/browser/` asserts:
+
+- *It rises before it backs away.* Straight back from someone looking up
+  at the sky is down through the ground: the planet comes out of the lens
+  and shrinks into the middle of its own photo.
+- *Earth and the Sun are fixed things in the scene.* Drawn to scale near
+  home and held at a pixel size far from it, they are two different
+  scenes: in one Earth shrinks a million-fold while the photo and every
+  star stand still, which reads as Earth flying off rather than the camera
+  leaving; in the other the photo shrinks and Earth does not.
+- *They are drawn only from a distance*, never much more than twice their
+  final size, so the opening view has nothing in it but the photo.
+- *The lens changes on the way out.* At home it has to be the photo's own,
+  which with the photo fitted across a screen of another shape runs from
+  15 degrees to 130; through that on an upright phone, Earth off-centre is
+  an egg. Outside, the screen's narrower side gets 38 to 55 degrees.
+
+What it gets wrong:
+
+- **Earth and the Sun are signs, not bodies**: a blue ball a light-year
+  or two across and a Sun beside it four times as wide, where the real
+  one is 109 times: at 109 either Earth is under a pixel or the Sun is
+  wider than the screen. At true scale home is a hundredth of a pixel
+  from where the camera ends up. The Sun is put on the
+  far side of Earth from the photo and off to one side, wherever it really
+  was, and the ground is taken to be just under the bottom of the photo,
+  since which way was up is not known without a location.
+- **It is not what an eye would see.** From a thousand light-years back
+  none of these stars would be visible, so the exposure rises as the camera
+  backs off and the named stars get dots regardless of brightness. The
+  backdrop is the catalog, which is a sample centred on the Sun.
+- **Distances are parallaxes, with their errors.** Past a few hundred
+  parsecs they are loose; a star HYG has no usable parallax for sits at its
+  placeholder of 100000 pc, never moves, and is labelled without a
+  distance.
+- **Only stars.** Planets, the Moon, deep-sky objects and satellites in a
+  solve are not drawn.
+- **The lens is taken to be a pinhole**, so on an ultrawide the labels sit
+  a few pixels off the photo toward its edges.
+
+To look at a change to it, look at it moving:
+
+```
+docker compose --profile browser run --rm browser node film.js <job id> [seconds]
+docker compose --profile browser run --rm browser node shots.js <job id> [<job id> ...]
+```
+
+The first records the page as a video and the second takes stills of the
+same eight moments for each solve, both into `data/browser/`; with no job
+id `film.js` films the tests' made-up solve. `VIEWPORT=390x844` in front of
+either shows it as a phone does. `?speed=4` on the page runs the tour
+faster, and `?u=0.3` opens it paused part-way.
+
 ## Quickstart
 
 ```
@@ -504,6 +591,20 @@ docker compose run --rm worker pytest -m solver
 The synthetic fields give exact ground truth: the test asserts the solved
 pointing lands within 1.5° of where the field was rendered, not just that
 the solver said yes.
+
+The homepage's logic, and the fly-around page's camera fit, under plain
+node with no browser and no dependencies:
+
+```
+node --test tests/js/*.test.mjs
+```
+
+The fly-around page itself, in Chromium (Playwright, in its own container),
+against the web service with a made-up solve:
+
+```
+docker compose --profile browser run --rm --build browser
+```
 
 ## Benchmark
 
