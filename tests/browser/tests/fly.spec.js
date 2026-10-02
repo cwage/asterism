@@ -340,3 +340,30 @@ test.describe('with two fingers', () => {
     expect(back.zoom).toBeCloseTo(before.zoom, 1);
   });
 });
+
+// With hardware acceleration off a browser has no WebGL, and three.js
+// cannot make a renderer. The page has to say so rather than sit black.
+// The browser is made to refuse WebGL from inside the page, as such a
+// browser does: getContext hands back null.
+test.describe('in a browser with no WebGL', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      const real = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = function (kind, ...rest) {
+        return /webgl/.test(kind) ? null : real.call(this, kind, ...rest);
+      };
+    });
+  });
+
+  test('says what is wrong instead of showing a black screen', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    await serveFixture(page);
+    await page.goto(`/fly?job=${JOB_ID}`);
+    await expect(page.locator('#status')).toContainText('needs WebGL 2');
+    await expect(page.locator('#status a')).toHaveAttribute('href', `/?job=${JOB_ID}`);
+    await expect(page.locator('#controls')).toBeHidden();
+    await page.setViewportSize({ width: 800, height: 600 });   // a resize must not throw either
+    expect(errors).toEqual([]);
+  });
+});

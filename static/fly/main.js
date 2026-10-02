@@ -77,9 +77,19 @@ const SPEED = Math.min(Math.max(Number(params.get('speed')) || 1, 0.1), 100);
 const rad = THREE.MathUtils.degToRad;
 const smooth = (x) => x * x * (3 - 2 * x);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setClearColor(0x02030a);
-stage.prepend(renderer.domElement);
+// three.js needs WebGL 2. A browser with hardware acceleration turned off,
+// or a GPU it has blocklisted, has none, and the renderer throws. Left to
+// throw here, the module stops before anything is drawn and the page is a
+// black screen saying it is loading, for good. So it is caught, and the
+// page says what is wrong instead (see the end of the file).
+let renderer = null;
+try {
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setClearColor(0x02030a);
+  stage.prepend(renderer.domElement);
+} catch {
+  renderer = null;
+}
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(DEMO.vfov, 1, 1e-4, 1e7);
 
@@ -621,6 +631,7 @@ function updateCamera() {
 }
 
 function layout() {
+  if (!renderer) return;
   const w = innerWidth, h = innerHeight;
   // From Earth the photo sits whole in the window and the sky carries on
   // around it: the camera's field is widened until the photo's own field
@@ -907,4 +918,13 @@ window.fly = {
   },
 };
 
-start().catch((e) => { $('status').textContent = `Could not start: ${e.message}`; });
+if (renderer) {
+  start().catch((e) => { $('status').textContent = `Could not start: ${e.message}`; });
+} else {
+  const id = /^[0-9a-f]{32}$/.test(params.get('job') || '') ? params.get('job') : null;
+  $('controls').hidden = true;
+  $('status').replaceChildren(
+    'This needs WebGL 2, and this browser has none to give: hardware acceleration may be turned off in its settings, '
+      + 'or it may not trust the graphics driver. ',
+    link(id ? `/?job=${id}` : '/', '← back'));
+}
