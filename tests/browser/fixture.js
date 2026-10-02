@@ -45,7 +45,7 @@ async function labels(pose) {
 
   const { ra, dec, vfov, width, height } = pose;
   const forward = [Math.cos(rad(dec)) * Math.cos(rad(ra)), Math.cos(rad(dec)) * Math.sin(rad(ra)), Math.sin(rad(dec))];
-  const up = unit([0, 0, 1].map((c, i) => c - forward[2] * forward[i]));   // north, squared to the view
+  const up = unit([0, 0, 1].map((c, i) => c - forward[2] * forward[i]));   // north, made square to the view
   const right = cross(forward, up);
   const f = height / 2 / Math.tan(rad(vfov) / 2);
 

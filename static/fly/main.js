@@ -121,7 +121,13 @@ async function loadCatalog() {
   });
   // The star file is cached for good under its version (fly.py), so the
   // version is part of what is asked for.
-  const buffer = await fetch(`/fly/stars.bin?v=${catalog.version}`).then((r) => r.arrayBuffer());
+  const buffer = await fetch(`/fly/stars.bin?v=${catalog.version}`).then((r) => {
+    if (!r.ok) throw new Error(`the star catalog is not available (${r.status})`);
+    return r.arrayBuffer();
+  });
+  // Five float32 to a star. Anything else is not the file the index
+  // describes: an error page read as numbers, or a download cut short.
+  if (buffer.byteLength !== catalog.count * 20) throw new Error('the star catalog did not arrive whole');
   const raw = new Float32Array(buffer);
   const n = catalog.count;
   const position = new Float32Array(n * 3), absmag = new Float32Array(n), tint = new Float32Array(n * 3);

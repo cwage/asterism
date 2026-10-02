@@ -271,6 +271,33 @@ test.describe('on a phone held upright', () => {
   });
 });
 
+// The star file is asked for separately from its index and can fail on its
+// own. Read as numbers, an error page is either an exception about array
+// lengths or a sky of garbage; the page should say what happened instead.
+test.describe('when the star file does not arrive', () => {
+  const answer = (page, response) => page.route('**/fly/stars.bin*', (route) => route.fulfill(response));
+
+  test('an error from the server is reported as the catalog being unavailable', async ({ page }) => {
+    await serveFixture(page);
+    await answer(page, { status: 503, contentType: 'application/json', body: '{"detail":"the star catalog has not been fetched"}' });
+    await page.goto(`/fly?job=${JOB_ID}&u=0`);
+    await expect(page.locator('#status')).toHaveText('Could not start: the star catalog is not available (503)');
+  });
+
+  test('a file cut short is reported as not having arrived whole', async ({ page }) => {
+    await serveFixture(page);
+    await answer(page, { status: 200, contentType: 'application/octet-stream', body: Buffer.alloc(4000) });
+    await page.goto(`/fly?job=${JOB_ID}&u=0`);
+    await expect(page.locator('#status')).toHaveText('Could not start: the star catalog did not arrive whole');
+  });
+
+  test('the status line is announced to a screen reader when it changes', async ({ page }) => {
+    await serveFixture(page);
+    await page.goto(`/fly?job=${JOB_ID}&u=0`);
+    await expect(page.locator('#status')).toHaveAttribute('aria-live', 'polite');
+  });
+});
+
 test.describe('with two fingers', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 3 });
 
