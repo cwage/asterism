@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>asterism — from outside</title>
+<style>
+  /* The homepage's palette, plus one colour of its own: everything that
+     is Earth's (home, the photo's outline, the lines of sight) is amber,
+     against the blue of the figures. */
+  :root {
+    color-scheme: dark;
+    --bg: #02030a; --ink: #cdd6e0; --dim: #8fa1b3; --faint: #6b7a8d;
+    --line: #34435c; --panel: #131a26; --accent: #78c8ff; --home: #ffb86b;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--ink);
+               font: 14px/1.4 system-ui, sans-serif; overflow: hidden; }
+  a { color: var(--accent); }
+
+  /* The scene fills the window; everything else lies over it. touch-action
+     so that a drag on a phone turns the view instead of scrolling a page
+     that has nowhere to scroll. */
+  #stage { position: absolute; inset: 0; overflow: hidden; touch-action: none; cursor: grab; }
+  #stage.dragging { cursor: grabbing; }
+  #stage canvas, #labels { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #labels { pointer-events: none; }
+  .label { position: absolute; left: 0; top: 0; white-space: nowrap; font-size: 12px;
+           text-shadow: 0 0 4px #000, 0 0 2px #000; will-change: transform; }
+  .label small { color: var(--dim); margin-left: 5px; }
+  .label.home { color: var(--home); }
+  /* With no Earth drawn (no photo), home is a ring. */
+  .label.home.ring::before { content: ""; position: absolute; left: -12px; top: 4px;
+                             width: 8px; height: 8px;
+                             border: 1.5px solid var(--home); border-radius: 50%; }
+
+  #info, #controls { position: absolute; left: 12px; right: 12px; pointer-events: none; }
+  #info > *, #controls > * { pointer-events: auto; }
+  #info { top: 10px; text-shadow: 0 0 6px #000; }
+  h1 { font-weight: 400; letter-spacing: 0.3em; font-size: 1.05rem; margin: 0 0 2px; }
+  /* The wordmark is the way back to the upload page, as on the homepage. */
+  h1 a { color: inherit; text-decoration: none; }
+  h1 a:hover { color: var(--accent); }
+  #status { margin: 0 0 4px; color: var(--dim); max-width: 34rem; }
+  #about { max-width: 30rem; color: var(--dim); }
+  #about summary { cursor: pointer; color: var(--faint); width: fit-content; }
+  #about summary:hover { color: var(--accent); }
+  #about[open] { background: #0a0f18e6; border: 1px solid var(--line); border-radius: 8px;
+                 padding: 6px 10px; text-shadow: none; }
+  #about p { margin: 6px 0 2px; }
+
+  #controls { bottom: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+         background: #0a0f18cc; border: 1px solid var(--line); border-radius: 8px;
+         padding: 6px 10px; }
+  #trip { flex: 1 1 200px; min-width: 120px; }
+  #where { flex: 0 0 auto; min-width: 38ch; font-variant-numeric: tabular-nums; }
+  label { color: var(--dim); display: inline-flex; align-items: center; gap: 5px; }
+  button { background: #1a2230; color: var(--ink); border: 1px solid var(--line);
+           border-radius: 6px; padding: 4px 10px; font: inherit; cursor: pointer; }
+  button:hover { background: #243044; }
+  button:focus-visible, summary:focus-visible, input:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px; }
+  input[type=range] { accent-color: var(--home); }
+  [hidden] { display: none !important; }
+
+  /* A phone held upright: the readout gets a line of its own under the
+     slider, and the one control that is only for tinkering goes. */
+  @media (max-width: 34rem) {
+    #where { min-width: 0; flex-basis: 100%; }
+    .tinker { display: none; }
+  }
+</style>
+<script type="importmap">
+  { "imports": { "three": "/fly/vendor/three/three.module.js" } }
+</script>
+</head>
+<body>
+<div id="stage">
+  <div id="labels"></div>
+</div>
+
+<header id="info">
+  <h1><a href="/">asterism</a></h1>
+  <p id="status">Loading the stars…</p>
+  <details id="about">
+    <summary>what am I looking at?</summary>
+    <p>The stars asterism named in the photo, each at the distance its
+      parallax gives. The photo hangs in space where Earth's view of them
+      was, and the lines from Earth pass through it at each star's place
+      in the picture.</p>
+    <p>Earth and the Sun are not to scale: from out here they would be far
+      too small to see. The other stars are the catalog's, with their
+      brightness turned up as the camera backs away.</p>
+    <p>Drag to look from another side. Scroll, or pinch, to move in and out.</p>
+  </details>
+</header>
+
+<div id="controls">
+  <div class="row">
+    <button id="play">Play</button>
+    <input id="trip" type="range" min="0" max="1" step="0.0005" value="0"
+           aria-label="Place in the tour: away from Earth, around the stars, and back">
+    <span id="where">at Earth</span>
+  </div>
+  <div class="row">
+    <label class="tinker">faintest star
+      <input id="maglimit" type="range" min="3" max="9" step="0.1" value="6.5">
+      <span id="magvalue">6.5</span>
+    </label>
+    <label><input id="showlines" type="checkbox" checked> figures</label>
+    <label><input id="showsight" type="checkbox" checked> lines from Earth</label>
+    <label><input id="showlabels" type="checkbox" checked> names</label>
+    <button id="home" hidden>back to Earth</button>
+  </div>
+</div>
+
+<script type="module" src="/fly/main.js"></script>
+</body>
+</html>

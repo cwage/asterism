@@ -16,8 +16,9 @@ from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.routing import APIRoute
+from fastapi.staticfiles import StaticFiles
 
-from . import card, db, exif, feedback, sky_tags, stats
+from . import card, db, exif, feedback, fly, sky_tags, stats
 
 app = FastAPI(title="asterism")
 db.init_db()
@@ -754,6 +755,54 @@ def get_job_card(job_id: str, request: Request):
                         filename=f"asterism-{job_id[:8]}.png")
 
 
+# The fly-around page: a solve's stars seen from outside, at their real
+# distances. Three things live under /fly: the page, the star data it
+# loads (built from the catalog on first request, fly.py), and its own
+# scripts, which are mounted at the bottom of this file.
+@app.get("/fly")
+def fly_page(request: Request, job: str | None = None):
+    """The page takes the job from its query string and asks /jobs/{id}
+    for it, as the homepage does. A share link unfurls with the solve's
+    card, as a ?job= link to the homepage does (#13)."""
+    if job and re.fullmatch(r"[0-9a-f]{32}", job):
+        with open("static/fly/index.html") as f:
+            page = f.read()
+        base = str(request.base_url).rstrip("/")
+        meta = (
+            '<meta property="og:title" content="asterism — these stars, from outside">\n'
+            '<meta property="og:description" content="The stars in a night-sky '
+            'photo, at their real distances: leave Earth and look back.">\n'
+            f'<meta property="og:image" content="{base}/jobs/{job}/card">\n'
+            '<meta name="twitter:card" content="summary_large_image">\n'
+        )
+        return HTMLResponse(page.replace("</head>", meta + "</head>"))
+    return FileResponse("static/fly/index.html")
+
+
+def _fly_data(which, media_type, cache):
+    paths = fly.files()
+    if paths is None:
+        raise HTTPException(503, "the star catalog has not been fetched")
+    return FileResponse(paths[which], media_type=media_type,
+                        headers={"Cache-Control": cache})
+
+
+@app.get("/fly/catalog.json")
+def fly_catalog():
+    """Small, and it names the star file's current version, so it is
+    asked for afresh on every visit."""
+    return _fly_data(1, "application/json", "no-cache")
+
+
+@app.get("/fly/stars.bin")
+def fly_stars():
+    """2.4 MB that changes only when the catalog does. The page asks for
+    it as stars.bin?v=<version from catalog.json>, so a changed file is a
+    new URL and this one can be kept for good."""
+    return _fly_data(0, "application/octet-stream",
+                     "public, max-age=31536000, immutable")
+
+
 # FastAPI registers only the method named on the decorator, so every GET
 # route above answered HEAD with 405 (plain Starlette routes add HEAD for
 # free). Feed readers HEAD an enclosure to learn its size before fetching
@@ -762,3 +811,9 @@ def get_job_card(job_id: str, request: Request):
 for _route in app.routes:
     if isinstance(_route, APIRoute) and "GET" in _route.methods:
         _route.methods.add("HEAD")
+
+
+# The fly-around page's scripts and its copy of three.js. Last in the
+# file: a mount takes everything under its path, so /fly itself and the
+# two data routes have to be matched before it.
+app.mount("/fly", StaticFiles(directory="static/fly"), name="fly")
