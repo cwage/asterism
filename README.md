@@ -529,9 +529,11 @@ fine in stills. The constraints, which `tests/browser/` asserts:
 
 What it gets wrong:
 
-- **Earth and the Sun are signs, not bodies**: a blue ball several
-  light-years across and a glow beside it. At true scale home is a
-  hundredth of a pixel from where the camera ends up. The Sun is put on the
+- **Earth and the Sun are signs, not bodies**: a blue ball a light-year
+  or two across and a Sun beside it four times as wide, where the real
+  one is 109 times: at 109 either Earth is under a pixel or the Sun is
+  wider than the screen. At true scale home is a hundredth of a pixel
+  from where the camera ends up. The Sun is put on the
   far side of Earth from the photo and off to one side, wherever it really
   was, and the ground is taken to be just under the bottom of the photo,
   since which way was up is not known without a location.

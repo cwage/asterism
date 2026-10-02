@@ -49,6 +49,8 @@ const read = (page) => page.evaluate(() => {
     },
     sun: {
       opacity: sun.glow.material.opacity, x: sunAt.x, y: sunAt.y, onScreen: onScreen(sunAt),
+      // Its bright disc's radius on screen, in pixels.
+      disc: sun.radius / camera.position.distanceTo(sun.glow.position) / perPixel,
       // Whether the whole of its glow is in the picture.
       whole: sunAt.ahead && sunAt.x - sunSize > 0 && sunAt.x + sunSize < innerWidth
         && sunAt.y - sunSize > 0 && sunAt.y + sunSize < innerHeight,
@@ -151,8 +153,13 @@ test('backing away is one move: the photo recedes, and Earth is there below it w
   expect(end.sun.onScreen).toBe(true);
   expect(end.frame.onScreen).toBe(true);
   expect(end.photo).toBeGreaterThan(0.6);
-  expect(end.earth.radius).toBeGreaterThan(30);
-  expect(end.earth.radius).toBeLessThan(38);
+  expect(end.earth.radius).toBeGreaterThan(9);
+  expect(end.earth.radius).toBeLessThan(13);
+  // The Sun plainly dwarfs Earth, as the real one does (if by 109 times
+  // rather than four), and stands clear of it.
+  expect(end.sun.disc / end.earth.radius).toBeGreaterThan(3.5);
+  expect(end.sun.disc / end.earth.radius).toBeLessThan(5.2);
+  expect(Math.hypot(end.sun.x - end.earth.x, end.sun.y - end.earth.y)).toBeGreaterThan(end.sun.disc + end.earth.radius);
   expect(end.earth.squash).toBeGreaterThan(0.9);
   expect(end.earth.squash).toBeLessThan(1.15);
   expect(end.sun.whole).toBe(true);

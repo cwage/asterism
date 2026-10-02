@@ -24,14 +24,19 @@ const TOUR_RISE_DEG = 18;
 // fraction of the screen's shorter side, and fixed at that size in space,
 // so that it shrinks and grows with the camera's distance like everything
 // else in the scene.
-const EARTH_SIZE = 0.0425, EARTH_MIN_PX = 14;
+const EARTH_SIZE = 0.0135, EARTH_MIN_PX = 6;
 // Up close a ball that size would fill the view, and backing away from it
 // would be the planet ballooning out of the camera. It is drawn only from
 // a distance, coming in between these fractions of the way to where the
 // backing away ends: it is never seen much more than twice its final size.
 const HOME_FADE_FROM = 0.4, HOME_FADE_TO = 0.7;
 // The Sun, in Earth radii: how far from Earth, the bright disc, the glow.
-const SUN_AWAY = 3.4, SUN_DISC = 0.9, SUN_GLOW = 2.2;
+// The real one is 109 Earths across and 23,000 Earth radii away. At 109,
+// either Earth is under a pixel or the Sun is wider than the screen, so
+// this keeps the proportion in spirit: a Sun that plainly dwarfs Earth,
+// with Earth still a ball that can be seen. It used to be drawn a little
+// smaller than Earth, which is the one thing everybody knows it is not.
+const SUN_AWAY = 7.5, SUN_DISC = 4, SUN_GLOW = 5.6;
 // Where Earth sits in the shot the backing away ends on, as a fraction of
 // the way down the screen: under the photo, clear of the controls along
 // the bottom. The camera is tipped by whatever that takes.
@@ -275,15 +280,20 @@ function iconLabel(text) {
 }
 
 function glowTexture() {
-  const size = 128, canvas = document.createElement('canvas');
+  const size = 256, canvas = document.createElement('canvas');
   canvas.width = canvas.height = size;
   const context = canvas.getContext('2d');
   const glow = context.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
   const disc = SUN_DISC / SUN_GLOW;
-  glow.addColorStop(0, 'rgba(255, 255, 255, 1)');
-  glow.addColorStop(disc * 0.8, 'rgba(255, 246, 220, 1)');
-  glow.addColorStop(disc, 'rgba(255, 214, 130, 0.5)');
-  glow.addColorStop(1, 'rgba(255, 170, 60, 0)');
+  // A disc with an edge to it, a little yellower toward the limb, and a
+  // halo that is gone by the sprite's rim.
+  // Yellow rather than white: at this size a white disc is a hole burnt
+  // in the picture, and Earth beside it cannot be seen for the glare.
+  glow.addColorStop(0, 'rgba(255, 244, 214, 1)');
+  glow.addColorStop(disc * 0.7, 'rgba(255, 232, 170, 1)');
+  glow.addColorStop(disc * 0.97, 'rgba(255, 204, 110, 1)');
+  glow.addColorStop(disc, 'rgba(255, 190, 90, 0.4)');
+  glow.addColorStop(1, 'rgba(255, 160, 60, 0)');
   context.fillStyle = glow;
   context.fillRect(0, 0, size, size);
   const texture = new THREE.CanvasTexture(canvas);
