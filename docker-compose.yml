@@ -57,3 +57,20 @@ services:
       - NTFY_BURST_WINDOW_MINUTES=${NTFY_BURST_WINDOW_MINUTES:-}
       - NTFY_SUMMARY_HOUR_UTC=${NTFY_SUMMARY_HOUR_UTC:-}
       - NTFY_TICK_SECONDS=${NTFY_TICK_SECONDS:-}
+
+  # Browser tests for the fly-around page, and two tools for looking at it
+  # (README, "From outside"). Behind a profile, so `up` does not start it:
+  #   docker compose --profile browser run --rm --build browser
+  # Chromium runs against the web service above, with the job it asks for
+  # answered from a fixture, so no solve and no photo is needed. Videos and
+  # stills go to data/browser/.
+  browser:
+    build: tests/browser
+    profiles: ["browser"]
+    depends_on:
+      - web
+    environment:
+      - BASE_URL=http://web:8000
+      - VIEWPORT=${VIEWPORT:-}
+    volumes:
+      - ./data/browser:/browser/out
