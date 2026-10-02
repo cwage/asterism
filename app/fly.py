@@ -126,7 +126,11 @@ def build(catalog_dir):
 def _signature(catalog_dir):
     """What the cache was built from: the layout version and each source
     file's size and modification time. None if the star catalog has not
-    been fetched."""
+    been fetched.
+
+    The time is kept to the nanosecond. In whole seconds, a catalog
+    rewritten to the same length within the second it was last built from
+    would pass for unchanged, and the old stars would go on being served."""
     sources = []
     for name in ("hyg.csv", constellations.LINES_FILE):
         try:
@@ -138,7 +142,7 @@ def _signature(catalog_dir):
             # signature so that fetching it later rebuilds.
             sources.append([name, None, None])
             continue
-        sources.append([name, stat.st_size, int(stat.st_mtime)])
+        sources.append([name, stat.st_size, stat.st_mtime_ns])
     return {"layout": LAYOUT, "sources": sources}
 
 

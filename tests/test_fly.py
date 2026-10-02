@@ -150,6 +150,22 @@ def test_a_changed_catalog_is_rebuilt(sky):
     assert after["version"] != before["version"]
 
 
+def test_a_rewrite_of_the_same_length_in_the_same_second_is_still_a_change(sky):
+    hyg = sky / "hyg.csv"
+    before = os.stat(hyg)
+    _, catalog_path = fly.files()
+    # Same number of bytes, one name different, a millisecond later.
+    hyg.write_text(FLY_HYG.replace("Nocolour", "Recolour"))
+    os.utime(hyg, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000))
+    after = os.stat(hyg)
+    assert after.st_size == before.st_size
+    assert int(after.st_mtime) == int(before.st_mtime)
+    _, catalog_path = fly.files()
+    with open(catalog_path) as f:
+        names = json.load(f)["names"]
+    assert "Recolour" in names and "Nocolour" not in names
+
+
 def test_a_half_written_cache_is_not_trusted(sky):
     stars_path, _ = fly.files()
     # As after a crash between writing the stars and recording what they
