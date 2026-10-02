@@ -40,6 +40,21 @@
   population from casual phone uploads: it bounds the question, it does not
   settle it.
 
+## The fly-around page (`static/fly/`, `/fly?job=`)
+- Its tests are three tiers: `tests/test_fly.py` (the star data and the
+  routes, in the fast pytest tier), `tests/js/fit.test.mjs` (the camera
+  fit, under node), and `tests/browser/` (the page in Chromium:
+  `docker compose --profile browser run --rm --build browser`). The browser
+  image bakes its tests in like the worker's: `--build` after editing.
+- Judge a change to how it moves by filming it (`node film.js` in the
+  browser container, README "From outside"), not by stills: every wrong
+  version of the camera's exit from Earth looked fine frame by frame.
+- Check it at a phone's size too (`VIEWPORT=390x844`). Most photos and
+  visitors come from phones, and an upright screen is where the framing
+  breaks first.
+- `static/fly/vendor/three/` is checked in. Change the version in
+  `scripts/vendor-three.sh` and rerun it; do not hand-edit.
+
 ## Deploy workflow
 - Deploy BEFORE merging: `fly deploy` from the feature branch, verify it works
   in prod, and only then merge the PR. main stays pristine as the rollback
