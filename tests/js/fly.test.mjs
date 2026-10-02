@@ -48,3 +48,15 @@ test('the link sits with the other things to do, ahead of keeping', () => {
   assert.ok(fly > 0, 'after the share card');
   assert.ok(keep > fly, 'before keep');
 });
+
+test('a browser with no WebGL 2 is not offered a page it cannot draw', () => {
+  const { sandbox, els } = loadPage();
+  // The harness's elements hand back a 2D recorder for any context; this
+  // one has no WebGL to give, as a browser with acceleration off has not.
+  const make = sandbox.document.createElement;
+  sandbox.document.createElement = () => Object.assign(make(), { getContext: () => null });
+  sandbox.render('0123456789abcdef0123456789abcdef',
+    job([star('Vega', 200, 200), star('Deneb', 500, 300), star('Altair', 400, 700)]));
+  els.photo.onload();
+  assert.equal(flyLinks(els.actions.children).length, 0);
+});

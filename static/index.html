@@ -1537,8 +1537,25 @@ function copyButton(label, text) {
 // stars and needs three of them to do it, so a solve with fewer is not
 // offered a page that could only say it cannot start.
 const FLY_MIN_STARS = 3;
+// The page also needs WebGL 2, which a browser with hardware acceleration
+// off does not have: without it there is nothing to offer. Asked once, and
+// the context made to ask is let go of straight away.
+let webgl2 = null;
+function hasWebGL2() {
+  if (webgl2 === null) {
+    try {
+      const gl = document.createElement('canvas').getContext('webgl2');
+      webgl2 = !!gl;
+      gl?.getExtension?.('WEBGL_lose_context')?.loseContext();
+    } catch {
+      webgl2 = false;
+    }
+  }
+  return webgl2;
+}
 function flyable(job) {
-  return (job.result.labels || []).filter(l => l.kind === 'star').length >= FLY_MIN_STARS;
+  return hasWebGL2()
+    && (job.result.labels || []).filter(l => l.kind === 'star').length >= FLY_MIN_STARS;
 }
 function flyLink(id) {
   const a = document.createElement('a');
