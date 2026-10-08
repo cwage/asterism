@@ -56,6 +56,10 @@ def test_social_labels_lead_with_bodies_then_proper_names():
     assert names == ["Saturn", "Lagoon Nebula (M8)", "Nunki", "Albaldah", "σ Sgr"]
     assert [l["name"] for l in card.social_labels(result, limit=3)] == [
         "Saturn", "Lagoon Nebula (M8)", "Nunki"]
+    # the cap holds even when bodies and DSOs alone would pass it
+    crowded = {"labels": [{"name": f"M{i}", "mag": 5.0, "x": 1, "y": 1,
+                           "kind": "dso", "status": "projected"} for i in range(14)]}
+    assert len(card.social_labels(crowded)) == card.SOCIAL_LABELS
 
 
 def test_portrait_and_landscape_widths(tmp_path, portrait, landscape):
@@ -102,6 +106,20 @@ def test_figure_lines_stop_at_the_headline_bar(tmp_path, portrait):
     img = Image.open(out)
     assert img.getpixel((1100, 20)) == card.BG[:3]
     assert img.getpixel((1100, 300)) != img.getpixel((300, 300))
+
+
+def test_a_long_caption_is_cut_to_fit_the_headline(tmp_path, portrait):
+    # The narrator can return up to 90 characters with no " · " to split
+    # on; at the smallest headline size it must still end inside the bar.
+    caption = "Extraordinarily luminous constellations stretching gloriously across " * 2
+    out = tmp_path / "s.png"
+    card.render_social(str(portrait), {"labels": [], "narration": {"caption": caption}},
+                       "host", str(out))
+    img = Image.open(out)
+    head = round(card.SOCIAL_WIDTH_PORTRAIT * card.SOCIAL_HEADER)
+    edge = [img.getpixel((x, y)) for x in range(img.width - 30, img.width)
+            for y in range(0, round(head * 0.6))]
+    assert set(edge) == {card.BG[:3]}
 
 
 def test_endpoint_serves_and_caches_each_style(fresh_db, portrait):

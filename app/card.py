@@ -388,9 +388,9 @@ _GREEK = re.compile("[\u0370-\u03ff]")
 
 
 def social_labels(result, limit=SOCIAL_LABELS):
-    """The labels the social card names, in drawing order: every visible
-    Moon, planet and deep-sky object, then stars brightest-first, proper
-    names ahead of Bayer letters — "Nunki" says something at a glance,
+    """The labels the social card names, in drawing order, at most limit:
+    the visible Moon, planets and deep-sky objects, then stars
+    brightest-first, proper names ahead of Bayer letters — "Nunki" says something at a glance,
     "ξ² Sgr" only to someone who already knows. Hidden labels are left
     out: the card names what the photo shows."""
     labels = sorted((l for l in result.get("labels") or []
@@ -399,7 +399,7 @@ def social_labels(result, limit=SOCIAL_LABELS):
     stars = [l for l in labels if l.get("kind", "star") == "star"]
     named = [l for l in stars if not _GREEK.search(l["name"])]
     bayer = [l for l in stars if _GREEK.search(l["name"])]
-    return special + (named + bayer)[:max(0, limit - len(special))]
+    return (special + named + bayer)[:limit]
 
 
 def render_social(image_path, result, share_host, out_path):
@@ -518,8 +518,8 @@ def render_social(image_path, result, share_host, out_path):
 
     out = Image.alpha_composite(canvas.convert("RGBA"), overlay).convert("RGB")
 
-    # Headline: the caption, shrunk to fit and then shortened by its
-    # " · " parts, over the provenance line. The bar is painted over the
+    # Headline: the caption, shrunk to fit, then shortened by its " · "
+    # parts, then cut at a word with an ellipsis, over the provenance line. The bar is painted over the
     # composite, so a figure line running off the top of the photo stops
     # at its edge.
     draw = ImageDraw.Draw(out)
@@ -531,6 +531,8 @@ def render_social(image_path, result, share_host, out_path):
             font = bold(font.size - 2)
         elif " · " in title:
             title = title.rsplit(" · ", 1)[0]
+        elif " " in title.rstrip("…"):
+            title = title.rstrip("…").rsplit(" ", 1)[0].rstrip(" ,;:—") + "…"
         else:
             break
     draw.text((40, head * 0.14), title, font=font, fill=INK[:3])
