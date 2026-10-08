@@ -203,7 +203,7 @@ def test_the_page_is_served_and_loads_its_script_by_absolute_path(client):
 def test_a_share_link_unfurls_with_the_solves_card(client):
     r = client.get(f"/fly?job={JOB}")
     assert r.status_code == 200
-    assert f'/jobs/{JOB}/card"' in r.text
+    assert f'/jobs/{JOB}/card?style=social"' in r.text
     assert "og:title" in r.text
 
 

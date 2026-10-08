@@ -7,9 +7,9 @@ import shutil
 import time
 import traceback
 
-from . import (beyond, constellations, db, dso, ephemeris, locate, lore,
-               narrate, night, notify, satellites, solver, stats, streaks,
-               verify)
+from . import (beyond, card, constellations, db, dso, ephemeris, locate,
+               lore, narrate, night, notify, satellites, solver, stats,
+               streaks, verify)
 
 # Below this many detected star-like sources, a quick job fails fast
 # instead of burning cpulimit tiers on daylight/food/pitch-black uploads.
@@ -84,8 +84,8 @@ def sweep_expired():
                 continue
             removed += 1
             if row["image_path"]:
-                # The share card (#13) is cached beside the upload.
-                for path in (row["image_path"], row["image_path"] + ".card.png"):
+                # The share cards (#13) are cached beside the upload.
+                for path in (row["image_path"], *card.cached_paths(row["image_path"])):
                     try:
                         os.unlink(path)
                     except FileNotFoundError:
@@ -118,8 +118,8 @@ def _sweep_orphans(conn):
     referenced = set()
     for row in conn.execute(
             "SELECT image_path FROM jobs WHERE image_path IS NOT NULL"):
-        base = os.path.basename(row["image_path"])
-        referenced.update((base, base + ".card.png"))
+        referenced.update(os.path.basename(p) for p in
+                          (row["image_path"], *card.cached_paths(row["image_path"])))
     cutoff = time.time() - RETENTION_HOURS * 3600
     removed = 0
     for name in names:

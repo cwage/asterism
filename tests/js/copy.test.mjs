@@ -61,10 +61,13 @@ test('starListText groups by kind, brightest first, skips cloud-hidden labels', 
   assert.equal(sandbox.starListText({ result: { labels: [] } }), '');
 });
 
-test('a solved result gets both copy buttons beside the card link', async () => {
+test('a solved result gets both copy buttons beside the card links', async () => {
   const { sandbox, els, clipboard } = loadPage();
-  const [card, describe, stars] = show(sandbox, els);
-  assert.ok(card.href.includes('/jobs/abc/card'));
+  const [share, full, describe, stars] = show(sandbox, els);
+  // the share image first: it is the one a feed can show
+  assert.equal(share.href, '/jobs/abc/card?style=social');
+  assert.equal(share.textContent, '✦ download share image');
+  assert.equal(full.href, '/jobs/abc/card');
   // the caption is the headline; there is no paragraph panel to fill
   assert.equal(els.headline.textContent, 'Saturn beside Vega');
   assert.equal(els.narration, undefined);
@@ -87,7 +90,7 @@ test('a solved result gets both copy buttons beside the card link', async () => 
 
 test('a second tap inside the moment restarts it rather than cutting it short', async () => {
   const { sandbox, els, clipboard } = loadPage();
-  const [, describe] = show(sandbox, els);
+  const [, , describe] = show(sandbox, els);
   await describe.dispatch('click');
   await new Promise(r => setTimeout(r, 1000));
   await describe.dispatch('click');
@@ -108,13 +111,13 @@ test('nothing to describe means no description button, the star list stays', () 
   // in it (the card, the view from outside) that are not this test's.
   const copies = children.filter((c) => c.className === 'copy');
   assert.deepEqual(copies.map((c) => c.textContent), ['copy star list']);
-  assert.equal(children[1].textContent, 'copy star list');
+  assert.equal(children[2].textContent, 'copy star list');
 });
 
 test('a refused clipboard write says so instead of doing nothing', async () => {
   const { sandbox, els, clipboard } = loadPage();
   sandbox.navigator.clipboard.writeText = async () => { throw new Error('denied'); };
-  const [, describe] = show(sandbox, els);
+  const [, , describe] = show(sandbox, els);
   await describe.dispatch('click');
   assert.equal(clipboard.length, 0);
   assert.equal(describe.textContent, 'copy failed');

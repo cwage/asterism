@@ -11,6 +11,7 @@ import time
 import uuid
 import xml.etree.ElementTree as ET
 from collections import defaultdict, deque
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -154,22 +155,47 @@ def _same_upload(conn, content_hash):
     return {"id": row["id"], "status": row["status"], "duplicate": True}
 
 
+def _share_caption(job_id):
+    """The card's caption for a solved, visible job, or None: what a share
+    link's preview is titled with."""
+    with db.get_conn() as conn:
+        row = conn.execute(
+            "SELECT result_json FROM jobs "
+            "WHERE id = ? AND status = 'done' AND hidden = 0",
+            (job_id,),
+        ).fetchone()
+    if not row or not row["result_json"]:
+        return None
+    return card._caption(json.loads(row["result_json"])) or None
+
+
+def _share_meta(request, job, title, description):
+    """OpenGraph tags for a share link (#13). The image is the social card:
+    a preview is drawn a few hundred pixels wide, where the full card's
+    labels can't be read."""
+    base = str(request.base_url).rstrip("/")
+    return (
+        f'<meta property="og:title" content="{html.escape(title)}">\n'
+        f'<meta property="og:description" content="{html.escape(description)}">\n'
+        f'<meta property="og:image" content="{base}/jobs/{job}/card?style=social">\n'
+        '<meta name="twitter:card" content="summary_large_image">\n'
+    )
+
+
 @app.get("/")
 def index(request: Request, job: str | None = None):
     # Share links (?job=...) get OpenGraph tags pointing at the rendered
-    # card (#13) so unfurls show the annotated photo. Job ids are uuid4
-    # hex; anything else is served untouched (the frontend handles bad ids).
+    # card (#13) so unfurls show the annotated photo, titled with its
+    # caption. Job ids are uuid4 hex; anything else is served untouched
+    # (the frontend handles bad ids).
     if job and re.fullmatch(r"[0-9a-f]{32}", job):
         with open("static/index.html") as f:
             page = f.read()
-        base = str(request.base_url).rstrip("/")
-        meta = (
-            '<meta property="og:title" content="asterism — what you saw">\n'
-            '<meta property="og:description" content="A night-sky photo, '
-            'plate-solved and labeled from its star pattern.">\n'
-            f'<meta property="og:image" content="{base}/jobs/{job}/card">\n'
-            '<meta name="twitter:card" content="summary_large_image">\n'
-        )
+        caption = _share_caption(job)
+        meta = _share_meta(
+            request, job,
+            f"{caption} — asterism" if caption else "asterism — what you saw",
+            "A night-sky photo, plate-solved and labeled from its star pattern.")
         return HTMLResponse(page.replace("</head>", meta + "</head>"))
     return FileResponse("static/index.html")
 
@@ -351,13 +377,14 @@ def hide_job(job_id: str, request: Request):
             (job_id,)
         ).rowcount:
             raise HTTPException(404, _GONE)  # swept between the two statements
-    # The cached card is the amplification path — share links unfurl it (#13)
-    # — so drop it now instead of waiting on the sweep.
+    # The cached cards are the amplification path — share links unfurl
+    # them (#13) — so drop them now instead of waiting on the sweep.
     if row["image_path"]:
-        try:
-            os.unlink(row["image_path"] + ".card.png")
-        except FileNotFoundError:
-            pass
+        for path in card.cached_paths(row["image_path"]):
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass
     return {"id": job_id, "hidden": True}
 
 
@@ -735,9 +762,12 @@ def get_job_image(job_id: str):
 
 
 @app.get("/jobs/{job_id}/card")
-def get_job_card(job_id: str, request: Request):
+def get_job_card(job_id: str, request: Request,
+                 style: Literal["full", "social"] = "full"):
     """Share card (#13): the annotated photo as a PNG, rendered once per
-    job and cached beside the upload (same retention sweep collects it)."""
+    job and style and cached beside the upload (same retention sweep
+    collects it). style=social is the version readable at feed size,
+    which link previews use."""
     with db.get_conn() as conn:
         row = conn.execute(
             "SELECT image_path, status, result_json, hidden FROM jobs WHERE id = ?",
@@ -747,12 +777,13 @@ def get_job_card(job_id: str, request: Request):
         raise HTTPException(404, _GONE)
     if row["status"] != "done" or not row["result_json"]:
         raise HTTPException(409, "no card until the solve finishes")
-    card_path = row["image_path"] + ".card.png"
+    card_path = row["image_path"] + card.SUFFIXES[style]
     if not os.path.exists(card_path):
-        card.render(row["image_path"], json.loads(row["result_json"]),
-                    request.url.hostname or "asterism", card_path)
+        card.RENDERERS[style](row["image_path"], json.loads(row["result_json"]),
+                              request.url.hostname or "asterism", card_path)
+    name = f"asterism-{job_id[:8]}" + ("-social" if style == "social" else "")
     return FileResponse(card_path, media_type="image/png",
-                        filename=f"asterism-{job_id[:8]}.png")
+                        filename=f"{name}.png")
 
 
 # The fly-around page: a solve's stars seen from outside, at their real
@@ -767,14 +798,10 @@ def fly_page(request: Request, job: str | None = None):
     if job and re.fullmatch(r"[0-9a-f]{32}", job):
         with open("static/fly/index.html") as f:
             page = f.read()
-        base = str(request.base_url).rstrip("/")
-        meta = (
-            '<meta property="og:title" content="asterism — these stars, from outside">\n'
-            '<meta property="og:description" content="The stars in a night-sky '
-            'photo, at their real distances: leave Earth and look back.">\n'
-            f'<meta property="og:image" content="{base}/jobs/{job}/card">\n'
-            '<meta name="twitter:card" content="summary_large_image">\n'
-        )
+        meta = _share_meta(
+            request, job, "asterism — these stars, from outside",
+            "The stars in a night-sky photo, at their real distances: "
+            "leave Earth and look back.")
         return HTMLResponse(page.replace("</head>", meta + "</head>"))
     return FileResponse("static/fly/index.html")
 

@@ -53,6 +53,16 @@ Final home: `asterism.quietlife.net`.
   Planets snap only when one nearby point source clearly dominates and is
   not already matched to a star; otherwise they keep their projected
   position. The Moon keeps its projected position because it is extended.
+- Share cards (#13) come in two styles. `/jobs/{id}/card` is the full
+  card: every label, as the page draws them, with a caption footer.
+  `/jobs/{id}/card?style=social` is the one a feed can show. A post or
+  link preview is drawn about 500px wide, where the full card's labels
+  shrink to unreadable 5px text, so it names a dozen objects three times
+  the size (the Moon, planets and deep-sky objects first, then stars with
+  proper names ahead of Bayer letters), writes the main constellations'
+  names, draws a marker only when its name fits, and puts the caption in
+  a headline bar on top. `?job=` and `/fly?job=` links preview the social
+  card, titled with the solve's caption; the results page offers both.
 - Satellite crossings (#11): when the photo carries both a timestamp and
   GPS, Space-Track element sets (`SPACETRACK_USER`/`SPACETRACK_PASS`) are
   propagated with sgp4 across the EXIF exposure window and projected
@@ -176,8 +186,8 @@ unhiding does not restore it: re-featuring is a separate decision.
 
 The job 404s from `/feed`, `GET /jobs/{id}`, `/image`, and `/card` with the same
 copy an expired job gets — a hidden job is indistinguishable from one that never
-existed, so an abuser learns nothing from the response. The cached card PNG is
-unlinked immediately: `?job=` points OpenGraph at the card, so already-posted
+existed, so an abuser learns nothing from the response. The cached card PNGs are
+unlinked immediately: `?job=` points OpenGraph at a card, so already-posted
 share links stop unfurling the image at the same moment. A job that hasn't
 solved yet also stops being claimable, so it can't burn a solve on its way out.
 Nor does a hidden job come back when the same file is uploaded again (#120):
