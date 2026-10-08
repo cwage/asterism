@@ -340,9 +340,10 @@ def test_sweep_collects_orphaned_upload_files(tmp_path, monkeypatch):
     fresh = uploads / "fresh.jpg"                 # being uploaded right now
     kept = uploads / "kept.jpg"                   # featured: exempt from expiry
     kept_card = uploads / "kept.jpg.card.png"
-    for f in (ghost, sidecar, fresh, kept, kept_card):
+    kept_social = uploads / "kept.jpg.social.png"
+    for f in (ghost, sidecar, fresh, kept, kept_card, kept_social):
         f.write_bytes(b"x")
-    for f in (ghost, sidecar, kept, kept_card):
+    for f in (ghost, sidecar, kept, kept_card, kept_social):
         os.utime(f, (old, old))
     with db.get_conn() as conn:
         conn.execute(
@@ -353,3 +354,4 @@ def test_sweep_collects_orphaned_upload_files(tmp_path, monkeypatch):
 
     assert not ghost.exists() and not sidecar.exists()
     assert fresh.exists() and kept.exists() and kept_card.exists()
+    assert kept_social.exists()

@@ -1557,6 +1557,13 @@ function flyable(job) {
   return hasWebGL2()
     && (job.result.labels || []).filter(l => l.kind === 'star').length >= FLY_MIN_STARS;
 }
+function cardLink(id, query, text) {
+  const a = document.createElement('a');
+  a.href = '/jobs/' + encodeURIComponent(id) + '/card' + query;
+  a.textContent = text;
+  a.className = 'cardlink';
+  return a;
+}
 function flyLink(id) {
   const a = document.createElement('a');
   a.href = '/fly?job=' + encodeURIComponent(id);
@@ -1576,14 +1583,14 @@ function render(id, job) {
     canvas.height = img.naturalHeight;
     document.getElementById('controls').hidden = false;
     draw();
-    // Server-rendered share card (#13): labels burned in, unfurl-ready.
-    const cardLink = document.createElement('a');
-    cardLink.href = '/jobs/' + encodeURIComponent(id) + '/card';
-    cardLink.textContent = '✦ download share card';
-    cardLink.className = 'cardlink';
+    // Server-rendered share cards (#13): the share image is the one a
+    // feed can show (a dozen names, drawn large), the full card carries
+    // every label for anyone who opens it at full size.
+    const shareLink = cardLink(id, '?style=social', '✦ download share image');
+    const fullLink = cardLink(id, '', '✦ download full card');
     // The words to go with it (#124): the description for a post or alt
     // text, and the label list for anyone who wants the names.
-    const actions = [cardLink];
+    const actions = [shareLink, fullLink];
     if (describeText(job)) actions.push(copyButton('copy description', () => describeText(job)));
     if (starListText(job)) actions.push(copyButton('copy star list', () => starListText(job)));
     if (flyable(job)) actions.push(flyLink(id));

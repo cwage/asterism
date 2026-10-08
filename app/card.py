@@ -1,17 +1,40 @@
-"""Server-rendered share card (#13): the photo with labels burned in from
-the same result JSON the canvas renders, plus a caption footer, as a PNG.
+"""Server-rendered share cards (#13): the photo with labels burned in from
+the same result JSON the canvas renders, as a PNG.
 
-Layout mirrors static/index.html's draw(): same colors, same priority
-order (Moon, planets, DSOs, stars brightest-first), same greedy
-right/left/above/below text placement with collision avoidance."""
+Two styles. The full card mirrors static/index.html's draw(): same
+colors, same priority order (Moon, planets, DSOs, stars brightest-first),
+same greedy right/left/above/below text placement with collision
+avoidance, every label, and a caption footer. The social card is the one
+link previews and posts use: a feed shows an image about 500px wide,
+where the full card's 40 labels shrink to unreadable 5px text. It keeps
+a dozen names drawn three times the size, the main constellations'
+names, and puts the caption in a headline bar on top."""
 
 import math
 import os
+import re
 
 from . import beyond
 
 CARD_WIDTH = 1600
 FOOTER_H = 128
+
+# The social card: a portrait photo goes out 1200 wide, a landscape one
+# 1400, so the labels hold the same size against a ~500px feed either way.
+SOCIAL_WIDTH_PORTRAIT = 1200
+SOCIAL_WIDTH_LANDSCAPE = 1400
+SOCIAL_HEADER = 0.13      # headline bar height, as a share of the width
+SOCIAL_LABELS = 12        # names on the photo, Moon/planets/DSOs first
+SOCIAL_FIGURE_NAMES = 3   # constellations whose names are written out
+
+# Each style is cached beside the upload under its own suffix; the hide
+# and the retention sweep remove all of them.
+SUFFIXES = {"full": ".card.png", "social": ".social.png"}
+
+
+def cached_paths(image_path):
+    """Every rendered card an upload may have beside it."""
+    return [image_path + suffix for suffix in SUFFIXES.values()]
 FONT_DIR = "/usr/share/fonts/truetype/dejavu"
 
 # Frontend palette (index.html `colors`), as RGBA tuples.
@@ -349,9 +372,174 @@ def render(image_path, result, share_host, out_path):
               font=font_cap, fill=DIM)
 
     out = Image.alpha_composite(card.convert("RGBA"), overlay).convert("RGB")
+    return _publish(out, out_path)
+
+
+def _publish(image, out_path):
     # Atomic publish: concurrent requests may render the same card; nobody
     # must ever be served a partially-written file.
     tmp_path = f"{out_path}.tmp{os.getpid()}"
-    out.save(tmp_path, "PNG")
+    image.save(tmp_path, "PNG")
     os.replace(tmp_path, out_path)
     return out_path
+
+
+_GREEK = re.compile("[\u0370-\u03ff]")
+
+
+def social_labels(result, limit=SOCIAL_LABELS):
+    """The labels the social card names, in drawing order: every visible
+    Moon, planet and deep-sky object, then stars brightest-first, proper
+    names ahead of Bayer letters — "Nunki" says something at a glance,
+    "ξ² Sgr" only to someone who already knows. Hidden labels are left
+    out: the card names what the photo shows."""
+    labels = sorted((l for l in result.get("labels") or []
+                     if l.get("status") != "hidden"), key=_priority)
+    special = [l for l in labels if l.get("kind") in ("moon", "planet", "dso")]
+    stars = [l for l in labels if l.get("kind", "star") == "star"]
+    named = [l for l in stars if not _GREEK.search(l["name"])]
+    bayer = [l for l in stars if _GREEK.search(l["name"])]
+    return special + (named + bayer)[:max(0, limit - len(special))]
+
+
+def render_social(image_path, result, share_host, out_path):
+    """Compose the social card PNG at out_path: the whole photo under a
+    headline bar, with a dozen names it can afford to draw large. A
+    marker is drawn only when its name fits — a ring with no name is
+    noise at this size — and nothing points off the frame."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    with Image.open(image_path) as src:
+        photo = src.convert("RGB")
+    width = (SOCIAL_WIDTH_LANDSCAPE if photo.width > photo.height
+             else SOCIAL_WIDTH_PORTRAIT)
+    scale = width / photo.width
+    ph = round(photo.height * scale)
+    head = round(width * SOCIAL_HEADER)
+    unit = width / SOCIAL_WIDTH_PORTRAIT   # sizes below are for 1200 wide
+    height = head + ph
+
+    def bold(size):
+        return ImageFont.truetype(os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf"),
+                                  round(size))
+
+    canvas = Image.new("RGB", (width, height), BG[:3])
+    canvas.paste(photo.resize((width, ph), Image.LANCZOS), (0, head))
+    overlay = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+
+    def at(x, y):
+        return x * scale, y * scale + head
+
+    def on_photo(x, y):
+        return 0 <= x < width and head <= y < height
+
+    placed = [(0, 0, width, head)]
+    figures = result.get("constellations") or []
+    for c in figures:
+        for x1, y1, x2, y2 in c["segments"]:
+            draw.line([*at(x1, y1), *at(x2, y2)], fill=(170, 190, 230, 110),
+                      width=round(3 * unit))
+
+    # Markers reserve their space first, so no name lands on another
+    # object's ring; each is drawn only once its own name has a spot.
+    marks = []
+    for l in social_labels(result):
+        x, y = at(l["x"], l["y"])
+        if not on_photo(x, y):
+            continue
+        big = l.get("kind", "star") != "star"
+        r = (26 if big else 16) * unit
+        placed.append((x - r, y - r, 2 * r, 2 * r))
+        marks.append((l, x, y, r, big))
+    for l, x, y, r, big in marks:
+        kind = l.get("kind", "star")
+        color = COLORS.get(kind, COLORS["star"])[:3] + (255,)
+        text = l["name"]
+        if kind == "moon" and l.get("phase") is not None:
+            text += f" ({round(l['phase'] * 100)}% lit)"
+        font = bold((40 if big else 34) * unit)
+        tw = draw.textlength(text, font=font)
+        th = font.size * 1.2
+        pad = 10 * unit
+        spot = _place_text(placed, [
+            (x + r + pad, y - th / 2),
+            (x - r - pad - tw, y - th / 2),
+            (x - tw / 2, y - r - pad - th),
+            (x - tw / 2, y + r + pad),
+        ], tw, th, width, height)
+        if spot:
+            draw.ellipse((x - r, y - r, x + r, y + r), outline=color,
+                         width=round((5 if big else 4) * unit))
+            draw.text(spot[:2], text, font=font, fill=color,
+                      stroke_width=round(5 * unit), stroke_fill=(0, 0, 0, 200))
+
+    # A meteor is the catch of the night: its streak and name go on too.
+    for streak in (result.get("streaks") or {}).get("streaks") or []:
+        if streak.get("kind") != "meteor" or streak.get("confidence") == "low":
+            continue
+        (x0, y0), (x1, y1) = at(*streak["start"]), at(*streak["end"])
+        draw.line([x0, y0, x1, y1], fill=STREAK_COLOR[:3] + (255,),
+                  width=round(5 * unit))
+        name = streak_name(streak)
+        font = bold(36 * unit)
+        tw = draw.textlength(name, font=font)
+        th = font.size * 1.2
+        mx, my = (x0 + x1) / 2, (y0 + y1) / 2
+        spot = _place_text(placed, [
+            (mx + 20 * unit, my - th / 2), (mx - 20 * unit - tw, my - th / 2),
+            (mx - tw / 2, my + 20 * unit), (mx - tw / 2, my - 20 * unit - th),
+        ], tw, th, width, height)
+        if spot:
+            draw.text(spot[:2], name, font=font, fill=STREAK_TEXT[:3] + (255,),
+                      stroke_width=round(5 * unit), stroke_fill=(0, 0, 0, 200))
+
+    # The main constellations' names, quiet capitals at each figure's
+    # centre, last in line for space: on a photo with no planet or galaxy
+    # in it the figures are the story, and their names are what reads.
+    font = bold(30 * unit)
+    for c in sorted(figures, key=lambda c: -len(c["segments"]))[:SOCIAL_FIGURE_NAMES]:
+        pts = [p for x1, y1, x2, y2 in c["segments"]
+               for p in (at(x1, y1), at(x2, y2)) if on_photo(*p)]
+        if len(pts) < 4:
+            continue
+        cx = sum(p[0] for p in pts) / len(pts)
+        cy = sum(p[1] for p in pts) / len(pts)
+        name = c["name"].upper()
+        tw = draw.textlength(name, font=font)
+        th = font.size * 1.3
+        spot = _place_text(placed, [
+            (cx - tw / 2, cy - th / 2), (cx - tw / 2, cy + th),
+            (cx - tw / 2, cy - 2 * th),
+        ], tw, th, width, height)
+        if spot:
+            draw.text(spot[:2], name, font=font, fill=(215, 225, 245, 200),
+                      stroke_width=round(4 * unit), stroke_fill=(0, 0, 0, 190))
+
+    out = Image.alpha_composite(canvas.convert("RGBA"), overlay).convert("RGB")
+
+    # Headline: the caption, shrunk to fit and then shortened by its
+    # " · " parts, over the provenance line. The bar is painted over the
+    # composite, so a figure line running off the top of the photo stops
+    # at its edge.
+    draw = ImageDraw.Draw(out)
+    draw.rectangle((0, 0, width, head - 1), fill=BG[:3])
+    title = _caption(result) or "A night sky, plate-solved"
+    font = bold(head * 0.36)
+    while draw.textlength(title, font=font) > width - 80:
+        if font.size > head * 0.26:
+            font = bold(font.size - 2)
+        elif " · " in title:
+            title = title.rsplit(" · ", 1)[0]
+        else:
+            break
+    draw.text((40, head * 0.14), title, font=font, fill=INK[:3])
+    sub_font = ImageFont.truetype(os.path.join(FONT_DIR, "DejaVuSans.ttf"),
+                                  round(head * 0.2))
+    draw.text((40, head * 0.62),
+              f"plate-solved from the stars alone · {share_host}",
+              font=sub_font, fill=ACCENT[:3])
+    return _publish(out, out_path)
+
+
+RENDERERS = {"full": render, "social": render_social}
