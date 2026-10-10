@@ -7,8 +7,9 @@ same greedy right/left/above/below text placement with collision
 avoidance, every label, and a caption footer. The social card is the one
 link previews and posts use: a feed shows an image about 500px wide,
 where the full card's 40 labels shrink to unreadable 5px text. It keeps
-a dozen names drawn three times the size, the main constellations'
-names, and puts the caption in a headline bar on top."""
+ten names drawn three times the size at a regular weight, only the
+figures the photo shows, the main constellations' names, and the caption
+on a gradient along the bottom edge (#167)."""
 
 import math
 import os
@@ -23,9 +24,32 @@ FOOTER_H = 128
 # 1400, so the labels hold the same size against a ~500px feed either way.
 SOCIAL_WIDTH_PORTRAIT = 1200
 SOCIAL_WIDTH_LANDSCAPE = 1400
-SOCIAL_HEADER = 0.13      # headline bar height, as a share of the width
-SOCIAL_LABELS = 12        # names on the photo, Moon/planets/DSOs first
+SOCIAL_LABELS = 10        # names on the photo, Moon/planets/DSOs first
 SOCIAL_FIGURE_NAMES = 3   # constellations whose names are written out
+SOCIAL_FOOTER = 0.16      # caption gradient, as a share of the height...
+SOCIAL_FOOTER_MAX = 0.2   # ...capped against the width for a tall panorama
+SOCIAL_CAPTION_H = 120    # the caption's two lines and margins, at 1200 wide
+# How close (as a share of the photo's width) a figure's vertex must be
+# to a named star to count as that star (#167).
+SOCIAL_SNAP = 0.012
+# The sky floor for figures with no named star: this percentile of the
+# visible named stars' heights, so one star matched in the haze at the
+# edge of the frame doesn't pull it to the ground.
+SOCIAL_FLOOR_PCT = 0.8
+# Figure line alpha on a bright sky and on a black one, with the sky's
+# mean brightness (0-255) below which it is "black".
+SOCIAL_FIGURE_ALPHA = (105, 170)
+SOCIAL_DARK_SKY = 40
+SOCIAL_FIGURE = (205, 215, 235)
+SOCIAL_FIGURE_TEXT = (215, 225, 240, 150)
+# Names on the social card: off-white for stars, the full card's hues
+# muted for the rest, all at a regular weight (#167).
+SOCIAL_COLORS = {
+    "star": (236, 240, 245, 235),
+    "planet": (255, 215, 140, 235),
+    "moon": (255, 235, 190, 235),
+    "dso": (215, 190, 255, 235),
+}
 
 # Each style is cached beside the upload under its own suffix; the hide
 # and the retention sweep remove all of them.
@@ -402,11 +426,96 @@ def social_labels(result, limit=SOCIAL_LABELS):
     return (special + named + bayer)[:limit]
 
 
+def social_figures(result, snap=None):
+    """The constellation figures the social card draws, each with the
+    share of its named stars the photo shows (#167).
+
+    Every figure the solve projects is a line somewhere in the frame, and
+    most frames have a horizon: on a Milky Way shot the whole southern
+    sky lands as a tangle of polygons across the field or the sea. The
+    verifier already says which named stars are hidden, and the figures
+    are judged by them. A figure is drawn only when more of its named
+    stars are shown than hidden; one that stays loses the legs that end on a hidden star; a
+    figure with no named star at all (Delphinus, Sagitta) is kept only
+    if all of it sits above the sky floor, the height below which named
+    stars stop being visible. The floor is a high percentile of the
+    visible stars' positions, not the lowest one: a single star matched
+    in the haze at the frame's edge must not drag the floor to the
+    ground."""
+    labels = result.get("labels") or []
+    matched = [(l["x"], l["y"]) for l in labels if l.get("status") == "matched"]
+    hidden = [(l["x"], l["y"]) for l in labels if l.get("status") == "hidden"]
+    if snap is None:
+        xs = [x for x, _ in matched + hidden]
+        snap = max(xs, default=0) * SOCIAL_SNAP
+    floor = None
+    if matched:
+        ys = sorted(y for _, y in matched)
+        floor = ys[round(SOCIAL_FLOOR_PCT * (len(ys) - 1))]
+
+    def near(pt, pts):
+        return any(abs(pt[0] - x) <= snap and abs(pt[1] - y) <= snap
+                   for x, y in pts)
+
+    out = []
+    for c in result.get("constellations") or []:
+        segs = c.get("segments") or []
+        verts = {(x, y) for x1, y1, x2, y2 in segs for x, y in ((x1, y1), (x2, y2))}
+        if not verts:
+            continue
+        shown = sum(near(v, matched) for v in verts)
+        lost = sum(near(v, hidden) for v in verts)
+        if shown + lost == 0:
+            if floor is None or any(y > floor for _, y in verts):
+                continue
+            out.append((c, 1.0))
+            continue
+        share = shown / (shown + lost)
+        if share <= 0.5:
+            # a tie is a figure the verifier matched one star of in the
+            # haze (δ Lup in the sea off Cape San Blas): not shown
+            continue
+        kept = [s for s in segs
+                if not near((s[0], s[1]), hidden) and not near((s[2], s[3]), hidden)]
+        if kept:
+            out.append((dict(c, segments=kept), share))
+    return out
+
+
+def _sky_luma(image):
+    """Mean brightness of the photo's upper half, 0–255: the sky, on
+    most frames, before the horizon."""
+    from PIL import ImageStat
+    half = image.crop((0, 0, image.width, max(1, image.height // 2)))
+    return ImageStat.Stat(half.convert("L")).mean[0]
+
+
+def _figure_alpha(luma):
+    """Figure lines at a fixed alpha vanish on a near-black phone sky
+    and shout on a bright one; this scales them between the two."""
+    dark = SOCIAL_FIGURE_ALPHA[1]
+    bright = SOCIAL_FIGURE_ALPHA[0]
+    t = min(1.0, max(0.0, luma / SOCIAL_DARK_SKY))
+    return round(dark + (bright - dark) * t)
+
+
+def _slid(candidates, w, h, frame_w, frame_h):
+    """The same spots, then each slid just inside the frame: a label for
+    a star at the edge is clipped otherwise, and a half name is worse
+    than a shifted one."""
+    inside = [(min(max(cx, 0), frame_w - w), min(max(cy, 0), frame_h - h))
+              for cx, cy in candidates]
+    return list(candidates) + [c for c in inside if c not in candidates]
+
+
 def render_social(image_path, result, share_host, out_path):
-    """Compose the social card PNG at out_path: the whole photo under a
-    headline bar, with a dozen names it can afford to draw large. A
-    marker is drawn only when its name fits — a ring with no name is
-    noise at this size — and nothing points off the frame."""
+    """Compose the social card PNG at out_path: the whole photo, a
+    handful of names it can afford to draw large, the figures the
+    photo actually shows, and the caption on a gradient along the
+    bottom edge (or the top, when the bottom is where the names are). Everything on it is drawn to recede: the photo is the
+    subject and the chart is a whisper over it (#167). A marker is
+    drawn only when its name fits — a ring with no name is noise at this
+    size — and nothing points off the frame."""
     from PIL import Image, ImageDraw, ImageFont
 
     with Image.open(image_path) as src:
@@ -414,98 +523,113 @@ def render_social(image_path, result, share_host, out_path):
     width = (SOCIAL_WIDTH_LANDSCAPE if photo.width > photo.height
              else SOCIAL_WIDTH_PORTRAIT)
     scale = width / photo.width
-    ph = round(photo.height * scale)
-    head = round(width * SOCIAL_HEADER)
+    height = round(photo.height * scale)
     unit = width / SOCIAL_WIDTH_PORTRAIT   # sizes below are for 1200 wide
-    height = head + ph
 
-    def bold(size):
-        return ImageFont.truetype(os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf"),
+    def face(size):
+        return ImageFont.truetype(os.path.join(FONT_DIR, "DejaVuSans.ttf"),
                                   round(size))
 
-    canvas = Image.new("RGB", (width, height), BG[:3])
-    canvas.paste(photo.resize((width, ph), Image.LANCZOS), (0, head))
+    canvas = photo.resize((width, height), Image.LANCZOS)
     overlay = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
 
     def at(x, y):
-        return x * scale, y * scale + head
+        return x * scale, y * scale
 
     def on_photo(x, y):
-        return 0 <= x < width and head <= y < height
+        return 0 <= x < width and 0 <= y < height
 
-    placed = [(0, 0, width, head)]
-    figures = result.get("constellations") or []
-    for c in figures:
+    # The caption's lines are reserved first, so no name lands under
+    # them. Only the lines: the gradient beyond them is still sky, and a
+    # Moon low over the trees wants its name. The caption takes the
+    # bottom edge unless more of the names would be under it there than
+    # at the top: a Moon or a planet is usually low, and it is the reason
+    # for the photo.
+    band = round(min(height * SOCIAL_FOOTER, width * SOCIAL_FOOTER_MAX))
+    words = round(SOCIAL_CAPTION_H * unit)
+    names = [at(l["x"], l["y"]) for l in social_labels(result)]
+    low = sum(y >= height - words for _, y in names)
+    high = sum(y < words for _, y in names)
+    on_top = low > high
+    placed = [(0, 0, width, words) if on_top else (0, height - words, width, words)]
+
+    figures = social_figures(result, snap=photo.width * SOCIAL_SNAP)
+    alpha = _figure_alpha(_sky_luma(canvas))
+    for c, share in figures:
+        color = SOCIAL_FIGURE[:3] + (round(alpha * (0.6 + 0.4 * share)),)
         for x1, y1, x2, y2 in c["segments"]:
-            draw.line([*at(x1, y1), *at(x2, y2)], fill=(170, 190, 230, 110),
-                      width=round(3 * unit))
+            draw.line([*at(x1, y1), *at(x2, y2)], fill=color,
+                      width=max(1, round(2 * unit)))
 
     # Markers reserve their space first, so no name lands on another
     # object's ring; each is drawn only once its own name has a spot.
     marks = []
     for l in social_labels(result):
         x, y = at(l["x"], l["y"])
-        if not on_photo(x, y):
-            continue
         big = l.get("kind", "star") != "star"
-        r = (26 if big else 16) * unit
+        r = (16 if big else 10) * unit
+        # a ring half off the frame looks like a mistake: a star that
+        # close to the edge goes unnamed
+        if not (on_photo(x - r, y - r) and on_photo(x + r, y + r)):
+            continue
         placed.append((x - r, y - r, 2 * r, 2 * r))
         marks.append((l, x, y, r, big))
     for l, x, y, r, big in marks:
         kind = l.get("kind", "star")
-        color = COLORS.get(kind, COLORS["star"])[:3] + (255,)
+        color = SOCIAL_COLORS.get(kind, SOCIAL_COLORS["star"])
         text = l["name"]
         if kind == "moon" and l.get("phase") is not None:
             text += f" ({round(l['phase'] * 100)}% lit)"
-        font = bold((40 if big else 34) * unit)
+        font = face((30 if big else 26) * unit)
         tw = draw.textlength(text, font=font)
         th = font.size * 1.2
-        pad = 10 * unit
-        spot = _place_text(placed, [
+        pad = 8 * unit
+        spot = _place_text(placed, _slid([
             (x + r + pad, y - th / 2),
             (x - r - pad - tw, y - th / 2),
             (x - tw / 2, y - r - pad - th),
             (x - tw / 2, y + r + pad),
-        ], tw, th, width, height)
+        ], tw, th, width, height), tw, th, width, height)
         if spot:
             draw.ellipse((x - r, y - r, x + r, y + r), outline=color,
-                         width=round((5 if big else 4) * unit))
+                         width=max(1, round(1.5 * unit)))
             draw.text(spot[:2], text, font=font, fill=color,
-                      stroke_width=round(5 * unit), stroke_fill=(0, 0, 0, 200))
+                      stroke_width=round(2 * unit), stroke_fill=(0, 0, 0, 160))
 
     # A meteor is the catch of the night: its streak and name go on too.
     for streak in (result.get("streaks") or {}).get("streaks") or []:
         if streak.get("kind") != "meteor" or streak.get("confidence") == "low":
             continue
         (x0, y0), (x1, y1) = at(*streak["start"]), at(*streak["end"])
-        draw.line([x0, y0, x1, y1], fill=STREAK_COLOR[:3] + (255,),
-                  width=round(5 * unit))
+        draw.line([x0, y0, x1, y1], fill=STREAK_COLOR[:3] + (230,),
+                  width=round(3 * unit))
         name = streak_name(streak)
-        font = bold(36 * unit)
+        font = face(28 * unit)
         tw = draw.textlength(name, font=font)
         th = font.size * 1.2
         mx, my = (x0 + x1) / 2, (y0 + y1) / 2
-        spot = _place_text(placed, [
-            (mx + 20 * unit, my - th / 2), (mx - 20 * unit - tw, my - th / 2),
-            (mx - tw / 2, my + 20 * unit), (mx - tw / 2, my - 20 * unit - th),
-        ], tw, th, width, height)
+        spot = _place_text(placed, _slid([
+            (mx + 16 * unit, my - th / 2), (mx - 16 * unit - tw, my - th / 2),
+            (mx - tw / 2, my + 16 * unit), (mx - tw / 2, my - 16 * unit - th),
+        ], tw, th, width, height), tw, th, width, height)
         if spot:
-            draw.text(spot[:2], name, font=font, fill=STREAK_TEXT[:3] + (255,),
-                      stroke_width=round(5 * unit), stroke_fill=(0, 0, 0, 200))
+            draw.text(spot[:2], name, font=font, fill=STREAK_TEXT[:3] + (240,),
+                      stroke_width=round(2 * unit), stroke_fill=(0, 0, 0, 160))
 
-    # The main constellations' names, quiet capitals at each figure's
-    # centre, last in line for space: on a photo with no planet or galaxy
-    # in it the figures are the story, and their names are what reads.
-    font = bold(30 * unit)
-    for c in sorted(figures, key=lambda c: -len(c["segments"]))[:SOCIAL_FIGURE_NAMES]:
+    # The main constellations' names, quiet letterspaced capitals at each
+    # figure's centre, last in line for space: on a photo with no planet
+    # or galaxy in it the figures are the story, and their names are
+    # what reads.
+    font = face(21 * unit)
+    for c, _ in sorted(figures, key=lambda f: -len(f[0]["segments"]))[:SOCIAL_FIGURE_NAMES]:
         pts = [p for x1, y1, x2, y2 in c["segments"]
                for p in (at(x1, y1), at(x2, y2)) if on_photo(*p)]
         if len(pts) < 4:
             continue
         cx = sum(p[0] for p in pts) / len(pts)
         cy = sum(p[1] for p in pts) / len(pts)
-        name = c["name"].upper()
+        name = " ".join(c["name"].upper())
         tw = draw.textlength(name, font=font)
         th = font.size * 1.3
         spot = _place_text(placed, [
@@ -513,35 +637,42 @@ def render_social(image_path, result, share_host, out_path):
             (cx - tw / 2, cy - 2 * th),
         ], tw, th, width, height)
         if spot:
-            draw.text(spot[:2], name, font=font, fill=(215, 225, 245, 200),
-                      stroke_width=round(4 * unit), stroke_fill=(0, 0, 0, 190))
+            draw.text(spot[:2], name, font=font, fill=SOCIAL_FIGURE_TEXT,
+                      stroke_width=round(2 * unit), stroke_fill=(0, 0, 0, 140))
 
-    out = Image.alpha_composite(canvas.convert("RGBA"), overlay).convert("RGB")
+    out = Image.alpha_composite(canvas.convert("RGBA"), overlay)
 
-    # Headline: the caption, shrunk to fit, then shortened by its " · "
-    # parts, then cut at a word with an ellipsis, over the provenance line. The bar is painted over the
-    # composite, so a figure line running off the top of the photo stops
-    # at its edge.
+    # The caption on a gradient up from the bottom edge, shrunk to fit,
+    # then shortened by its " · " parts, then cut at a word with an
+    # ellipsis, over the provenance line. The gradient is painted over
+    # the composite, so a figure line running off the bottom fades with
+    # the photo instead of crossing the words.
+    grad = Image.new("RGBA", (width, band), (0, 0, 0, 0))
+    gd = ImageDraw.Draw(grad)
+    for i in range(band):
+        t = (band - 1 - i if on_top else i) / band
+        gd.line([(0, i), (width, i)], fill=BG[:3] + (round(215 * t ** 1.4),))
+    out.alpha_composite(grad, (0, 0 if on_top else height - band))
     draw = ImageDraw.Draw(out)
-    draw.rectangle((0, 0, width, head - 1), fill=BG[:3])
     title = _caption(result) or "A night sky, plate-solved"
-    font = bold(head * 0.36)
-    while draw.textlength(title, font=font) > width - 80:
-        if font.size > head * 0.26:
-            font = bold(font.size - 2)
+    margin = 40 * unit
+    font = face(34 * unit)
+    while draw.textlength(title, font=font) > width - 2 * margin:
+        if font.size > 26 * unit:
+            font = face(font.size - 2)
         elif " · " in title:
             title = title.rsplit(" · ", 1)[0]
         elif " " in title.rstrip("…"):
             title = title.rstrip("…").rsplit(" ", 1)[0].rstrip(" ,;:—") + "…"
         else:
             break
-    draw.text((40, head * 0.14), title, font=font, fill=INK[:3])
-    sub_font = ImageFont.truetype(os.path.join(FONT_DIR, "DejaVuSans.ttf"),
-                                  round(head * 0.2))
-    draw.text((40, head * 0.62),
-              f"plate-solved from the stars alone · {share_host}",
-              font=sub_font, fill=ACCENT[:3])
-    return _publish(out, out_path)
+    sub = face(19 * unit)
+    title_y = 28 * unit if on_top else height - 36 * unit - sub.size - font.size * 1.2 - 8 * unit
+    draw.text((margin, title_y), title, font=font, fill=INK)
+    draw.text((margin, title_y + font.size * 1.2 + 8 * unit),
+              f"{share_host}  ·  plate-solved from the stars alone",
+              font=sub, fill=DIM)
+    return _publish(out.convert("RGB"), out_path)
 
 
 RENDERERS = {"full": render, "social": render_social}
