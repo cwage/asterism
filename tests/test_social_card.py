@@ -173,6 +173,45 @@ def test_figures_are_judged_by_the_stars_the_photo_shows():
     assert kept[0][0]["segments"] == [[500, 600, 600, 620], [600, 620, 450, 640]]
 
 
+def test_figures_are_judged_by_stars_only():
+    # a planet matched beside a vertex is not a shown star, and a hidden
+    # cluster beside one does not prune the leg: neither is in any figure
+    result = {"labels": [
+        _star("Shaula", 1.6, x=200, y=300), _star("Lesath", 2.7, x=250, y=320),
+        {"name": "Ptolemy Cluster (M7)", "mag": 3.3, "x": 300, "y": 340,
+         "kind": "dso", "status": "hidden"},
+        _star("Antares", 1.0, x=100, y=200, status="hidden"),
+        _star("Fang", 2.6, x=120, y=220, status="hidden"),
+        {"name": "Mars", "mag": 0.5, "x": 400, "y": 400, "kind": "planet",
+         "status": "matched"},
+    ], "constellations": [
+        _figure("Scorpius", (200, 300, 250, 320), (250, 320, 300, 340)),
+        _figure("Ophiuchus", (100, 200, 120, 220), (120, 220, 400, 400)),
+    ]}
+    kept = card.social_figures(result, snap=5)
+    assert [c["name"] for c, _ in kept] == ["Scorpius"]
+    assert kept[0][0]["segments"] == [[200, 300, 250, 320], [250, 320, 300, 340]]
+
+
+def test_the_gradient_is_never_shorter_than_the_caption(tmp_path):
+    # a 3:1 panorama: 16% of its height is less than the caption's two
+    # lines, so the gradient grows to carry them
+    path = tmp_path / "pano.jpg"
+    Image.new("RGB", (3000, 1000), (140, 140, 140)).save(path, "JPEG")
+    out = tmp_path / "s.png"
+    card.render_social(str(path), {"labels": []}, "host", str(out))
+    img = Image.open(out)
+    height = img.height
+    assert round(height * card.SOCIAL_FOOTER) < card.SOCIAL_CAPTION_H
+    words = round(card.SOCIAL_CAPTION_H * img.width / card.SOCIAL_WIDTH_PORTRAIT)
+    # the right end of every row the words occupy (the top quarter of
+    # the block is margin, where the gradient is still faint) is darkened
+    # photo, not bare photo
+    for y in range(height - round(words * 0.75), height, 10):
+        assert max(img.getpixel((img.width - 10, y))) < 120
+    assert max(img.getpixel((img.width - 10, 10))) >= 130
+
+
 def test_figures_without_named_stars_stay_above_the_sky_floor():
     # Delphinus has no star bright enough to be named; it is drawn when
     # it sits in the sky and dropped when it sits in the foreground. The

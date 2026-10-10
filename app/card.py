@@ -442,7 +442,10 @@ def social_figures(result, snap=None):
     visible stars' positions, not the lowest one: a single star matched
     in the haze at the frame's edge must not drag the floor to the
     ground."""
-    labels = result.get("labels") or []
+    # Stars only: the verifier also marks planets matched and clusters
+    # hidden, and neither is a vertex of any figure.
+    labels = [l for l in result.get("labels") or []
+              if l.get("kind", "star") == "star"]
     matched = [(l["x"], l["y"]) for l in labels if l.get("status") == "matched"]
     hidden = [(l["x"], l["y"]) for l in labels if l.get("status") == "hidden"]
     if snap is None:
@@ -546,8 +549,12 @@ def render_social(image_path, result, share_host, out_path):
     # bottom edge unless more of the names would be under it there than
     # at the top: a Moon or a planet is usually low, and it is the reason
     # for the photo.
-    band = round(min(height * SOCIAL_FOOTER, width * SOCIAL_FOOTER_MAX))
     words = round(SOCIAL_CAPTION_H * unit)
+    # The gradient is a share of the height, but never shorter than the
+    # caption it carries: on a 3:1 panorama the share alone would leave
+    # the words on bare photo.
+    band = min(height, max(round(min(height * SOCIAL_FOOTER, width * SOCIAL_FOOTER_MAX)),
+                           round(words * 1.3)))
     names = [at(l["x"], l["y"]) for l in social_labels(result)]
     low = sum(y >= height - words for _, y in names)
     high = sum(y < words for _, y in names)
