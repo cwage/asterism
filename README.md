@@ -57,12 +57,19 @@ Final home: `asterism.quietlife.net`.
   card: every label, as the page draws them, with a caption footer.
   `/jobs/{id}/card?style=social` is the one a feed can show. A post or
   link preview is drawn about 500px wide, where the full card's labels
-  shrink to unreadable 5px text, so it names a dozen objects three times
+  shrink to unreadable 5px text, so it names ten objects three times
   the size (the Moon, planets and deep-sky objects first, then stars with
   proper names ahead of Bayer letters), writes the main constellations'
-  names, draws a marker only when its name fits, and puts the caption in
-  a headline bar on top. `?job=` and `/fly?job=` links preview the social
-  card, titled with the solve's caption; the results page offers both.
+  names, draws a marker only when its name fits, and puts the caption on
+  a gradient along the bottom edge. It is drawn to recede (#167): regular
+  weight, off-white, hairline rings and figures, and only the figures the
+  photo shows. The verifier's hidden stars decide that: a constellation
+  whose named stars are mostly hidden is left out, one that stays loses
+  the legs ending on a hidden star, and a figure with no named star at
+  all is drawn only above the sky floor, a high percentile of the visible
+  stars' heights. Figure lines brighten on a near-black sky. `?job=` and
+  `/fly?job=` links preview the social card, titled with the solve's
+  caption; the results page offers both.
 - Satellite crossings (#11): when the photo carries both a timestamp and
   GPS, Space-Track element sets (`SPACETRACK_USER`/`SPACETRACK_PASS`) are
   propagated with sgp4 across the EXIF exposure window and projected
