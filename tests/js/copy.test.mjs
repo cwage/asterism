@@ -66,7 +66,7 @@ test('a solved result gets both copy buttons beside the card links', async () =>
   const [share, full, describe, stars] = show(sandbox, els);
   // the share image first: it is the one a feed can show
   assert.equal(share.href, '/jobs/abc/card?style=social');
-  assert.equal(share.textContent, '✦ download share image');
+  assert.equal(share.textContent, '✦ share image');
   assert.equal(full.href, '/jobs/abc/card');
   // the caption is the headline; there is no paragraph panel to fill
   assert.equal(els.headline.textContent, 'Saturn beside Vega');

@@ -1586,8 +1586,8 @@ function render(id, job) {
     // Server-rendered share cards (#13): the share image is the one a
     // feed can show (a dozen names, drawn large), the full card carries
     // every label for anyone who opens it at full size.
-    const shareLink = cardLink(id, '?style=social', '✦ download share image');
-    const fullLink = cardLink(id, '', '✦ download full card');
+    const shareLink = cardLink(id, '?style=social', '✦ share image');
+    const fullLink = cardLink(id, '', '✦ full card');
     // The words to go with it (#124): the description for a post or alt
     // text, and the label list for anyone who wants the names.
     const actions = [shareLink, fullLink];

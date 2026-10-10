@@ -782,8 +782,12 @@ def get_job_card(job_id: str, request: Request,
         card.RENDERERS[style](row["image_path"], json.loads(row["result_json"]),
                               request.url.hostname or "asterism", card_path)
     name = f"asterism-{job_id[:8]}" + ("-social" if style == "social" else "")
+    # Shown in the tab, not downloaded: a click on an image should show
+    # the image, and saving it is the browser's own menu. The filename
+    # still names the save.
     return FileResponse(card_path, media_type="image/png",
-                        filename=f"{name}.png")
+                        filename=f"{name}.png",
+                        content_disposition_type="inline")
 
 
 # The fly-around page: a solve's stars seen from outside, at their real
