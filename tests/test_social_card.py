@@ -258,11 +258,15 @@ def test_endpoint_serves_and_caches_each_style(fresh_db, portrait):
     social = client.get("/jobs/solved/card?style=social")
     assert social.status_code == 200
     assert social.headers["content-type"] == "image/png"
-    assert "asterism-solved-social.png" in social.headers["content-disposition"]
+    # shown in the tab, not downloaded, but a save gets a sensible name
+    assert social.headers["content-disposition"] == (
+        'inline; filename="asterism-solved-social.png"')
     assert Image.open(f"{portrait}.social.png").width == card.SOCIAL_WIDTH_PORTRAIT
-    # the full card is unchanged, and the two are cached apart
+    # the full card is shown the same way, and the two are cached apart
     full = client.get("/jobs/solved/card")
     assert full.status_code == 200
+    assert full.headers["content-disposition"] == (
+        'inline; filename="asterism-solved.png"')
     assert Image.open(f"{portrait}.card.png").width == card.CARD_WIDTH
     assert client.get("/jobs/solved/card?style=poster").status_code == 422
 
